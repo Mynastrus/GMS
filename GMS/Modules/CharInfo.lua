@@ -1,9 +1,9 @@
 -- ============================================================================
 --	GMS/Modules/CharInfo.lua
---	CharInfo-Module (Ace)
+--	CharInfo MODULE (Ace)
 --	- Zugriff auf GMS über AceAddon Registry
---	- Registriert UI-Page + RightDock Icon (TOP)
---	- Style aligned with UI Extension (helpers/log/safecall/guards)
+--	- UI-Page + RightDock Icon
+--	- Zeigt Player-Snapshot + ctx (optional) + Auswahl-Buttons
 -- ============================================================================
 
 	local _G = _G
@@ -23,8 +23,8 @@
 	-- #	MODULE
 	-- ###########################################################################
 
-	local MODULE_NAME  = "CHARINFO"
-	local DISPLAY_NAME = "Charakterinformationen"
+	local MODULE_NAME	= "CHARINFO"
+	local DISPLAY_NAME	= "Charakterinformationen"
 
 	local CharInfo = GMS:GetModule(MODULE_NAME, true)
 	if not CharInfo then
@@ -38,8 +38,11 @@
 	CharInfo._integrated     = CharInfo._integrated or false
 	CharInfo._ticker         = CharInfo._ticker or nil
 
+	-- Icon: nimm einen, der bei dir existiert (du kannst ihn per /run testen)
+	local ICON = "Interface\\Icons\\INV_Misc_Head_Human_01"
+
 	-- ###########################################################################
-	-- #	INTERNAL HELPERS (style aligned)
+	-- #	HELPERS (style aligned)
 	-- ###########################################################################
 
 	local function Log(level, message, context)
@@ -67,7 +70,6 @@
 	end
 
 	local function UIRef()
-		-- UI ist eine Extension (table an GMS), alternativ könnte es ein Module sein.
 		return (GMS and (GMS.UI or GMS:GetModule("UI", true))) or nil
 	end
 
@@ -79,14 +81,115 @@
 		return nil
 	end
 
+	local function SetNavContext(ctx)
+		local ui = UIRef()
+		if ui and type(ui.SetNavigationContext) == "function" then
+			ui:SetNavigationContext(ctx)
+			return true
+		end
+		return false
+	end
+
+	local function OpenSelf()
+		local ui = UIRef()
+		if ui and type(ui.Open) == "function" then
+			ui:Open("CHARINFO")
+			return true
+		end
+		return false
+	end
+
+	local function FormatNameRealm(name, realm)
+		name = tostring(name or "")
+		realm = tostring(realm or "")
+		if name == "" then return "-" end
+		if realm ~= "" then
+			return name .. "-" .. realm
+		end
+		return name
+	end
+
+	local function GetPlayerSnapshot()
+		local name, realm = _G.UnitFullName("player")
+		local className = _G.UnitClass("player") -- localized
+		local raceName = _G.UnitRace("player") -- localized
+		local level = _G.UnitLevel("player")
+
+		local guildName = _G.GetGuildInfo and _G.GetGuildInfo("player") or nil
+
+		local specName = "-"
+		if type(_G.GetSpecialization) == "function" and type(_G.GetSpecializationInfo) == "function" then
+			local specIndex = _G.GetSpecialization()
+			if specIndex then
+				local _, sName = _G.GetSpecializationInfo(specIndex)
+				if sName and sName ~= "" then specName = sName end
+			end
+		end
+
+		local ilvlEquipped = nil
+		local ilvlOverall = nil
+		if type(_G.GetAverageItemLevel) == "function" then
+			local overall, equipped = _G.GetAverageItemLevel()
+			ilvlOverall = overall
+			ilvlEquipped = equipped
+		end
+
+		return {
+			name = name,
+			realm = realm,
+			name_full = FormatNameRealm(name, realm),
+			class = className or "-",
+			spec = specName,
+			race = raceName or "-",
+			level = level or "-",
+			guild = guildName or "-",
+			ilvl = (ilvlEquipped and string.format("%.1f", ilvlEquipped)) or "-",
+			ilvl_overall = (ilvlOverall and string.format("%.1f", ilvlOverall)) or "-",
+			guid = (_G.UnitGUID and _G.UnitGUID("player")) or nil,
+		}
+	end
+
+	local function GetTargetSnapshot()
+		if not (_G.UnitExists and _G.UnitExists("target")) then return nil end
+		if not (_G.UnitIsPlayer and _G.UnitIsPlayer("target")) then return nil end
+
+		local name, realm = _G.UnitFullName("target")
+		local className = _G.UnitClass("target")
+		local raceName = _G.UnitRace("target")
+		local level = _G.UnitLevel("target")
+		local guid = (_G.UnitGUID and _G.UnitGUID("target")) or nil
+
+		-- Spec / ilvl für target sind ohne Inspect nicht zuverlässig -> bewusst "-"
+		return {
+			name = name,
+			realm = realm,
+			name_full = FormatNameRealm(name, realm),
+			class = className or "-",
+			spec = "-",
+			race = raceName or "-",
+			level = level or "-",
+			guild = "-",
+			ilvl = "-",
+			ilvl_overall = "-",
+			guid = guid,
+		}
+	end
+
+	local function RenderBlock(titleText, lines)
+		local out = {}
+		out[#out + 1] = "|cff03A9F4" .. tostring(titleText or "") .. "|r"
+		for _, l in ipairs(lines or {}) do
+			out[#out + 1] = tostring(l)
+		end
+		return table.concat(out, "\n")
+	end
+
 	-- ###########################################################################
 	-- #	UI PAGE
 	-- ###########################################################################
 
 	function CharInfo:TryRegisterPage()
-		if self._pageRegistered then
-			return true
-		end
+		if self._pageRegistered then return true end
 
 		local ui = UIRef()
 		if not ui or type(ui.RegisterPage) ~= "function" then
@@ -94,16 +197,25 @@
 		end
 
 		ui:RegisterPage("CHARINFO", 60, DISPLAY_NAME, function(root)
-			local ctx = GetNavContext(true) or {}
+			local ui2 = UIRef()
+			local ctx = GetNavContext(true) or nil
+			local player = GetPlayerSnapshot()
 
-			local guid = ctx.guid
-			local name_full = ctx.name_full or ctx.name
-			local realm = ctx.realm
+			-- optional: wenn ctx leer -> "selbst auswählbar" (Button). Wir setzen NICHT automatisch.
+			local ctxName = ctx and ctx.name_full or nil
+			local ctxGuid = ctx and ctx.guid or nil
+			local ctxFrom = ctx and (ctx.from or ctx.source) or nil
 
-			local function ctxLine()
-				local nm = name_full or "-"
-				if realm and realm ~= "" then nm = nm .. "-" .. tostring(realm) end
-				return "GUID: " .. tostring(guid or "-") .. "\nName: " .. tostring(nm)
+			-- Header/Footer
+			if ui2 and type(ui2.Header_BuildIconText) == "function" then
+				ui2:Header_BuildIconText({
+					icon = ICON,
+					text = "|cff03A9F4" .. DISPLAY_NAME .. "|r",
+					subtext = ctxName and ("Context: |cffCCCCCC" .. tostring(ctxName) .. "|r") or "Kein Context gesetzt",
+				})
+			end
+			if ui2 and type(ui2.SetStatusText) == "function" then
+				ui2:SetStatusText(ctxName and "CHARINFO: ctx aktiv" or "CHARINFO: nur player")
 			end
 
 			local wrapper = AceGUI:Create("SimpleGroup")
@@ -112,51 +224,107 @@
 			wrapper:SetLayout("Flow")
 			root:AddChild(wrapper)
 
-			local title = AceGUI:Create("Label")
-			title:SetFullWidth(true)
-			title:SetText("|cff03A9F4CHARINFO|r")
-			if title.label then
-				title.label:SetFontObject(_G.GameFontNormalLarge)
+			-- Player Block
+			local lblPlayer = AceGUI:Create("Label")
+			lblPlayer:SetFullWidth(true)
+			lblPlayer:SetText(RenderBlock("Player", {
+				"Name: " .. tostring(player.name_full or "-"),
+				"Level: " .. tostring(player.level or "-"),
+				"Race: " .. tostring(player.race or "-"),
+				"Class: " .. tostring(player.class or "-"),
+				"Spec: " .. tostring(player.spec or "-"),
+				"iLvL: " .. tostring(player.ilvl or "-") .. " (overall " .. tostring(player.ilvl_overall or "-") .. ")",
+				"Guild: " .. tostring(player.guild or "-"),
+				"GUID: " .. tostring(player.guid or "-"),
+			}))
+			if lblPlayer.label then
+				lblPlayer.label:SetFontObject(_G.GameFontNormalSmallOutline)
 			end
-			wrapper:AddChild(title)
+			wrapper:AddChild(lblPlayer)
 
-			local info = AceGUI:Create("Label")
-			info:SetFullWidth(true)
-			info:SetText(ctxLine())
-			if info.label then
-				info.label:SetFontObject(_G.GameFontNormalSmallOutline)
-			end
-			wrapper:AddChild(info)
+			-- Buttons row
+			local row = AceGUI:Create("SimpleGroup")
+			row:SetFullWidth(true)
+			row:SetLayout("Flow")
+			wrapper:AddChild(row)
 
-			local btnRow = AceGUI:Create("SimpleGroup")
-			btnRow:SetFullWidth(true)
-			btnRow:SetLayout("Flow")
-			wrapper:AddChild(btnRow)
-
-			local btnRefresh = AceGUI:Create("Button")
-			btnRefresh:SetText("Context erneut lesen")
-			btnRefresh:SetWidth(200)
-			btnRefresh:SetCallback("OnClick", function()
-				-- Nicht-consume lesen (falls irgendwer ihn wieder gesetzt hat)
-				local ctx2 = GetNavContext(false) or {}
-				guid = ctx2.guid or guid
-				name_full = ctx2.name_full or ctx2.name or name_full
-				realm = ctx2.realm or realm
-				info:SetText(ctxLine())
+			local btnSelf = AceGUI:Create("Button")
+			btnSelf:SetText("Spieler selbst auswählen")
+			btnSelf:SetWidth(200)
+			btnSelf:SetCallback("OnClick", function()
+				SetNavContext({
+					from = "charinfo",
+					name_full = player.name_full,
+					guid = player.guid,
+					unit = "player",
+				})
+				if ui2 and type(ui2.SetStatusText) == "function" then
+					ui2:SetStatusText("CHARINFO: ctx = player gesetzt")
+				end
+				OpenSelf()
 			end)
-			btnRow:AddChild(btnRefresh)
+			row:AddChild(btnSelf)
 
-			local btnDebug = AceGUI:Create("Button")
-			btnDebug:SetText("Debug: Print")
-			btnDebug:SetWidth(140)
-			btnDebug:SetCallback("OnClick", function()
+			local btnTarget = AceGUI:Create("Button")
+			btnTarget:SetText("Target auswählen")
+			btnTarget:SetWidth(160)
+			btnTarget:SetCallback("OnClick", function()
+				local t = GetTargetSnapshot()
+				if not t then
+					if ui2 and type(ui2.SetStatusText) == "function" then
+						ui2:SetStatusText("CHARINFO: kein Spieler-Target")
+					end
+					return
+				end
+				SetNavContext({
+					from = "charinfo",
+					name_full = t.name_full,
+					guid = t.guid,
+					unit = "target",
+				})
+				if ui2 and type(ui2.SetStatusText) == "function" then
+					ui2:SetStatusText("CHARINFO: ctx = target gesetzt")
+				end
+				OpenSelf()
+			end)
+			row:AddChild(btnTarget)
+
+			local btnClear = AceGUI:Create("Button")
+			btnClear:SetText("Context löschen")
+			btnClear:SetWidth(140)
+			btnClear:SetCallback("OnClick", function()
+				SetNavContext(nil)
+				if ui2 and type(ui2.SetStatusText) == "function" then
+					ui2:SetStatusText("CHARINFO: ctx gelöscht")
+				end
+				OpenSelf()
+			end)
+			row:AddChild(btnClear)
+
+			-- ctx Block (falls vorhanden)
+			local lblCtx = AceGUI:Create("Label")
+			lblCtx:SetFullWidth(true)
+			lblCtx:SetText(RenderBlock("Context", {
+				"From: " .. tostring(ctxFrom or "-"),
+				"Name: " .. tostring(ctxName or "-"),
+				"GUID: " .. tostring(ctxGuid or "-"),
+			}))
+			if lblCtx.label then
+				lblCtx.label:SetFontObject(_G.GameFontNormalSmallOutline)
+			end
+			wrapper:AddChild(lblCtx)
+
+			-- Debug Button
+			local btnDbg = AceGUI:Create("Button")
+			btnDbg:SetText("Debug: Print Player + Ctx")
+			btnDbg:SetWidth(220)
+			btnDbg:SetCallback("OnClick", function()
 				if GMS and type(GMS.Print) == "function" then
-					local nm = name_full or "-"
-					if realm and realm ~= "" then nm = nm .. "-" .. tostring(realm) end
-					GMS:Print("CHARINFO ctx guid=" .. tostring(guid or "-") .. " name_full=" .. tostring(nm))
+					GMS:Print("CHARINFO player=" .. tostring(player.name_full) .. " guid=" .. tostring(player.guid))
+					GMS:Print("CHARINFO ctx=" .. tostring(ctxName) .. " guid=" .. tostring(ctxGuid) .. " from=" .. tostring(ctxFrom))
 				end
 			end)
-			btnRow:AddChild(btnDebug)
+			wrapper:AddChild(btnDbg)
 		end)
 
 		self._pageRegistered = true
@@ -168,9 +336,7 @@
 	-- ###########################################################################
 
 	function CharInfo:TryRegisterDockIcon()
-		if self._dockRegistered then
-			return true
-		end
+		if self._dockRegistered then return true end
 
 		local ui = UIRef()
 		if not ui or type(ui.AddRightDockIconTop) ~= "function" then
@@ -181,7 +347,7 @@
 			id = "CHARINFO",
 			order = 60,
 			selectable = true,
-			icon = "Interface\\Icons\\inv_helm_armor_tatteredhoodmasked_b_01",
+			icon = ICON,
 			tooltipTitle = DISPLAY_NAME,
 			tooltipText = "Öffnet die Charakter-Info",
 			onClick = function()
@@ -201,31 +367,18 @@
 	-- ###########################################################################
 
 	function CharInfo:TryIntegrateWithUIIfAvailable()
-		if self._integrated then
-			return true
-		end
+		if self._integrated then return true end
 
 		local okPage = self:TryRegisterPage()
 		local okDock = self:TryRegisterDockIcon()
 
 		if okPage and okDock then
 			self._integrated = true
-			Log("INFO", "Integrated with UI", nil)
-
-			if self._ticker and self._ticker.Cancel then
-				self._ticker:Cancel()
-			end
+			if self._ticker and self._ticker.Cancel then self._ticker:Cancel() end
 			self._ticker = nil
-
-			-- optional: Statusbar Hinweis
-			local ui = UIRef()
-			if ui and type(ui.SetStatusText) == "function" then
-				ui:SetStatusText("|cff03A9F4CharInfo|r: bereit")
-			end
-
+			Log("INFO", "Integrated with UI", nil)
 			return true
 		end
-
 		return false
 	end
 
@@ -237,11 +390,8 @@
 		local tries = 0
 		self._ticker = _G.C_Timer.NewTicker(0.50, function()
 			tries = tries + 1
-			if CharInfo:TryIntegrateWithUIIfAvailable() then
-				return
-			end
+			if CharInfo:TryIntegrateWithUIIfAvailable() then return end
 			if tries >= 30 then
-				-- ~15s max
 				if CharInfo._ticker and CharInfo._ticker.Cancel then CharInfo._ticker:Cancel() end
 				CharInfo._ticker = nil
 				Log("WARN", "UI not available (gave up retries)", nil)
@@ -254,15 +404,9 @@
 	-- ###########################################################################
 
 	function CharInfo:OnEnable()
-		-- Sofort versuchen (falls UI schon da ist)
-		if self:TryIntegrateWithUIIfAvailable() then
-			return
-		end
-
-		-- Retry: UI kann später in der TOC kommen
+		if self:TryIntegrateWithUIIfAvailable() then return end
 		self:StartIntegrationTicker()
 
-		-- Zusätzlich: Bei PLAYER_LOGIN nochmal versuchen (manchmal kommen Abhängigkeiten spät)
 		if type(self.RegisterEvent) == "function" then
 			self:RegisterEvent("PLAYER_LOGIN", function()
 				SafeCall(CharInfo.TryIntegrateWithUIIfAvailable, CharInfo)
@@ -271,9 +415,6 @@
 	end
 
 	function CharInfo:OnDisable()
-		-- Keine harte Deregistration: UI-Registry ist global; Module kann wieder enabled werden.
-		if self._ticker and self._ticker.Cancel then
-			self._ticker:Cancel()
-		end
+		if self._ticker and self._ticker.Cancel then self._ticker:Cancel() end
 		self._ticker = nil
 	end
