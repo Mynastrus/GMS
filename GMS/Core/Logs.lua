@@ -145,8 +145,24 @@
 	-- ###########################################################################
 
 	function LOGS:Init()
+		-- Prefer centralized logging DB if provided by Core
+		if GMS and GMS.logging_db then
+			LOGS._db = GMS.logging_db
+			return
+		end
+
+		-- Prefer module namespace via GMS.DB if available
+		if GMS and GMS.DB and type(GMS.DB.GetModuleDB) == "function" then
+			local ok, ns = pcall(function() return GMS.DB:GetModuleDB("LOGS") end)
+			if ok and ns then
+				LOGS._db = ns
+				return
+			end
+		end
+
+		-- Fallback: create a dedicated AceDB for logs (keeps SavedVariables name consistent)
 		if AceDB then
-			local ok, db = pcall(AceDB.New, AceDB, "GMS_LOGS_DB", LOGS.DEFAULTS, true)
+			local ok, db = pcall(AceDB.New, AceDB, "GMS_Logging_DB", LOGS.DEFAULTS, true)
 			if ok and db then
 				LOGS._db = db
 			end

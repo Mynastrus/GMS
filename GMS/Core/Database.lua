@@ -70,3 +70,51 @@
 		_G.GMS = GMS
 		GMS:InitializeStandardDatabases(false)
 	end
+
+	-- ============================================================================
+	--	GMS.DB helper API
+	--
+	--	Provides a small wrapper to register per-module namespaces and retrieve them.
+	-- ============================================================================
+
+	GMS.DB = GMS.DB or {}
+
+	-- Register a module's DB namespace. `defaults` is optional table.
+	function GMS.DB:RegisterModule(moduleName, defaults, optionsProvider)
+		if not moduleName then return nil end
+		if not self._parent or not self._parent.db then return nil end
+
+		local ok, ns = pcall(function()
+			return self._parent.db:RegisterNamespace(moduleName, defaults)
+		end)
+		if ok and ns then
+			self._modules = self._modules or {}
+			self._modules[moduleName] = ns
+			-- if optionsProvider callback provided, call it to attach options (optional)
+			if type(optionsProvider) == "function" then
+				pcall(optionsProvider)
+			end
+			return ns
+		end
+		return nil
+	end
+
+	function GMS.DB:GetModuleDB(moduleName)
+		if not moduleName then return nil end
+		self._modules = self._modules or {}
+		if self._modules[moduleName] then return self._modules[moduleName] end
+		if self.db then
+			local ok, ns = pcall(function()
+				return self.db:GetNamespace(moduleName, true)
+			end)
+			if ok and ns then
+				self._modules[moduleName] = ns
+				return ns
+			end
+		end
+		return nil
+	end
+
+	-- attach parent references for convenience
+	GMS.DB._parent = GMS
+
