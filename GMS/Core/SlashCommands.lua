@@ -272,3 +272,10 @@
             owner = EXT_NAME,
         })
 	end
+
+-- Notify that SlashCommands core finished loading
+pcall(function()
+	if GMS and type(GMS.Print) == "function" then
+		GMS:Print("SlashCommands wurde geladen")
+	end
+end)

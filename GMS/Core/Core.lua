@@ -280,3 +280,10 @@
 			end
 		end)
 	end
+
+	-- Notify that Core finished loading
+	pcall(function()
+	    if GMS and type(GMS.Print) == "function" then
+	        GMS:Print("CORE wurde geladen")
+	    end
+	end)

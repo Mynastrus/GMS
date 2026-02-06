@@ -570,3 +570,10 @@
 
 	-- Use Info so the default minLevel (INFO) will show it
 	GMS:Info("LOGS Extension loaded")
+
+	-- Notify that Logs core finished loading
+	pcall(function()
+		if GMS and type(GMS.Print) == "function" then
+			GMS:Print("Logs wurde geladen")
+		end
+	end)

@@ -600,6 +600,13 @@
 		end
 	end
 
+		-- Notify that UI core finished loading
+		pcall(function()
+			if GMS and type(GMS.Print) == "function" then
+				GMS:Print("UI wurde geladen")
+			end
+		end)
+
 	-- ###########################################################################
 	-- #	PERSISTENZ (POSITION / SIZE)
 	-- ###########################################################################

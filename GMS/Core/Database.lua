@@ -118,3 +118,11 @@
 	-- attach parent references for convenience
 	GMS.DB._parent = GMS
 
+
+	-- Notify that Database core finished loading
+	pcall(function()
+		if GMS and type(GMS.Print) == "function" then
+			GMS:Print("Database wurde geladen")
+		end
+	end)
+
