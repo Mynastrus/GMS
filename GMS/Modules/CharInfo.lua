@@ -415,6 +415,7 @@
 
 	function CHARINFO:InitializeCharacterLog()
 		-- Register or fetch DB namespace for character logging
+		-- Try centralized helper first
 		if GMS and GMS.DB and type(GMS.DB.RegisterModule) == "function" then
 			local ok, ns = pcall(function()
 				return GMS.DB:RegisterModule("CHARINFO", DB_DEFAULTS, nil)
@@ -424,18 +425,39 @@
 			end
 		end
 
-		-- Fallback: use direct DB access if available
-		if not self._db and GMS and GMS.db then
-			local ok, ns = pcall(function()
-				return GMS.db:RegisterNamespace("CHARINFO", DB_DEFAULTS)
-			end)
-			if ok and ns then
-				self._db = ns
+		-- If no DB yet, try to ensure core DBs are initialized and retry
+		if not self._db and GMS and type(GMS.InitializeDatabaseIfAvailable) == "function" then
+			pcall(function() GMS:InitializeDatabaseIfAvailable(false) end)
+			if GMS and GMS.db and type(GMS.db.RegisterNamespace) == "function" then
+				pcall(function()
+					self._db = GMS.db:RegisterNamespace("CHARINFO", DB_DEFAULTS)
+				end)
+			end
+
+		-- Fallback: if a centralized logging DB exists, use it
+		if not self._db and GMS and GMS.logging_db then
+			self._db = GMS.logging_db
+		end
+
+		-- Last resort: create a dedicated AceDB savedvariable
+		if not self._db then
+			local ok, LibStub = pcall(function() return _G.LibStub end)
+			if ok and LibStub and type(LibStub) == "function" then
+				local AceDB = LibStub("AceDB-3.0", true)
+				if AceDB then
+					local sOk, db = pcall(AceDB.New, AceDB, "GMS_Logging_DB", DB_DEFAULTS, true)
+					if sOk and db then
+						self._db = db
+					end
+				end
 			end
 		end
 
 		-- Auto-log current player to account-wide character table
-		if self._db and self._db.global and type(self._db.global) == "table" then
+		if self._db then
+			if not self._db.global or type(self._db.global) ~= "table" then
+				self._db.global = self._db.global or {}
+			end
 			self._db.global.characters = self._db.global.characters or {}
 
 			local snap = GetPlayerSnapshot()
@@ -449,7 +471,11 @@
 					level = snap.level,
 				}
 				Log("INFO", "Character logged: " .. snap.name_full, nil)
+			else
+				Log("WARN", "Character snapshot missing; not logged", nil)
 			end
+		else
+			Log("WARN", "CHARINFO DB namespace not available; character not logged", nil)
 		end
 	end
 
