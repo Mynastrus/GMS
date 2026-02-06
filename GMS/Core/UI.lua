@@ -1214,8 +1214,20 @@
 		if self._inited then return end
 		self._inited = true
 
-		if AceDB then
-			self.db = AceDB:New("GMS_UIDB", DEFAULTS, true)
+		-- Prefer centralized module DB via GMS.DB; fallback to AceDB if not available
+		if GMS and GMS.DB and type(GMS.DB.RegisterModule) == "function" then
+			local ok, ns = pcall(function()
+				return GMS.DB:RegisterModule("UI", DEFAULTS, nil)
+			end)
+			if ok and ns then
+				self.db = ns
+			elseif AceDB then
+				self.db = AceDB:New("GMS_UIDB", DEFAULTS, true)
+			end
+		else
+			if AceDB then
+				self.db = AceDB:New("GMS_UIDB", DEFAULTS, true)
+			end
 		end
 
 		self:CreateFrame()
