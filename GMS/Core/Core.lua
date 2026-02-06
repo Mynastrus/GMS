@@ -176,8 +176,18 @@
 			return true
 		end
 
+		-- Prefer a centralized initializer if provided by Core/Database.lua
+		if type(self.InitializeStandardDatabases) == "function" then
+			local ok, res = pcall(self.InitializeStandardDatabases, self, force)
+			if ok and res then
+				self:LOG_Info("CORE", "InitializeStandardDatabases used", nil)
+				return true
+			end
+		end
+
+		-- Fallback: create the main DB using Core defaults
 		self.db = AceDB:New("GMS_DB", self.DEFAULTS, true)
-		self:LOG_Info("CORE", "AceDB initialized", nil)
+		self:LOG_Info("CORE", "AceDB initialized (fallback)", nil)
 		return true
 	end
 
