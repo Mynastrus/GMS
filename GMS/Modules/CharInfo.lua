@@ -484,6 +484,16 @@
 		-- Initialize and log character to account-wide DB
 		SafeCall(CHARINFO.InitializeCharacterLog, CHARINFO)
 
+		-- Ensure we attempt to initialize again when player fully logs in / enters world
+		if type(self.RegisterEvent) == "function" then
+			self:RegisterEvent("PLAYER_LOGIN", function()
+				SafeCall(CHARINFO.InitializeCharacterLog, CHARINFO)
+			end)
+			self:RegisterEvent("PLAYER_ENTERING_WORLD", function()
+				SafeCall(CHARINFO.InitializeCharacterLog, CHARINFO)
+			end)
+		end
+
 		if self:TryIntegrateWithUIIfAvailable() then return end
 		self:StartIntegrationTicker()
 
