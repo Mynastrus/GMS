@@ -58,6 +58,7 @@ Core\Core.lua
 Core\SlashCommands.lua
 Core\ChatLinks.lua
 Core\UI.lua
+Core\Logs.lua
 
 # =========================
 # Internal Modules (Feature-Module)
