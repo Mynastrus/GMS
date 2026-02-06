@@ -433,6 +433,7 @@
 					self._db = GMS.db:RegisterNamespace("CHARINFO", DB_DEFAULTS)
 				end)
 			end
+			end
 
 		-- Fallback: if a centralized logging DB exists, use it
 		if not self._db and GMS and GMS.logging_db then
