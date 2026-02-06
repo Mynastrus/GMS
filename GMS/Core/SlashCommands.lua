@@ -1,10 +1,10 @@
 	-- ============================================================================
 	--	GMS/Core/SlashCommands.lua
-	--	SlashCommands Core (Ace-only)
-	--	- KEIN _G, KEIN addonTable
-	--	- Zugriff auf GMS ausschließlich über AceAddon Registry
-	--	- Registriert /gms (ein Command)
-	--	- SubCommand-Registry für Module
+	--	SlashCommands EXTENSION (no GMS:NewModule)
+	--	- Zugriff auf GMS über AceAddon Registry
+	--	- Registriert /gms (ein Command) via AceConsole-Mixin am GMS
+	--	- SubCommand-Registry für Module/Extensions
+	--	- Optional: STATES Updates (wenn vorhanden)
 	-- ============================================================================
 
 	local LibStub = LibStub
@@ -16,65 +16,45 @@
 	local GMS = AceAddon:GetAddon("GMS", true)
 	if not GMS then return end
 
-	local AceConsole = LibStub("AceConsole-3.0", true)
-	if not AceConsole then return end
-
-	-- ###########################################################################
-	-- #	ACE MODULE
-	-- ###########################################################################
-
-	local MODULE_NAME = "SLASHCOMMANDS"
-	local DISPLAY_NAME = "Slash Commands"
-
-	local SlashCommands = GMS:NewModule(MODULE_NAME, "AceConsole-3.0")
-	GMS.SlashCommands = SlashCommands
-
-	-- ###########################################################################
-	-- #	STATES (optional)
-	-- ###########################################################################
-
-	local STATES = (GMS and GMS.STATES) or nil
-
-	local function STATE_Update(state, reason, meta)
-		if not STATES or type(STATES.UPDATE) ~= "function" then
-			return
-		end
-		STATES:UPDATE(MODULE_NAME, state, reason, meta)
+	-- Für RegisterChatCommand muss GMS AceConsole gemixt haben
+	if type(GMS.RegisterChatCommand) ~= "function" then
+		return
 	end
 
-	-- Mark file load
-	STATE_Update("LOADED")
+	-- ###########################################################################
+	-- #	META
+	-- ###########################################################################
 
-	-- ###########################################################################
-	-- #	STATE
-	-- ###########################################################################
+    GMS.SlashCommands = GMS.SlashCommands or {}
+	local SlashCommands = GMS.SlashCommands
+    
+    local EXT_NAME = "SLASHCOMMANDS"
+    local DISPLAY_NAME = "Chateingabe"
 
 	SlashCommands.SUBCOMMAND_REGISTRY = SlashCommands.SUBCOMMAND_REGISTRY or {}
-	SlashCommands.PRIMARY_COMMAND = "gms"
+	SlashCommands.PRIMARY_COMMAND = SlashCommands.PRIMARY_COMMAND or "gms"
 
-	-- ---------------------------------------------------------------------------
-	--	Normalisiert einen SubCommand-Key
-	--	@param rawKey string
-	--	@return string
-	-- ---------------------------------------------------------------------------
+	-- ###########################################################################
+	-- #	INTERNAL HELPERS
+	-- ###########################################################################
 
-	local function NormalizeSubCommandKey(rawKey)
-		if not rawKey then return "" end
-		return string.lower(tostring(rawKey))
+	local function LOWER(s)
+		return string.lower(tostring(s or ""))
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Parsed Input für "/gms <sub> <rest>"
-	--	@param input string
-	--	@return string subCommand
-	--	@return string arguments
-	--	@return string fullInput
-	-- ---------------------------------------------------------------------------
+	local function TRIM(s)
+		s = tostring(s or "")
+		s = string.gsub(s, "^%s+", "")
+		s = string.gsub(s, "%s+$", "")
+		return s
+	end
+
+	local function NormalizeSubCommandKey(rawKey)
+		return LOWER(TRIM(rawKey))
+	end
 
 	local function ParseGmsSlashInput(input)
-		local fullInput = tostring(input or "")
-		fullInput = string.gsub(fullInput, "^%s+", "")
-		fullInput = string.gsub(fullInput, "%s+$", "")
+		local fullInput = TRIM(input)
 
 		if fullInput == "" then
 			return "", "", ""
@@ -86,12 +66,6 @@
 		return subCommand, rest, fullInput
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Prüft, ob ein Wert ein Array von Strings ist
-	--	@param value any
-	--	@return boolean
-	-- ---------------------------------------------------------------------------
-
 	local function IsStringArray(value)
 		if type(value) ~= "table" then return false end
 		for _, v in ipairs(value) do
@@ -99,13 +73,6 @@
 		end
 		return true
 	end
-
-	-- ---------------------------------------------------------------------------
-	--	Sucht einen Registry-Eintrag nach Key oder Alias
-	--	@param registry table
-	--	@param subCommand string
-	--	@return table|nil
-	-- ---------------------------------------------------------------------------
 
 	local function FindSubCommandEntry(registry, subCommand)
 		local normalized = NormalizeSubCommandKey(subCommand)
@@ -132,20 +99,17 @@
 		return nil
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Gibt Hilfe / SubCommand-Liste aus
-	--	@param registry table
-	--	@param header string|nil
-	--	@return nil
-	-- ---------------------------------------------------------------------------
-
 	local function PrintGmsHelp(registry, header)
 		if header and header ~= "" then
-			GMS:Print(tostring(header))
+			if type(GMS.Print) == "function" then
+				GMS:Print(tostring(header))
+			end
 		end
 
-		GMS:Print("Usage: /gms <subcommand> [args]")
-		GMS:Print("Example: /gms help")
+		if type(GMS.Print) == "function" then
+			GMS:Print("Usage: /gms <subcommand> [args]")
+			GMS:Print("Example: /gms help")
+		end
 
 		local keys = {}
 		for key, _ in pairs(registry) do
@@ -154,41 +118,54 @@
 		table.sort(keys)
 
 		if #keys == 0 then
-			GMS:Print("No subcommands registered.")
+			if type(GMS.Print) == "function" then
+				GMS:Print("No subcommands registered.")
+			end
 			return
 		end
 
-		GMS:Print("Subcommands:")
+		if type(GMS.Print) == "function" then
+			GMS:Print("Subcommands:")
+		end
+
 		for _, key in ipairs(keys) do
 			local entry = registry[key]
 			local helpText = entry and entry.help or ""
 			if helpText ~= "" then
-				GMS:Printf(" - %s: %s", key, helpText)
+				if type(GMS.Printf) == "function" then
+					GMS:Printf(" - %s: %s", key, helpText)
+				elseif type(GMS.Print) == "function" then
+					GMS:Print(" - " .. key .. ": " .. helpText)
+				end
 			else
-				GMS:Printf(" - %s", key)
+				if type(GMS.Printf) == "function" then
+					GMS:Printf(" - %s", key)
+				elseif type(GMS.Print) == "function" then
+					GMS:Print(" - " .. key)
+				end
 			end
 		end
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Dispatcher für /gms
-	--	@param input string
-	--	@return nil
-	-- ---------------------------------------------------------------------------
+	-- ###########################################################################
+	-- #	DISPATCHER
+	-- ###########################################################################
 
 	local function HandleGmsSlashCommandInput(input)
 		local subCommand, arguments, fullInput = ParseGmsSlashInput(input)
 
 		if subCommand == "" then
-			HandleGmsSlashCommandInput("ui")
+			HandleGmsSlashCommandInput("?")
 			return
 		end
-		if subCommand == "help" or subCommand == "?" then
+
+		local subNorm = NormalizeSubCommandKey(subCommand)
+		if subNorm == "help" or subNorm == "?" then
 			PrintGmsHelp(SlashCommands.SUBCOMMAND_REGISTRY, DISPLAY_NAME)
 			return
 		end
 
-		local entry = FindSubCommandEntry(SlashCommands.SUBCOMMAND_REGISTRY, subCommand)
+		local entry = FindSubCommandEntry(SlashCommands.SUBCOMMAND_REGISTRY, subNorm)
 		if not entry or type(entry.handlerFn) ~= "function" then
 			PrintGmsHelp(SlashCommands.SUBCOMMAND_REGISTRY, "Unknown subcommand: " .. tostring(subCommand))
 			return
@@ -196,30 +173,40 @@
 
 		local ok, err = pcall(entry.handlerFn, tostring(arguments), tostring(fullInput), tostring(subCommand))
 		if not ok then
-			GMS:LOG_Error(MODULE_NAME, "Subcommand handler error", { sub = subCommand, error = tostring(err) })
-			GMS:Printf("Error executing '%s'. Check logs.", tostring(subCommand))
+			if type(GMS.LOG_Error) == "function" then
+				GMS:LOG_Error(EXT_NAME, "Subcommand handler error", { sub = subCommand, error = tostring(err) })
+			end
+			if type(GMS.Printf) == "function" then
+				GMS:Printf("Error executing '%s'. Check logs.", tostring(subCommand))
+			elseif type(GMS.Print) == "function" then
+				GMS:Print("Error executing '" .. tostring(subCommand) .. "'. Check logs.")
+			end
 		end
 	end
 
 	-- ###########################################################################
-	-- #	PUBLIC API (für Module)
+	-- #	PUBLIC API (für Module/Extensions)
 	-- ###########################################################################
 
-	function SlashCommands:API_RegisterSubCommand(key, handlerFn, opts)
+	function GMS:Slash_RegisterSubCommand(key, handlerFn, opts)
 		local normalizedKey = NormalizeSubCommandKey(key)
 		if normalizedKey == "" then
-			GMS:LOG_Error(MODULE_NAME, "RegisterSubCommand failed: empty key", { key = key })
+			if type(GMS.LOG_Error) == "function" then
+				GMS:LOG_Error(EXT_NAME, "RegisterSubCommand failed: empty key", { key = key })
+			end
 			return false
 		end
 
 		if type(handlerFn) ~= "function" then
-			GMS:LOG_Error(MODULE_NAME, "RegisterSubCommand failed: handlerFn not function", { key = normalizedKey, handlerType = type(handlerFn) })
+			if type(GMS.LOG_Error) == "function" then
+				GMS:LOG_Error(EXT_NAME, "RegisterSubCommand failed: handlerFn not function", { key = normalizedKey, handlerType = type(handlerFn) })
+			end
 			return false
 		end
 
 		opts = opts or {}
 
-		self.SUBCOMMAND_REGISTRY[normalizedKey] = {
+		SlashCommands.SUBCOMMAND_REGISTRY[normalizedKey] = {
 			key = normalizedKey,
 			handlerFn = handlerFn,
 			help = tostring(opts.help or ""),
@@ -227,56 +214,61 @@
 			owner = tostring(opts.owner or ""),
 		}
 
-		GMS:LOG_Info(MODULE_NAME, "Subcommand registered", { key = normalizedKey, owner = opts.owner, help = opts.help })
+		if type(GMS.LOG_Info) == "function" then
+			GMS:LOG_Info(EXT_NAME, "Subcommand registered", { key = normalizedKey, owner = opts.owner, help = opts.help })
+		end
+
 		return true
 	end
 
-	function SlashCommands:API_UnregisterSubCommand(key)
+	function GMS:Slash_UnregisterSubCommand(key)
 		local normalizedKey = NormalizeSubCommandKey(key)
 		if normalizedKey == "" then return false end
 
-		if self.SUBCOMMAND_REGISTRY[normalizedKey] then
-			self.SUBCOMMAND_REGISTRY[normalizedKey] = nil
-			GMS:LOG_Info(MODULE_NAME, "Subcommand unregistered", { key = normalizedKey })
+		if SlashCommands.SUBCOMMAND_REGISTRY[normalizedKey] then
+			SlashCommands.SUBCOMMAND_REGISTRY[normalizedKey] = nil
+
+			if type(GMS.LOG_Info) == "function" then
+				GMS:LOG_Info(EXT_NAME, "Subcommand unregistered", { key = normalizedKey })
+			end
+
 			return true
 		end
 
 		return false
 	end
 
-	function SlashCommands:API_PrintHelp()
-		PrintGmsHelp(self.SUBCOMMAND_REGISTRY, DISPLAY_NAME)
+	function GMS:Slash_PrintHelp()
+		PrintGmsHelp(SlashCommands.SUBCOMMAND_REGISTRY, DISPLAY_NAME)
+	end
+
+	-- Shortcut: kompatibel zu deinem bisherigen Pattern
+	function GMS:SlashCommand(input)
+		HandleGmsSlashCommandInput(input)
 	end
 
 	-- ###########################################################################
-	-- #	ACE LIFECYCLE
+	-- #	BOOTSTRAP (einmalig)
 	-- ###########################################################################
 
-	function SlashCommands:OnInitialize()
-		STATE_Update("INITIALIZED")
-	end
+	if not SlashCommands._registered then
+		SlashCommands._registered = true
 
-	function SlashCommands:OnEnable()
-		STATE_Update("ENABLED")
-
-		if self.DID_REGISTER_PRIMARY_COMMAND then
-			-- bereits registriert => trotzdem ready markieren (idempotent)
-			STATE_Update("READY")
-			return
-		end
-
-		self.DID_REGISTER_PRIMARY_COMMAND = true
-
-		GMS:RegisterChatCommand(self.PRIMARY_COMMAND, function(input)
+		GMS:RegisterChatCommand(SlashCommands.PRIMARY_COMMAND, function(input)
 			HandleGmsSlashCommandInput(input)
 		end)
-
-		GMS:LOG_Info(MODULE_NAME, "Primary slash command registered", { cmd = "/gms" })
-
-		-- Jetzt ist /gms wirklich da
-		STATE_Update("READY")
 	end
 
-	function SlashCommands:OnDisable()
-		STATE_Update("DISABLED")
+    if not SlashCommands._defaultsLoaded then
+		SlashCommands._defaultsLoaded = true
+
+		GMS:Slash_RegisterSubCommand("reload", function()
+            if ReloadUI then
+                ReloadUI()
+            end
+        end, {
+            help = "Lädt die UI neu.",
+            alias = { "rl" },
+            owner = EXT_NAME,
+        })
 	end

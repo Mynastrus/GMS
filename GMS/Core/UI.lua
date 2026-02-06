@@ -1,18 +1,27 @@
 	-- ============================================================================
 	--	GMS/Core/UI.lua
-	--	UI Shell (ButtonFrameTemplate) + AceGUI Content (embedded) + RightDock Tabs
-	--	- KEIN _G, KEIN addonTable
-	--	- Zugriff auf GMS ausschließlich über AceAddon Registry
-	--	- Fenster: Blizzard ButtonFrameTemplate (Move/Resize/ESC close)
-	--	- Content: AceGUI Widgets in einem WoW-Container-Frame (Fill)
-	--	- Persistenz: AceDB-3.0 (Position + Größe + aktive Page)
-	--	- Clamp: immer mind. 15px vom Rand (SetClampRectInsets) + RightDock Platz
-	--	- Pages: RegisterPage + Navigate (AceGUI Root Fill)
-	--	- RightDock: Tabs/Icons oben + unten rechts (selectable) + korrekte FrameLevel
-	--	- Bridge: GMS:UI_IsReady() + GMS:UI_Open(pageName)
+	--	UI EXTENSION (no GMS:NewModule)
+	--	- Zugriff auf GMS über AceAddon Registry
+	--	- Style aligned with ChatLinks / SlashCommands Extensions
+	--	- ButtonFrameTemplate shell + embedded AceGUI regions
+	--	- RightDock Tabs (top/bottom) with safe FrameLevel/Strata
+	--	- DB: AceDB-3.0 optional (window pos/size + activePage)
+	--
+	--	IMPORTANT:
+	--	- "PAGES" is a self-contained section.
+	--	  If you remove that whole section, UI still loads/opens and shows fallback content.
+	--
+	--	Header/Footer:
+	--	- Header/Footer sind bewusst am MainFrame (f) verankert (nicht im Content/Inlay).
+	--	- UI._headerContent / UI._footerContent liefern die SimpleGroups zurück (nicht die Labels).
+	--
+	--	Bridge:
+	--	- GMS:UI_IsReady()
+	--	- GMS:UI_Open(pageName)
 	-- ============================================================================
 
-	local LibStub = LibStub
+	local _G = _G
+	local LibStub = _G.LibStub
 	if not LibStub then return end
 
 	local AceAddon = LibStub("AceAddon-3.0", true)
@@ -22,48 +31,77 @@
 	if not GMS then return end
 
 	local AceGUI = LibStub("AceGUI-3.0", true)
-	local AceDB = LibStub("AceDB-3.0", true)
+	local AceDB  = LibStub("AceDB-3.0", true)
 
-	local MODULE_NAME = "UI"
+	local EXT_NAME     = "UI"
 	local DISPLAY_NAME = "Guild Management System"
-	local FRAME_NAME = "GMS_MainFrame"
-
-	-- ---------------------------------------------------------------------------
-	--	Log-Helfer (nutzt GMS Logging Buffer)
-	--	@param level string
-	--	@param message string
-	--	@param context table|nil
-	-- ---------------------------------------------------------------------------
-	local function Log(level, message, context)
-		if level == "ERROR" then
-			if GMS.LOG_Error then GMS:LOG_Error(MODULE_NAME, message, context) end
-		elseif level == "WARN" then
-			if GMS.LOG_Warn then GMS:LOG_Warn(MODULE_NAME, message, context) end
-		elseif level == "DEBUG" then
-			if GMS.LOG_Debug then GMS:LOG_Debug(MODULE_NAME, message, context) end
-		else
-			if GMS.LOG_Info then GMS:LOG_Info(MODULE_NAME, message, context) end
-		end
-	end
+	local FRAME_NAME   = "GMS_MainFrame"
 
 	-- ###########################################################################
-	-- #	ACE SUBMODULE
+	-- #	EXT STATE (table on GMS)
 	-- ###########################################################################
 
-	local UI = GMS:GetModule(MODULE_NAME, true)
-	if not UI then
-		UI = GMS:NewModule(
-			MODULE_NAME,
-			"AceConsole-3.0",
-			"AceEvent-3.0"
-		)
-	end
+	GMS.UI = GMS.UI or {}
+	local UI = GMS.UI
 
-	GMS.UI = UI
+	UI._inited			= UI._inited or false
+	UI.db				= UI.db or nil
 
-	-- ###########################################################################
-	-- #	DEFAULTS / STATE
-	-- ###########################################################################
+	UI._frame			= UI._frame or nil
+	UI._content			= UI._content or nil
+	UI._regions			= UI._regions or {}
+	UI._fallbackRoot	= UI._fallbackRoot or nil
+
+	UI._page			= UI._page or nil
+	UI._navContext		= UI._navContext or nil
+
+	UI._pages			= UI._pages or {}
+	UI._order			= UI._order or {}
+
+	UI._rightDockSeeded = UI._rightDockSeeded or false
+	UI._rightDock = UI._rightDock or {
+		inited = false,
+		parent = nil,
+		top = { order = {}, entries = {} },
+		bottom = { order = {}, entries = {} },
+		all = {},
+	}
+
+	-- Header/Footer: Frames + Content-Groups (SimpleGroup) bewusst separat vom Content
+	UI._headerFrame		= UI._headerFrame or nil
+	UI._footerFrame		= UI._footerFrame or nil
+	UI._headerContent	= UI._headerContent or nil	-- SimpleGroup (wird von außen befüllt)
+	UI._footerContent	= UI._footerContent or nil	-- SimpleGroup (wird von außen befüllt)
+	UI._statusLabelWidget = UI._statusLabelWidget or nil	-- AceGUI Label widget (optional)
+	UI._statusLabelFS	= UI._statusLabelFS or nil	-- FontString für farbige Codes (optional)
+
+	UI.RightDockConfig = UI.RightDockConfig or {
+		offsetX = -10,
+		topOffsetY = 26,
+		bottomOffsetY = 1,
+		slotWidth = 46,
+		slotHeight = 38,
+		slotGap = 2,
+		buttonSize = 32,
+		iconInset = 4,
+		buttonOffsetX = 4,
+		buttonOffsetY = 0,
+		slotBackdrop = {
+			bgFile = "Interface\\FrameGeneral\\UI-Background-Rock",
+			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+			tile = true,
+			tileSize = 16,
+			edgeSize = 12,
+			insets = { left = 2, right = 2, top = 2, bottom = 2 },
+		},
+		normalTexture = "",
+		pushedTexture = "Interface\\Buttons\\UI-Quickslot-Depress",
+		hoverTexture = "Interface\\Buttons\\ButtonHilight-Square",
+		selectedGlowTexture = "Interface\\Buttons\\UI-ActionButton-Border",
+		selectedGlowColor = { 1, 0.82, 0.2, 1 },
+		selectedGlowPad = 32,
+		iconTexCoord = { 0.07, 0.93, 0.07, 0.93 },
+	}
 
 	local DEFAULTS = {
 		profile = {
@@ -79,118 +117,85 @@
 		},
 	}
 
-	UI.db = UI.db or nil
-	UI._inited = UI._inited or false
-	UI._frame = UI._frame or nil
-	UI._content = UI._content or nil
-	UI._root = UI._root or nil
-	UI._page = UI._page or nil
-
-	UI._pages = UI._pages or {}
-	UI._order = UI._order or {}
-
-	UI._rightDockSeeded = UI._rightDockSeeded or false
-	UI._rightDock = UI._rightDock or {
-		inited = false,
-		parent = nil,
-		top = { order = {}, entries = {} },
-		bottom = { order = {}, entries = {} },
-		all = {},
-	}
-
-	-- ---------------------------------------------------------------------------
-	--	RightDock Config
-	-- ---------------------------------------------------------------------------
-	UI.RightDockConfig = UI.RightDockConfig or {
-		offsetX = -10,
-		topOffsetY = 26,
-		bottomOffsetY = 1,
-		slotWidth = 46,
-		slotHeight = 38,
-		slotGap = 2,
-		buttonSize = 32, --32
-		iconInset = 4,
-		buttonOffsetX = 4,
-		buttonOffsetY = 0,
-		slotBackdrop = {
-			bgFile = "Interface\\FrameGeneral\\UI-Background-Rock",
-			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-			tile = true,
-			tileSize = 16,
-			edgeSize = 12,
-			insets = { left = 2, right = 2, top = 2, bottom = 2 },
-		},
-		normalTexture = "", --"Interface\\Buttons\\UI-Quickslot2",
-		pushedTexture = "Interface\\Buttons\\UI-Quickslot-Depress",
-		hoverTexture = "Interface\\Buttons\\ButtonHilight-Square",
-		selectedGlowTexture = "Interface\\Buttons\\UI-ActionButton-Border",
-		selectedGlowColor = { 1, 0.82, 0.2, 1 },
-		selectedGlowPad = 32,
-		iconTexCoord = { 0.07, 0.93, 0.07, 0.93 },
-	}
-
 	-- ###########################################################################
 	-- #	INTERNAL HELPERS
 	-- ###########################################################################
 
-	-- ---------------------------------------------------------------------------
-	--	Führt eine Funktion sicher aus (pcall) und loggt Fehler
-	--	@param fn function|nil
-	--	@param ... any
-	--	@return boolean ok
-	-- ---------------------------------------------------------------------------
+	local function Log(level, message, context)
+		if level == "ERROR" then
+			if type(GMS.LOG_Error) == "function" then GMS:LOG_Error(EXT_NAME, message, context) end
+		elseif level == "WARN" then
+			if type(GMS.LOG_Warn) == "function" then GMS:LOG_Warn(EXT_NAME, message, context) end
+		elseif level == "DEBUG" then
+			if type(GMS.LOG_Debug) == "function" then GMS:LOG_Debug(EXT_NAME, message, context) end
+		else
+			if type(GMS.LOG_Info) == "function" then GMS:LOG_Info(EXT_NAME, message, context) end
+		end
+	end
+
+	local function TRIM(s)
+		s = tostring(s or "")
+		s = string.gsub(s, "^%s+", "")
+		s = string.gsub(s, "%s+$", "")
+		return s
+	end
+
 	local function SafeCall(fn, ...)
 		if type(fn) ~= "function" then return false end
 		local ok, err = pcall(fn, ...)
 		if not ok then
-			Log("ERROR", "UI Fehler", { err = tostring(err) })
-			if GMS and GMS.Print then
+			Log("ERROR", "UI error", { err = tostring(err) })
+			if type(GMS.Print) == "function" then
 				GMS:Print("UI Fehler: " .. tostring(err))
 			end
 		end
 		return ok
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Sortiert registrierte Pages nach order + id
-	--	@return nil
-	-- ---------------------------------------------------------------------------
-	local function SortPages()
-		if type(wipe) == "function" then
-			wipe(UI._order)
-		else
-			for k in pairs(UI._order) do UI._order[k] = nil end
+	local function CopyTableSafe(src)
+		if type(_G.CopyTable) == "function" then
+			return _G.CopyTable(src)
 		end
-
-		for id, p in pairs(UI._pages) do
-			UI._order[#UI._order + 1] = { id = id, order = p.order or 9999 }
-		end
-
-		table.sort(UI._order, function(a, b)
-			if a.order == b.order then
-				return tostring(a.id) < tostring(b.id)
+		local out = {}
+		for k, v in pairs(src or {}) do
+			if type(v) == "table" then
+				local t = {}
+				for kk, vv in pairs(v) do t[kk] = vv end
+				out[k] = t
+			else
+				out[k] = v
 			end
-			return a.order < b.order
-		end)
+		end
+		return out
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Setzt einen Navigation-Context (z. B. guid), der von der Ziel-Page gelesen werden kann
-	--
-	--	@param ctx table|nil
-	--	@return nil
-	-- ---------------------------------------------------------------------------
+	local function GetWindowDB()
+		if not UI.db then
+			return DEFAULTS.profile.window
+		end
+		UI.db.profile.window = UI.db.profile.window or {}
+		return UI.db.profile.window
+	end
+
+	local function SaveActivePage(pageName)
+		if not UI.db then return end
+		local wdb = GetWindowDB()
+		wdb.activePage = tostring(pageName or "home")
+	end
+
+	local function GetActivePage()
+		local wdb = GetWindowDB()
+		return tostring(wdb.activePage or "home")
+	end
+
+	-- ###########################################################################
+	-- #	NAV CONTEXT (public)
+	-- ###########################################################################
+
 	function UI:SetNavigationContext(ctx)
 		self._navContext = (type(ctx) == "table" and ctx) or nil
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Gibt den letzten Navigation-Context zurück (oder nil)
-	--
-	--	@param consume boolean|nil
-	--		- wenn true: Context wird nach dem Lesen gelöscht
-	--	@return table|nil
-	-- ---------------------------------------------------------------------------
 	function UI:GetNavigationContext(consume)
 		local ctx = self._navContext
 		if consume == true then
@@ -198,56 +203,281 @@
 		end
 		return ctx
 	end
-	
-	-- ---------------------------------------------------------------------------
-	--	Gibt die Window-DB zurück (Profile)
-	--	@return table
-	-- ---------------------------------------------------------------------------
-	local function GetWindowDB()
-		if not UI.db then
-			return DEFAULTS.profile.window
+
+	-- ###########################################################################
+	-- #	HEADER / FOOTER API (frames + content groups)
+	-- ###########################################################################
+
+	function UI:GetHeaderFrame() return self._headerFrame end
+	function UI:GetFooterFrame() return self._footerFrame end
+	function UI:GetContentFrame() return self._content end
+
+	-- Diese beiden sind die "eigentlichen" Content-Container (SimpleGroup), die Pages/Extensions befüllen
+	function UI:GetHeaderContent() return self._headerContent end
+	function UI:GetFooterContent() return self._footerContent end
+
+	function UI:Header_Clear()
+		local g = self._headerContent
+		if g and g.ReleaseChildren then
+			g:ReleaseChildren()
+		end
+	end
+
+	function UI:Footer_Clear()
+		local g = self._footerContent
+		if g and g.ReleaseChildren then
+			g:ReleaseChildren()
+		end
+		self._statusLabelWidget = nil
+		self._statusLabelFS = nil
+	end
+
+	-- Status-Text: nutzt FontString (für Farbcodes), aber hängt als Label im FooterContent
+	function UI:SetStatusText(msg)
+		msg = tostring(msg or "")
+		if not AceGUI then return end
+
+		local g = self._footerContent
+		if not g then return end
+
+		if not self._statusLabelWidget then
+			local lbl = AceGUI:Create("Label")
+			lbl:SetFullWidth(true)
+
+			if lbl.label then
+				lbl.label:SetFontObject(_G.GameFontNormalSmallOutline)
+				lbl.label:SetJustifyH("LEFT")
+				lbl.label:SetJustifyV("MIDDLE")
+			end
+
+			g:AddChild(lbl)
+
+			self._statusLabelWidget = lbl
+			self._statusLabelFS = lbl.label
 		end
 
-		UI.db.profile.window = UI.db.profile.window or {}
-		return UI.db.profile.window
+		if self._statusLabelFS and self._statusLabelFS.SetText then
+			self._statusLabelFS:SetText(msg) -- Farbcodes ok
+		elseif self._statusLabelWidget and self._statusLabelWidget.SetText then
+			self._statusLabelWidget:SetText(msg)
+		end
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Speichert aktive Page in DB
-	--	@param pageName string
-	-- ---------------------------------------------------------------------------
-	local function SaveActivePage(pageName)
-		if not UI.db then return end
-		local wdb = GetWindowDB()
-		wdb.activePage = tostring(pageName or "home")
+	-- ###########################################################################
+	-- #	HEADER BUILDERS (3 Varianten) + Default
+	-- ###########################################################################
+
+	local function Header_EnsureLayout()
+		if UI._headerContent and UI._headerContent.SetLayout then
+			-- Header ist kein "Fill", weil mehrere Widgets horizontal rein sollen
+			UI._headerContent:SetLayout("Flow")
+		end
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Liest aktive Page aus DB (Fallback home)
-	--	@return string
-	-- ---------------------------------------------------------------------------
-	local function GetActivePage()
-		local wdb = GetWindowDB()
-		return tostring(wdb.activePage or "home")
+	-- 1) Icon + Text (typischer Header)
+	function UI:Header_BuildIconText(opts)
+		opts = opts or {}
+		if not AceGUI then return false end
+		if not self._headerContent then return false end
+
+		self:Header_Clear()
+		Header_EnsureLayout()
+
+		local iconPath = tostring(opts.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+		local text = tostring(opts.text or "")
+		local sub = tostring(opts.subtext or "")
+
+		local icon = AceGUI:Create("Icon")
+		icon:SetImage(iconPath)
+		icon:SetImageSize(18, 18)
+		icon:SetWidth(30)
+		icon:SetHeight(10)
+		self._headerContent:AddChild(icon)
+
+		local label = AceGUI:Create("Label")
+		label:SetText(text)
+		label:SetFullWidth(false)
+		label:SetWidth(380)
+		if label.label then
+			label.label:SetFontObject(_G.GameFontNormalOutline)
+			label.label:SetJustifyH("LEFT")
+			label.label:SetJustifyV("MIDDLE")
+		end
+		self._headerContent:AddChild(label)
+
+		if sub ~= "" then
+			local label2 = AceGUI:Create("Label")
+			label2:SetText(sub)
+			label2:SetFullWidth(false)
+			label2:SetWidth(520)
+			if label2.label then
+				label2.label:SetFontObject(_G.GameFontNormalSmallOutline)
+				label2.label:SetJustifyH("LEFT")
+				label2.label:SetJustifyV("MIDDLE")
+			end
+			self._headerContent:AddChild(label2)
+		end
+
+		return true
+	end
+
+	-- 2) Eingabefeld (Suche)
+	function UI:Header_BuildSearch(opts)
+		opts = opts or {}
+		if not AceGUI then return false end
+		if not self._headerContent then return false end
+
+		self:Header_Clear()
+		Header_EnsureLayout()
+
+		local iconPath = tostring(opts.icon or "Interface\\Icons\\INV_Misc_Search_01")
+		local placeholder = tostring(opts.placeholder or "Suche…")
+		local onChanged = opts.onChanged
+		local onEnter = opts.onEnter
+
+		local icon = AceGUI:Create("Icon")
+		icon:SetImage(iconPath)
+		icon:SetImageSize(16, 16)
+		icon:SetWidth(22)
+		icon:SetHeight(16)
+		self._headerContent:AddChild(icon)
+
+		local edit = AceGUI:Create("EditBox")
+		edit:SetLabel("") -- kein AceGUI-Label über dem Feld
+		edit:SetText("")
+		edit:SetWidth(360)
+		edit:DisableButton(true) -- kein "OK" Button
+		self._headerContent:AddChild(edit)
+
+		-- Hinweis (placeholder-like): wenn leer, zeig Text in Label daneben (robust, da AceGUI EditBox keinen echten placeholder hat)
+		local hint = AceGUI:Create("Label")
+		hint:SetText("|cffAAAAAA" .. placeholder .. "|r")
+		hint:SetFullWidth(false)
+		hint:SetWidth(260)
+		if hint.label then
+			hint.label:SetFontObject(_G.GameFontNormalSmallOutline)
+			hint.label:SetJustifyH("LEFT")
+			hint.label:SetJustifyV("MIDDLE")
+		end
+		self._headerContent:AddChild(hint)
+
+		local function UpdateHint()
+			if not hint or not hint.label then return end
+			local t = ""
+			if edit and edit.GetText then t = tostring(edit:GetText() or "") end
+			if TRIM(t) == "" then
+				hint.label:SetText("|cffAAAAAA" .. placeholder .. "|r")
+			else
+				hint.label:SetText("")
+			end
+		end
+
+		edit:SetCallback("OnTextChanged", function(_, _, val)
+			UpdateHint()
+			if type(onChanged) == "function" then
+				pcall(onChanged, tostring(val or ""), edit)
+			end
+		end)
+
+		edit:SetCallback("OnEnterPressed", function(_, _, val)
+			UpdateHint()
+			if type(onEnter) == "function" then
+				pcall(onEnter, tostring(val or ""), edit)
+			end
+		end)
+
+		UpdateHint()
+
+		-- speicher für späteren Zugriff (optional)
+		self._headerSearchBox = edit
+		return true
+	end
+
+	-- 3) Controls (3-4 Checkboxen / Buttons)
+	function UI:Header_BuildControls(opts)
+		opts = opts or {}
+		if not AceGUI then return false end
+		if not self._headerContent then return false end
+
+		self:Header_Clear()
+		Header_EnsureLayout()
+
+		local title = tostring(opts.title or "Filter / Aktionen")
+		local onToggleA = opts.onToggleA
+		local onToggleB = opts.onToggleB
+		local onToggleC = opts.onToggleC
+		local onClickMain = opts.onClickMain
+
+		local label = AceGUI:Create("Label")
+		label:SetText(title)
+		label:SetFullWidth(false)
+		label:SetWidth(220)
+		if label.label then
+			label.label:SetFontObject(_G.GameFontNormalOutline)
+			label.label:SetJustifyH("LEFT")
+			label.label:SetJustifyV("MIDDLE")
+		end
+		self._headerContent:AddChild(label)
+
+		local cbA = AceGUI:Create("CheckBox")
+		cbA:SetLabel(tostring(opts.labelA or "Online"))
+		cbA:SetValue(opts.valueA and true or false)
+		cbA:SetWidth(110)
+		cbA:SetCallback("OnValueChanged", function(_, _, val)
+			if type(onToggleA) == "function" then pcall(onToggleA, val and true or false) end
+		end)
+		self._headerContent:AddChild(cbA)
+
+		local cbB = AceGUI:Create("CheckBox")
+		cbB:SetLabel(tostring(opts.labelB or "Twinks"))
+		cbB:SetValue(opts.valueB and true or false)
+		cbB:SetWidth(110)
+		cbB:SetCallback("OnValueChanged", function(_, _, val)
+			if type(onToggleB) == "function" then pcall(onToggleB, val and true or false) end
+		end)
+		self._headerContent:AddChild(cbB)
+
+		local cbC = AceGUI:Create("CheckBox")
+		cbC:SetLabel(tostring(opts.labelC or "Sort A-Z"))
+		cbC:SetValue(opts.valueC and true or false)
+		cbC:SetWidth(120)
+		cbC:SetCallback("OnValueChanged", function(_, _, val)
+			if type(onToggleC) == "function" then pcall(onToggleC, val and true or false) end
+		end)
+		self._headerContent:AddChild(cbC)
+
+		local btn = AceGUI:Create("Button")
+		btn:SetText(tostring(opts.buttonText or "Aktualisieren"))
+		btn:SetWidth(140)
+		btn:SetCallback("OnClick", function()
+			if type(onClickMain) == "function" then pcall(onClickMain) end
+		end)
+		self._headerContent:AddChild(btn)
+
+		return true
+	end
+
+	-- Default Header: Addon Info
+	function UI:Header_BuildDefault()
+		local version = (GMS and GMS.VERSION) and tostring(GMS.VERSION) or ""
+		local sub = (version ~= "" and ("Version: |cffCCCCCC" .. version .. "|r")) or "UI Extension aktiv"
+		return self:Header_BuildIconText({
+			icon = "Interface\\Icons\\INV_Misc_Note_05",
+			text = "|cff03A9F4[GMS]|r " .. DISPLAY_NAME,
+			subtext = sub,
+		})
 	end
 
 	-- ###########################################################################
 	-- #	TITLE / PORTRAIT
 	-- ###########################################################################
 
-	-- ---------------------------------------------------------------------------
-	--	Setzt den Fenstertitel (Custom FontString)
-	--	@param text string|nil
-	-- ---------------------------------------------------------------------------
 	function UI:SetWindowTitle(text)
 		if self._frame and self._frame.GMS_TitleText then
 			self._frame.GMS_TitleText:SetText(tostring(text or ""))
 		end
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Setzt das Fenster-Icon (Portrait) sauber mit Fallback
-	-- ---------------------------------------------------------------------------
 	function UI:SetIconFallback()
 		if not self._frame then return end
 
@@ -268,26 +498,64 @@
 	end
 
 	-- ###########################################################################
-	-- #	ACEGUI EMBEDDING
+	-- #	REGIONS (AceGUI embedding)
 	-- ###########################################################################
 
-	-- ---------------------------------------------------------------------------
-	--	Released den AceGUI Root (falls vorhanden)
-	-- ---------------------------------------------------------------------------
-	function UI:ReleaseAceRoot()
-		if self._root and AceGUI then
-			AceGUI:Release(self._root)
+	function UI:INTERNAL_CreateRegion(regionKey, parent, points)
+		if not AceGUI or not parent then return nil end
+		self._regions = self._regions or {}
+
+		local r = self._regions[regionKey]
+		if r and r.frame and r.root then
+			return r.root
 		end
-		self._root = nil
+
+		local regionFrame = CreateFrame("Frame", nil, parent)
+		regionFrame:ClearAllPoints()
+		for i = 1, #points do
+			local p = points[i]
+			regionFrame:SetPoint(p[1], p[2], p[3], p[4], p[5])
+		end
+
+		regionFrame:SetFrameStrata(parent:GetFrameStrata())
+		regionFrame:SetFrameLevel(parent:GetFrameLevel() + 1)
+
+		local root = AceGUI:Create("SimpleGroup")
+		root:SetLayout("Fill")
+		root:SetFullWidth(true)
+		root:SetFullHeight(true)
+
+		root.frame:SetParent(regionFrame)
+		root.frame:ClearAllPoints()
+		root.frame:SetAllPoints(regionFrame)
+		root.frame:Show()
+
+		self._regions[regionKey] = { frame = regionFrame, root = root }
+		return root
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Erstellt den AceGUI Root (SimpleGroup Fill) im Content-Frame
-	-- ---------------------------------------------------------------------------
-	function UI:EnsureAceRoot()
-		if not AceGUI or not self._content then return end
+	function UI:GetRegionRoot(regionKey)
+		if not self._regions then return nil end
+		local r = self._regions[regionKey]
+		return r and r.root or nil
+	end
 
-		self:ReleaseAceRoot()
+	function UI:GetHeader() return self:GetRegionRoot("HEADER") end
+	function UI:GetContent() return self:GetRegionRoot("CONTENT") end
+	function UI:GetStatus() return self:GetRegionRoot("STATUS") end
+
+	function UI:ClearContentRegion()
+		local root = self:GetContent()
+		if root and root.ReleaseChildren then root:ReleaseChildren() end
+	end
+
+	-- ###########################################################################
+	-- #	FALLBACK CONTENT (works even without PAGES section)
+	-- ###########################################################################
+
+	function UI:EnsureFallbackContentRoot()
+		if self._fallbackRoot then return end
+		if not AceGUI or not self._content then return end
 
 		local root = AceGUI:Create("SimpleGroup")
 		root:SetLayout("Fill")
@@ -296,16 +564,46 @@
 		root.frame:SetAllPoints(self._content)
 		root.frame:Show()
 
-		self._root = root
+		self._fallbackRoot = root
+	end
+
+	function UI:RenderFallbackContent(root, hintText)
+		if not AceGUI or not root then return end
+
+		local title = AceGUI:Create("Label")
+		title:SetText("|cff03A9F4GMS|r – UI ist geladen.")
+		title:SetFontObject(_G.GameFontNormalLarge)
+		title:SetFullWidth(true)
+		root:AddChild(title)
+
+		local hint = AceGUI:Create("Label")
+		hint:SetText(tostring(hintText or "Pages-System ist nicht aktiv (oder entfernt)."))
+		hint:SetFullWidth(true)
+		root:AddChild(hint)
+
+		local resetBtn = AceGUI:Create("Button")
+		resetBtn:SetText("Fenster zurücksetzen (Position/Größe)")
+		resetBtn:SetFullWidth(true)
+		resetBtn:SetCallback("OnClick", function()
+			UI:ResetWindowToDefaults()
+		end)
+		root:AddChild(resetBtn)
+	end
+
+	if type(UI.Navigate) ~= "function" then
+		function UI:Navigate(_)
+			self:EnsureFallbackContentRoot()
+			if self._fallbackRoot and self._fallbackRoot.ReleaseChildren then
+				self._fallbackRoot:ReleaseChildren()
+				self:RenderFallbackContent(self._fallbackRoot, "Navigate() aktiv, aber PAGES-Section fehlt.")
+			end
+		end
 	end
 
 	-- ###########################################################################
 	-- #	PERSISTENZ (POSITION / SIZE)
 	-- ###########################################################################
 
-	-- ---------------------------------------------------------------------------
-	--	Wendet gespeicherte Fenster-Position + Größe an
-	-- ---------------------------------------------------------------------------
 	function UI:ApplyWindowState()
 		if not self._frame then return end
 
@@ -314,7 +612,7 @@
 		self._frame:ClearAllPoints()
 		self._frame:SetPoint(
 			wdb.point or "CENTER",
-			UIParent,
+			_G.UIParent,
 			wdb.relPoint or "CENTER",
 			wdb.x or 0,
 			wdb.y or 0
@@ -326,9 +624,6 @@
 		)
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Speichert aktuelle Fenster-Position + Größe in DB
-	-- ---------------------------------------------------------------------------
 	function UI:SaveWindowState()
 		if not self._frame or not self.db then return end
 
@@ -345,27 +640,21 @@
 		wdb.y = math.floor(((yOfs or 0) + 0.5))
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Setzt Fenster-DB auf Defaults zurück und wendet sie an
-	-- ---------------------------------------------------------------------------
 	function UI:ResetWindowToDefaults()
 		if not self.db then return end
-		self.db.profile.window = CopyTable(DEFAULTS.profile.window)
+		self.db.profile.window = CopyTableSafe(DEFAULTS.profile.window)
+
 		if self._frame then
 			self:ApplyWindowState()
-			self:Navigate(GetActivePage())
 			self:ReflowRightDock()
+			self:Navigate(self._page or GetActivePage())
 		end
 	end
 
 	-- ###########################################################################
-	-- #	RIGHT DOCK (TABS) + FRAMELEVEL FIX
+	-- #	RIGHT DOCK (TABS)
 	-- ###########################################################################
 
-	-- ---------------------------------------------------------------------------
-	--	Initialisiert RightDock State und Parent
-	--	@param parent Frame|nil
-	-- ---------------------------------------------------------------------------
 	function UI:RightDockEnsure(parent)
 		self._rightDock = self._rightDock or { inited = false, parent = nil, top = {}, bottom = {}, all = {} }
 		self._rightDock.top = self._rightDock.top or { order = {}, entries = {} }
@@ -379,10 +668,6 @@
 		self._rightDock.inited = true
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Setzt Slot-Backdrop
-	--	@param slot Frame
-	-- ---------------------------------------------------------------------------
 	function UI:RightDockApplySlotBackdrop(slot)
 		local cfg = self.RightDockConfig
 		if slot and slot.SetBackdrop and cfg and cfg.slotBackdrop then
@@ -390,11 +675,6 @@
 		end
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Setzt Selection-Glow an/aus
-	--	@param entry table
-	--	@param selected boolean
-	-- ---------------------------------------------------------------------------
 	function UI:RightDockSetSelected(entry, selected)
 		if entry and entry.button and entry.button._glow then
 			entry.button._glow:SetShown(selected and true or false)
@@ -404,12 +684,6 @@
 		end
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Markiert einen Dock-Eintrag als selected (optional exklusiv)
-	--	@param id string
-	--	@param selected boolean
-	--	@param exclusive boolean|nil
-	-- ---------------------------------------------------------------------------
 	function UI:SetRightDockSelected(id, selected, exclusive)
 		self:RightDockEnsure()
 		local entry = self._rightDock.all[id]
@@ -426,9 +700,6 @@
 		self:RightDockSetSelected(entry, selected)
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Reflow: Positioniert Slots oben/unten rechts
-	-- ---------------------------------------------------------------------------
 	function UI:ReflowRightDock()
 		if not self._frame then return end
 
@@ -481,12 +752,6 @@
 		placeBottom()
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Fügt ein RightDock Icon hinzu (lane top|bottom) + korrekte FrameLevel
-	--	@param lane string
-	--	@param opts table
-	--	@return table|nil entry
-	-- ---------------------------------------------------------------------------
 	function UI:AddRightDockIcon(lane, opts)
 		opts = opts or {}
 		lane = (lane == "bottom") and "bottom" or "top"
@@ -506,12 +771,11 @@
 
 		local parent = self._rightDock.parent
 		local parentStrata = parent and parent:GetFrameStrata() or "DIALOG"
-		local parentLevel = parent and parent:GetFrameLevel() or 20
+		local parentLevel  = parent and parent:GetFrameLevel() or 20
 
 		local slot = CreateFrame("Frame", nil, parent, "BackdropTemplate")
 		slot:SetSize(cfg.slotWidth, cfg.slotHeight)
 		slot:SetFrameStrata(parentStrata)
-		--GMS:Print(parentLevel)
 		slot:SetFrameLevel(parentLevel - 10)
 
 		self:RightDockApplySlotBackdrop(slot)
@@ -554,19 +818,19 @@
 
 		btn:SetScript("OnEnter", function()
 			if opts.tooltipTitle or opts.tooltipText then
-				GameTooltip:SetOwner(slot, "ANCHOR_LEFT")
+				_G.GameTooltip:SetOwner(slot, "ANCHOR_LEFT")
 				if opts.tooltipTitle and opts.tooltipTitle ~= "" then
-					GameTooltip:AddLine(opts.tooltipTitle, 1, 1, 1)
+					_G.GameTooltip:AddLine(opts.tooltipTitle, 1, 1, 1)
 				end
 				if opts.tooltipText and opts.tooltipText ~= "" then
-					GameTooltip:AddLine(opts.tooltipText, 0.9, 0.9, 0.9, true)
+					_G.GameTooltip:AddLine(opts.tooltipText, 0.9, 0.9, 0.9, true)
 				end
-				GameTooltip:Show()
+				_G.GameTooltip:Show()
 			end
 		end)
 
 		btn:SetScript("OnLeave", function()
-			GameTooltip:Hide()
+			_G.GameTooltip:Hide()
 		end)
 
 		btn:SetScript("OnClick", function(_, mouseButton)
@@ -592,25 +856,9 @@
 		return entry
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Shortcut: AddRightDockIconTop
-	--	@param opts table
-	-- ---------------------------------------------------------------------------
-	function UI:AddRightDockIconTop(opts)
-		return self:AddRightDockIcon("top", opts)
-	end
+	function UI:AddRightDockIconTop(opts) return self:AddRightDockIcon("top", opts) end
+	function UI:AddRightDockIconBottom(opts) return self:AddRightDockIcon("bottom", opts) end
 
-	-- ---------------------------------------------------------------------------
-	--	Shortcut: AddRightDockIconBottom
-	--	@param opts table
-	-- ---------------------------------------------------------------------------
-	function UI:AddRightDockIconBottom(opts)
-		return self:AddRightDockIcon("bottom", opts)
-	end
-
-	-- ---------------------------------------------------------------------------
-	--	Seed: Default Tabs (Start + Options) als Platzhalter
-	-- ---------------------------------------------------------------------------
 	function UI:SeedRightDockPlaceholders()
 		self:AddRightDockIconTop({
 			id = "home",
@@ -639,210 +887,153 @@
 	end
 
 	-- ###########################################################################
-	-- #	PAGES
+	-- #	PAGES (SELF-CONTAINED)
+	-- #	-> remove this whole block and UI still opens + shows fallback content
+	-- ###########################################################################
+	do
+		local function SortPages()
+			if type(_G.wipe) == "function" then
+				_G.wipe(UI._order)
+			else
+				for k in pairs(UI._order) do UI._order[k] = nil end
+			end
+
+			for id, p in pairs(UI._pages) do
+				UI._order[#UI._order + 1] = { id = id, order = p.order or 9999 }
+			end
+
+			table.sort(UI._order, function(a, b)
+				if a.order == b.order then
+					return tostring(a.id) < tostring(b.id)
+				end
+				return a.order < b.order
+			end)
+		end
+
+		function UI:RegisterPage(id, order, title, buildFn)
+			id = tostring(id or "")
+			if id == "" then return false end
+
+			self._pages[id] = {
+				order = tonumber(order) or 9999,
+				title = tostring(title or id),
+				build = buildFn,
+			}
+
+			SortPages()
+			return true
+		end
+
+		local function GetFirstPageId()
+			if UI._order and UI._order[1] and UI._order[1].id then
+				return UI._order[1].id
+			end
+			return nil
+		end
+
+		function UI:Navigate(id)
+			if not self._inited then
+				self:Init()
+			end
+
+			if not self._frame then
+				return
+			end
+
+			id = tostring(id or "")
+			if id == "" then
+				id = GetActivePage()
+			end
+
+			if id ~= "OPTIONS" and (not self._pages or not self._pages[id]) then
+				id = GetFirstPageId() or "home"
+			end
+
+			self._page = id
+			SaveActivePage(id)
+
+			local contentRoot = self:GetContent()
+			if not contentRoot then
+				self:EnsureFallbackContentRoot()
+				contentRoot = self._fallbackRoot
+			end
+
+			if contentRoot and contentRoot.ReleaseChildren then
+				contentRoot:ReleaseChildren()
+			end
+
+			if id == "OPTIONS" then
+				self:SetWindowTitle(DISPLAY_NAME .. "   |cffCCCCCCOptionen|r")
+
+				if AceGUI then
+					local holder = AceGUI:Create("SimpleGroup")
+					holder:SetLayout("Fill")
+					holder:SetFullWidth(true)
+					holder:SetFullHeight(true)
+					contentRoot:AddChild(holder)
+
+					if GMS.Options and type(GMS.Options.EmbedInto) == "function" then
+						SafeCall(GMS.Options.EmbedInto, GMS.Options, holder.frame)
+					else
+						local lbl = AceGUI:Create("Label")
+						lbl:SetFullWidth(true)
+						lbl:SetText("Options sind nicht verfügbar.")
+						contentRoot:AddChild(lbl)
+					end
+				end
+
+				self:SetRightDockSelected("options", true, true)
+				return
+			end
+
+			local p = self._pages and self._pages[id] or nil
+			self:SetWindowTitle(DISPLAY_NAME .. "   |cffCCCCCC" .. tostring((p and p.title) or id) .. "|r")
+
+			if p and type(p.build) == "function" then
+				SafeCall(p.build, contentRoot, id)
+			else
+				self:RenderFallbackContent(contentRoot, "Page nicht gefunden: " .. tostring(id))
+			end
+
+			self:SetRightDockSelected(id, true, true)
+		end
+	end
+
+	if type(UI.Navigate) ~= "function" then
+		function UI:Navigate(_)
+			self:EnsureFallbackContentRoot()
+			if self._fallbackRoot and self._fallbackRoot.ReleaseChildren then
+				self._fallbackRoot:ReleaseChildren()
+				self:RenderFallbackContent(self._fallbackRoot, "Pages-Section entfernt. (Fallback content)")
+			end
+		end
+	end
+
+	-- ###########################################################################
+	-- #	FRAME (ButtonFrameTemplate)
 	-- ###########################################################################
 
-	-- ---------------------------------------------------------------------------
-	--	Registriert eine Page
-	--	@param id string
-	--	@param order number
-	--	@param title string
-	--	@param buildFn function(root:AceGUIWidget, id:string)
-	-- ---------------------------------------------------------------------------
-	function UI:RegisterPage(id, order, title, buildFn)
-		if not id then return end
-		self._pages[id] = {
-			order = order or 9999,
-			title = title or tostring(id),
-			build = buildFn,
-		}
-		SortPages()
-	end
-
-	-- ---------------------------------------------------------------------------
-	--	Navigiert zu einer Page und baut den AceGUI Content
-	--	- Special: "OPTIONS" versucht GMS.Options:EmbedInto(root.frame)
-	--	@param id string
-	-- ---------------------------------------------------------------------------
-	function UI:Navigate(id)
-		if not self._inited then
-			self:Init()
-		end
-
-		if not self._frame then
-			return
-		end
-
-		id = tostring(id or "")
-		if id == "" then
-			id = GetActivePage()
-		end
-
-		if id ~= "OPTIONS" and not self._pages[id] then
-			if self._order[1] then
-				id = self._order[1].id
-			else
-				id = "home"
-			end
-		end
-
-		self._page = id
-		SaveActivePage(id)
-
-		self:EnsureAceRoot()
-		if not self._root then return end
-
-		self._root:ReleaseChildren()
-
-		if id == "OPTIONS" then
-			self:SetWindowTitle(DISPLAY_NAME .. "   |cffCCCCCCOptionen|r")
-
-			local holder = AceGUI:Create("SimpleGroup")
-			holder:SetLayout("Fill")
-			holder:SetFullWidth(true)
-			holder:SetFullHeight(true)
-			self._root:AddChild(holder)
-
-			if GMS.Options and GMS.Options.EmbedInto then
-				SafeCall(GMS.Options.EmbedInto, GMS.Options, holder.frame)
-			else
-				local lbl = AceGUI:Create("Label")
-				lbl:SetFullWidth(true)
-				lbl:SetText("Options sind nicht verfügbar.")
-				self._root:AddChild(lbl)
-			end
-
-			self:SetRightDockSelected("options", true, true)
-			return
-		end
-
-		local p = self._pages[id]
-		self:SetWindowTitle(DISPLAY_NAME .. "   |cffCCCCCC" .. tostring((p and p.title) or id) .. "|r")
-
-		if p and p.build then
-			SafeCall(p.build, self._root, id)
-		end
-
-		self:SetRightDockSelected(id, true, true)
-	end
-
-		-- ---------------------------------------------------------------------------
-	--	Erstellt eine Region (Frame) am MainFrame und embedded AceGUI Root (Fill)
-	--	@param regionKey string ("HEADER"|"CONTENT"|"STATUS")
-	--	@param parent Frame
-	--	@param points table
-	--	@return AceGUIWidget|nil root
-	-- ---------------------------------------------------------------------------
-	function UI:INTERNAL_CreateRegion(regionKey, parent, points)
+	local function CreateAceGroupInFrame(parent, layout)
 		if not AceGUI or not parent then return nil end
-		if not self._regions then return nil end
-	
-		local r = self._regions[regionKey]
-		if r and r.frame and r.root then
-			return r.root
-		end
-	
-		local regionFrame = CreateFrame("Frame", nil, parent)
-		regionFrame:ClearAllPoints()
-		for i = 1, #points do
-			local p = points[i]
-			regionFrame:SetPoint(p[1], p[2], p[3], p[4], p[5])
-		end
-	
-		regionFrame:SetFrameStrata(parent:GetFrameStrata())
-		regionFrame:SetFrameLevel(parent:GetFrameLevel() + 1)
-	
-		local root = AceGUI:Create("SimpleGroup")
-		root:SetLayout("Fill")
-		root:SetFullWidth(true)
-		root:SetFullHeight(true)
-	
-		root.frame:SetParent(regionFrame)
-		root.frame:ClearAllPoints()
-		root.frame:SetAllPoints(regionFrame)
-		root.frame:Show()
-	
-		self._regions[regionKey] = { frame = regionFrame, root = root }
-		return root
-	end
-	
-	-- ---------------------------------------------------------------------------
-	--	Gibt Region Root zurück (AceGUI SimpleGroup)
-	--	@param regionKey string
-	--	@return AceGUIWidget|nil
-	-- ---------------------------------------------------------------------------
-	function UI:GetRegionRoot(regionKey)
-		if not self._regions then return nil end
-		local r = self._regions[regionKey]
-		return r and r.root or nil
-	end
-	
-	-- ---------------------------------------------------------------------------
-	--	Gibt Region Frame zurück (Container Frame)
-	--	@param regionKey string
-	--	@return Frame|nil
-	-- ---------------------------------------------------------------------------
-	function UI:GetRegionFrame(regionKey)
-		if not self._regions then return nil end
-		local r = self._regions[regionKey]
-		return r and r.frame or nil
-	end
-	
-	-- ---------------------------------------------------------------------------
-	--	Convenience Getter
-	-- ---------------------------------------------------------------------------
-	function UI:GetHeader()
-		return self:GetRegionRoot("HEADER")
-	end
-	
-	function UI:GetContent()
-		return self:GetRegionRoot("CONTENT")
-	end
-	
-	function UI:GetStatus()
-		return self:GetRegionRoot("STATUS")
-	end
-	
-	-- ---------------------------------------------------------------------------
-	--	Leert nur CONTENT (Pagination hängt ausschließlich hier)
-	-- ---------------------------------------------------------------------------
-	function UI:ClearContentRegion()
-		local root = self:GetContent()
-		if root and root.ReleaseChildren then
-			root:ReleaseChildren()
-		end
-	end
-	
-	-- ---------------------------------------------------------------------------
-	--	Optional: Header/Status explizit leeren (nicht automatisch bei Navigate)
-	-- ---------------------------------------------------------------------------
-	function UI:ClearHeaderRegion()
-		local root = self:GetHeader()
-		if root and root.ReleaseChildren then
-			root:ReleaseChildren()
-		end
-	end
-	
-	function UI:ClearStatusRegion()
-		local root = self:GetStatus()
-		if root and root.ReleaseChildren then
-			root:ReleaseChildren()
-		end
+		layout = layout or "Fill"
+
+		local group = AceGUI:Create("SimpleGroup")
+		group:SetLayout(layout)
+		group:SetFullWidth(true)
+		group:SetFullHeight(true)
+
+		group.frame:SetParent(parent)
+		group.frame:ClearAllPoints()
+		group.frame:SetAllPoints(parent)
+		group.frame:Show()
+
+		return group
 	end
 
-
-	
-	-- ###########################################################################
-	-- #	FRAME (BUTTONFRAMETEMPLATE)
-	-- ###########################################################################
-
-	-- ---------------------------------------------------------------------------
-	--	Erstellt das Hauptfenster (einmalig)
-	-- ---------------------------------------------------------------------------
 	function UI:CreateFrame()
 		if self._frame then return end
 
-		local f = CreateFrame("Frame", FRAME_NAME, UIParent, "ButtonFrameTemplate")
+		local f = CreateFrame("Frame", FRAME_NAME, _G.UIParent, "ButtonFrameTemplate")
 		f:SetFrameStrata("DIALOG")
 		f:SetFrameLevel(200)
 		f:SetMovable(true)
@@ -869,16 +1060,13 @@
 			f:SetClampRectInsets(-15, 45, 15, -15)
 		end
 
-		if UISpecialFrames and type(tContains) == "function" and type(tinsert) == "function" then
-			if not tContains(UISpecialFrames, FRAME_NAME) then
-				tinsert(UISpecialFrames, FRAME_NAME)
+		if _G.UISpecialFrames and type(_G.tContains) == "function" and type(_G.tinsert) == "function" then
+			if not _G.tContains(_G.UISpecialFrames, FRAME_NAME) then
+				_G.tinsert(_G.UISpecialFrames, FRAME_NAME)
 			end
 		end
 
-		f:SetScript("OnDragStart", function(selfFrame)
-			selfFrame:StartMoving()
-		end)
-
+		f:SetScript("OnDragStart", function(selfFrame) selfFrame:StartMoving() end)
 		f:SetScript("OnDragStop", function(selfFrame)
 			selfFrame:StopMovingOrSizing()
 			UI:SaveWindowState()
@@ -898,15 +1086,14 @@
 		resize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
 		resize:SetFrameStrata(f:GetFrameStrata())
 		resize:SetFrameLevel(f:GetFrameLevel() + 20)
-		resize:SetScript("OnMouseDown", function()
-			f:StartSizing("BOTTOMRIGHT")
-		end)
+		resize:SetScript("OnMouseDown", function() f:StartSizing("BOTTOMRIGHT") end)
 		resize:SetScript("OnMouseUp", function()
 			f:StopMovingOrSizing()
 			UI:SaveWindowState()
 			UI:ReflowRightDock()
 		end)
 
+		-- Content (Inset-gebunden) bleibt wie gehabt
 		local inset = f.Inset or f.inset
 		local content = CreateFrame("Frame", nil, f)
 		content:SetFrameStrata(f:GetFrameStrata())
@@ -920,6 +1107,42 @@
 			content:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 14)
 		end
 
+		-- Header/Footer (am Frame f, bewusst entkoppelt vom Content)
+		local content_header = CreateFrame("Frame", nil, f)
+		content_header:SetHeight(30)
+		content_header:SetFrameStrata(f:GetFrameStrata())
+		content_header:SetFrameLevel(f:GetFrameLevel() + 1)
+		content_header:SetPoint("TOPLEFT",  f, "TOPLEFT",  60, -28)
+		content_header:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8,  -28)
+
+		local content_footer = CreateFrame("Frame", nil, f)
+		content_footer:SetHeight(20)
+		content_footer:SetFrameStrata(f:GetFrameStrata())
+		content_footer:SetFrameLevel(f:GetFrameLevel() + 1)
+		content_footer:SetPoint("BOTTOMLEFT",  f, "BOTTOMLEFT",  10, 0)
+		content_footer:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 0)
+
+		-- Register frames in UI state
+		UI._headerFrame = content_header
+		UI._footerFrame = content_footer
+		UI._content = content
+
+		-- Header/Footer content groups (SimpleGroup) -> das ist der "zurückgegebene Content"
+		local headerGroup = CreateAceGroupInFrame(content_header, "List")
+		local footerGroup = CreateAceGroupInFrame(content_footer, "Fill")
+
+		UI._headerContent = headerGroup
+		UI._footerContent = footerGroup
+
+		-- Default Header + Default Footer Status
+		if UI._headerContent then
+			UI:Header_BuildDefault()
+		end
+		if UI._footerContent then
+			UI:SetStatusText("Status: bereit")
+		end
+
+		-- Background fürs Content (wie gehabt)
 		local bg = content:CreateTexture(nil, "BACKGROUND")
 		bg:SetAllPoints(content)
 		bg:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
@@ -927,7 +1150,6 @@
 		bg:SetVertexColor(0, 0, 0, 0.30)
 
 		if f.CloseButton then
-			-- Sicher nach oben & sichtbar
 			f.CloseButton:ClearAllPoints()
 			f.CloseButton:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, 0)
 
@@ -935,13 +1157,10 @@
 			f.CloseButton:SetFrameLevel(f:GetFrameLevel() + 500)
 			f.CloseButton:Show()
 
-			-- WICHTIG: Texturen nach vorne holen (sonst "klickbar aber unsichtbar")
 			local n = f.CloseButton:GetNormalTexture()
 			if n then n:SetDrawLayer("OVERLAY", 7) end
-
 			local p = f.CloseButton:GetPushedTexture()
 			if p then p:SetDrawLayer("OVERLAY", 7) end
-
 			local h = f.CloseButton:GetHighlightTexture()
 			if h then h:SetDrawLayer("OVERLAY", 7) end
 
@@ -953,7 +1172,6 @@
 
 		f:SetScript("OnShow", function()
 			UI:SetIconFallback()
-
 			UI:RightDockEnsure(f)
 
 			if not UI._rightDockSeeded then
@@ -969,25 +1187,29 @@
 
 		f:SetScript("OnHide", function()
 			UI:SaveWindowState()
-			UI:ReleaseAceRoot()
 		end)
 
 		f:Hide()
 
-		self._frame = f
-		self._content = content
+		UI._frame = f
 
-		self:SetIconFallback()
-		self:SetWindowTitle(DISPLAY_NAME)
+		-- CONTENT Region (AceGUI) bleibt am Inset-Content hängen
+		UI._regions = UI._regions or {}
+		if AceGUI then
+			UI:INTERNAL_CreateRegion("CONTENT", content, {
+				{ "TOPLEFT", content, "TOPLEFT", 0, 0 },
+				{ "BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 0 },
+			})
+		end
+
+		UI:SetIconFallback()
+		UI:SetWindowTitle(DISPLAY_NAME)
 	end
 
 	-- ###########################################################################
 	-- #	PUBLIC API (INIT / SHOW / HIDE / TOGGLE / OPEN)
 	-- ###########################################################################
 
-	-- ---------------------------------------------------------------------------
-	--	Initialisiert UI (DB, Frame, Default-Page)
-	-- ---------------------------------------------------------------------------
 	function UI:Init()
 		if self._inited then return end
 		self._inited = true
@@ -999,68 +1221,31 @@
 		self:CreateFrame()
 		self:ApplyWindowState()
 
-		if not next(self._pages) then
+		if type(self.RegisterPage) == "function" and (not self._pages or not next(self._pages)) then
 			self:RegisterPage("home", 1, "Dashboard", function(root)
-				if not AceGUI then
-					return
-				end
-
-				local title = AceGUI:Create("Label")
-				title:SetText("|cff03A9F4GMS|r – UI ist geladen.")
-				title:SetFontObject(GameFontNormalLarge)
-				title:SetFullWidth(true)
-				root:AddChild(title)
-
-				local hint = AceGUI:Create("Label")
-				hint:SetText("Tabs rechts: Klick öffnet Pages. Pages registrieren: GMS.UI:RegisterPage(id, order, title, buildFn)")
-				hint:SetFullWidth(true)
-				root:AddChild(hint)
-
-				local resetBtn = AceGUI:Create("Button")
-				resetBtn:SetText("Fenster zurücksetzen (Position/Größe)")
-				resetBtn:SetFullWidth(true)
-				resetBtn:SetCallback("OnClick", function()
-					UI:ResetWindowToDefaults()
-				end)
-				root:AddChild(resetBtn)
+				self:RenderFallbackContent(root, "Tabs rechts: Klick öffnet Pages. Pages registrieren: GMS.UI:RegisterPage(id, order, title, buildFn)")
 			end)
-
-			SortPages()
 		end
 
 		Log("DEBUG", "UI Init complete", nil)
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Zeigt das Fenster an (Init falls nötig)
-	-- ---------------------------------------------------------------------------
 	function UI:Show()
-		if not self._inited then
-			self:Init()
-		end
+		if not self._inited then self:Init() end
 		if self._frame then
 			self:ApplyWindowState()
 			self._frame:Show()
 		end
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Versteckt das Fenster
-	-- ---------------------------------------------------------------------------
 	function UI:Hide()
-		if self._frame then
-			self._frame:Hide()
-		end
+		if self._frame then self._frame:Hide() end
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Toggle (Init falls nötig)
-	-- ---------------------------------------------------------------------------
 	function UI:Toggle(pageName)
-		if not self._inited then
-			self:Init()
-		end
+		if not self._inited then self:Init() end
 		if not self._frame then return end
+
 		if self._frame:IsShown() then
 			self:Hide()
 		else
@@ -1068,60 +1253,37 @@
 		end
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Öffnet UI und navigiert optional zu pageName
-	--	- Idempotent: wenn offen, nur Page wechseln
-	--	@param pageName string|nil
-	-- ---------------------------------------------------------------------------
 	function UI:Open(pageName)
-		local wasShown = (self._frame and self._frame:IsShown()) and true or false
-		self:Show()
 		local desired = (type(pageName) == "string" and pageName ~= "" and pageName) or (self._page or GetActivePage())
-		if wasShown then
-			self:Navigate(desired)
-		else
-			self:Navigate(desired)
-		end
+		self:Show()
+		self:Navigate(desired)
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Schließt UI (alias Hide)
-	-- ---------------------------------------------------------------------------
 	function UI:Close()
 		self:Hide()
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Prüft ob UI bereit ist
-	--	@return boolean
-	-- ---------------------------------------------------------------------------
 	function UI:IsReady()
 		return self._inited == true and self._frame ~= nil
 	end
 
-	-- ============================================================================
-	--	PATCH: UI registriert "/gms ui"
-	--	- Ace-only Standard: Zugriff auf SlashCommands über GMS:GetModule(...)
-	--	- Kein _G, kein addonTable
-	-- ============================================================================
+	-- ###########################################################################
+	-- #	SLASH COMMAND INTEGRATION (your SlashCommands EXTENSION)
+	-- ###########################################################################
 
-	-- ---------------------------------------------------------------------------
-	--	Registriert den SubCommand "ui" bei SlashCommands (falls verfügbar)
-	--	@return nil
-	-- ---------------------------------------------------------------------------
 	function UI:RegisterUiSlashCommandIfAvailable()
-		local SlashCommands = GMS:GetModule("SLASHCOMMANDS", true)
-		if not SlashCommands or type(SlashCommands.API_RegisterSubCommand) ~= "function" then
+		if type(GMS.Slash_RegisterSubCommand) ~= "function" then
 			Log("WARN", "SlashCommands not available; cannot register /gms ui", nil)
 			return
 		end
 
-		SlashCommands:API_RegisterSubCommand("ui", function(rest)
-			UI:Open((type(rest) == "string" and rest ~= "" and rest) or nil)
+		GMS:Slash_RegisterSubCommand("ui", function(rest)
+			rest = TRIM(rest)
+			UI:Open((rest ~= "" and rest) or nil)
 		end, {
 			help = "Öffnet die GMS UI (/gms ui [page])",
 			alias = { "open" },
-			owner = MODULE_NAME,
+			owner = EXT_NAME,
 		})
 
 		Log("INFO", "Registered subcommand: /gms ui", nil)
@@ -1131,22 +1293,15 @@
 	-- #	GMS BRIDGE API
 	-- ###########################################################################
 
-	-- ---------------------------------------------------------------------------
-	--	Prüft, ob UI bereit ist
-	--	@return boolean
-	-- ---------------------------------------------------------------------------
 	function GMS:UI_IsReady()
-		return type(GMS.UI) == "table" and type(GMS.UI.Open) == "function" and (GMS.UI.IsReady == nil or GMS.UI:IsReady() == true)
+		return type(GMS.UI) == "table"
+			and type(GMS.UI.Open) == "function"
+			and (GMS.UI.IsReady == nil or GMS.UI:IsReady() == true)
 	end
 
-	-- ---------------------------------------------------------------------------
-	--	Öffnet UI über GMS
-	--	@param pageName string|nil
-	--	@return boolean
-	-- ---------------------------------------------------------------------------
 	function GMS:UI_Open(pageName)
 		if not self:UI_IsReady() then
-			if GMS.UI and GMS.UI.Init then
+			if GMS.UI and type(GMS.UI.Init) == "function" then
 				GMS.UI:Init()
 			end
 		end
@@ -1161,28 +1316,10 @@
 	end
 
 	-- ###########################################################################
-	-- #	LIFECYCLE
+	-- #	BOOTSTRAP (extension style)
 	-- ###########################################################################
 
-	-- ---------------------------------------------------------------------------
-	--	Ace Lifecycle: OnInitialize
-	-- ---------------------------------------------------------------------------
-	function UI:OnInitialize()
-		self:Init()
-	end
-
-	-- ---------------------------------------------------------------------------
-	--	Ace Lifecycle: OnEnable
-	-- ---------------------------------------------------------------------------
-	function UI:OnEnable()
-		Log("DEBUG", "UI OnEnable", nil)
-		self:RegisterUiSlashCommandIfAvailable()
-	end
-
-	-- ---------------------------------------------------------------------------
-	--	Ace Lifecycle: OnDisable
-	-- ---------------------------------------------------------------------------
-	function UI:OnDisable()
-		Log("DEBUG", "UI OnDisable", nil)
-		self:Hide()
+	if not UI._bootstrapped then
+		UI._bootstrapped = true
+		UI:RegisterUiSlashCommandIfAvailable()
 	end

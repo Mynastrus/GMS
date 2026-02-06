@@ -48,15 +48,6 @@
 	local Unpack = (table and table.unpack) or _G.unpack
 
 	-- ---------------------------------------------------------------------------
-	--	GMS Namespace vorbereiten (kann aus ModulStates.lua schon existieren)
-	-- ---------------------------------------------------------------------------
-
-	local PreGMS = _G.GMS
-	if type(PreGMS) ~= "table" then
-		PreGMS = nil
-	end
-
-	-- ---------------------------------------------------------------------------
 	--	GMS AceAddon erstellen ODER aus Registry holen
 	-- ---------------------------------------------------------------------------
 
@@ -77,27 +68,6 @@
 	end
 
 	-- ---------------------------------------------------------------------------
-	--	Migration: wenn _G.GMS vorher nur Namespace-Table war (PreGMS),
-	--	übernehmen wir wichtige Felder (z.B. STATES) in das AceAddon-Objekt.
-	-- ---------------------------------------------------------------------------
-
-	if PreGMS and PreGMS ~= GMS then
-		if PreGMS.STATES and not GMS.STATES then
-			GMS.STATES = PreGMS.STATES
-		end
-	end
-
-	-- ---------------------------------------------------------------------------
-	--	STATES: aus frühem Namespace übernehmen oder anlegen
-	-- ---------------------------------------------------------------------------
-
-	if PreGMS and type(PreGMS) == "table" and type(PreGMS.STATES) == "table" then
-		GMS.STATES = PreGMS.STATES
-	else
-		GMS.STATES = GMS.STATES or {}
-	end
-	
-	-- ---------------------------------------------------------------------------
 	--	Global Export (bewusst erlaubt) für /run & Debugging
 	--	=> _G.GMS muss das AceAddon-Objekt sein (für /run GMS:XY()).
 	-- ---------------------------------------------------------------------------
@@ -113,9 +83,9 @@
 	--	Konstanten / Meta
 	-- ---------------------------------------------------------------------------
 
-	GMS.ADDON_NAME			= "GMS"
+	GMS.ADDON_NAME			= ADDON_NAME
 	GMS.INTERNAL_ADDON_NAME	= tostring(ADDON_NAME or "GMS")
-	GMS.CHAT_PREFIX			= "|cff03A9F4GMS|r"
+	GMS.CHAT_PREFIX			= "|cff03A9F4[GMS]|r"
 	GMS.LOG_BUFFER_MAX		= 5000
 
 	-- ============================================================================
@@ -123,23 +93,12 @@
 	-- ============================================================================
 
 	-- ---------------------------------------------------------------------------
-	--	Gibt Text direkt in den Chat aus (ohne Prefix)
-	-- ---------------------------------------------------------------------------
-
-	local function INTERNAL_PrintToChat(text)
-		local chat = _G.DEFAULT_CHAT_FRAME
-		if chat and chat.AddMessage then
-			chat:AddMessage(tostring(text))
-		end
-	end
-
-	-- ---------------------------------------------------------------------------
 	--	GMS:Print
 	-- ---------------------------------------------------------------------------
 
 	function GMS:Print(msg)
 		if msg == nil then return end
-		INTERNAL_PrintToChat(string.format("%s: %s", tostring(self.CHAT_PREFIX), tostring(msg)))
+		print(string.format("%s  %s", tostring(self.CHAT_PREFIX), tostring(msg)))
 	end
 
 	-- ---------------------------------------------------------------------------

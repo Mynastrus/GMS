@@ -1,5 +1,5 @@
 ## Interface: 120000
-## Title: GMS
+## Title: Guild Management System (GMS)
 ## Author: Ritschy-Norgannon (EU)
 ## Version: 1.0.0
 ## DefaultState: enabled
@@ -53,27 +53,11 @@ Libs\LibDeflate\lib.xml
 # Core (Boot + Infrastruktur)
 # =========================
 
-Core\ModulStates.lua
-
-
-GMS.lua
-
+Core\Core.lua
 
 Core\SlashCommands.lua
-Core\Logging.lua
-
-Core/UI.lua
-
-
-
-
-#Core\Init.lua
-#Core\Util.lua
-#Core\AddonLoader.lua
-#Core\DB.lua
-#Core\Modules.lua
-#Core\Events.lua
-#Core\Options.lua
+Core\ChatLinks.lua
+Core\UI.lua
 
 # =========================
 # Internal Modules (Feature-Module)
