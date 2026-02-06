@@ -38,6 +38,16 @@
 	CharInfo._integrated     = CharInfo._integrated or false
 	CharInfo._ticker         = CharInfo._ticker or nil
 
+	-- DB for account-wide character logging
+	CharInfo._db = CharInfo._db or nil
+
+	local DB_DEFAULTS = {
+		profile = {},
+		global = {
+			characters = {}, -- table: { name_full = { name, realm, guid, timestamp } }
+		}
+	}
+
 	-- Icon: nimm einen, der bei dir existiert (du kannst ihn per /run testen)
 	local ICON = "Interface\\Icons\\INV_Misc_Head_Human_01"
 
@@ -403,7 +413,50 @@
 	-- #	ACE LIFECYCLE
 	-- ###########################################################################
 
+	function CharInfo:InitializeCharacterLog()
+		-- Register or fetch DB namespace for character logging
+		if GMS and GMS.DB and type(GMS.DB.RegisterModule) == "function" then
+			local ok, ns = pcall(function()
+				return GMS.DB:RegisterModule("CHARINFO", DB_DEFAULTS, nil)
+			end)
+			if ok and ns then
+				self._db = ns
+			end
+		end
+
+		-- Fallback: use direct DB access if available
+		if not self._db and GMS and GMS.db then
+			local ok, ns = pcall(function()
+				return GMS.db:RegisterNamespace("CHARINFO", DB_DEFAULTS)
+			end)
+			if ok and ns then
+				self._db = ns
+			end
+		end
+
+		-- Auto-log current player to account-wide character table
+		if self._db and self._db.global and type(self._db.global) == "table" then
+			self._db.global.characters = self._db.global.characters or {}
+
+			local snap = GetPlayerSnapshot()
+			if snap and snap.name_full then
+				self._db.global.characters[snap.name_full] = {
+					name = snap.name,
+					realm = snap.realm,
+					guid = snap.guid,
+					timestamp = _G.time and _G.time() or 0,
+					class = snap.class,
+					level = snap.level,
+				}
+				Log("INFO", "Character logged: " .. snap.name_full, nil)
+			end
+		end
+	end
+
 	function CharInfo:OnEnable()
+		-- Initialize and log character to account-wide DB
+		SafeCall(CharInfo.InitializeCharacterLog, CharInfo)
+
 		if self:TryIntegrateWithUIIfAvailable() then return end
 		self:StartIntegrationTicker()
 
