@@ -7,7 +7,7 @@
 	--	- Optional: STATES Updates (wenn vorhanden)
 	-- ============================================================================
 
-	local LibStub = LibStub
+	local LibStub = _G.LibStub
 	if not LibStub then return end
 
 	local AceAddon = LibStub("AceAddon-3.0", true)

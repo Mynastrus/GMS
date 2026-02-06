@@ -19,7 +19,7 @@
 	--	- Override: im Link als 3. Segment: |HGMS:ACTION:TITLE|h...|h
 	-- ============================================================================
 
-	local LibStub = LibStub
+	local LibStub = _G.LibStub
 	if not LibStub then return end
 
 	local AceAddon = LibStub("AceAddon-3.0", true)
