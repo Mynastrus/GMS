@@ -1323,3 +1323,21 @@
 		UI._bootstrapped = true
 		UI:RegisterUiSlashCommandIfAvailable()
 	end
+
+
+		-- ###########################################################################
+	-- #	DEV: AUTO OPEN AFTER RELOAD (test only)
+	-- ###########################################################################
+
+	UI._devAutoOpen = UI._devAutoOpen or true
+
+	if not UI._devAutoOpenHooked then
+		UI._devAutoOpenHooked = true
+
+		local f = CreateFrame("Frame")
+		f:RegisterEvent("PLAYER_LOGIN")
+		f:SetScript("OnEvent", function()
+			if not UI._devAutoOpen then return end
+			UI:Open(GetActivePage())
+		end)
+	end
