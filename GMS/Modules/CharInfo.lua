@@ -25,7 +25,7 @@
 	-- ###########################################################################
 
 	local MODULE_NAME = "CHARINFO"
-	local DISPLAY_NAME = "Char Info"
+	local DISPLAY_NAME = "Charakterinformationen"
 
 	local CharInfo = GMS:GetModule(MODULE_NAME, true)
 	if not CharInfo then

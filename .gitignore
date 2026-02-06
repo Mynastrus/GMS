@@ -1,0 +1,58 @@
+# =========================================================
+# WoW / AddOn spezifisch
+# =========================================================
+
+## WoW Backup / Temp Dateien
+*.toc.bak
+*.toc.old
+*.bak
+*.tmp
+*.log
+
+## WoW AddOn Packager / Release
+.pkgmeta
+.releases/
+.wago/
+.wowmeta
+
+## Curse / Wago Artefakte
+*.zip
+*.bat
+
+# =========================================================
+# VS Code
+# =========================================================
+
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+
+.luarc.json
+GMS.code-workspace
+
+# =========================================================
+# Betriebssystem
+# =========================================================
+
+## Windows
+Thumbs.db
+desktop.ini
+
+## macOS
+.DS_Store
+
+# =========================================================
+# Git
+# =========================================================
+
+## Merge / Rebase Reste
+*.orig
+
+# =========================================================
+# Optional: lokale Build / Test Ordner
+# =========================================================
+
+_dist/
+_build/
+_out/
