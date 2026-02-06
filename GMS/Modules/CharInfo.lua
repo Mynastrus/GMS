@@ -26,20 +26,20 @@
 	local MODULE_NAME	= "CHARINFO"
 	local DISPLAY_NAME	= "Charakterinformationen"
 
-	local CharInfo = GMS:GetModule(MODULE_NAME, true)
-	if not CharInfo then
-		CharInfo = GMS:NewModule(MODULE_NAME, "AceEvent-3.0")
+	local CHARINFO = GMS:GetModule(MODULE_NAME, true)
+	if not CHARINFO then
+		CHARINFO = GMS:NewModule(MODULE_NAME, "AceEvent-3.0")
 	end
 
-	GMS[MODULE_NAME] = CharInfo
+	GMS[MODULE_NAME] = CHARINFO
 
-	CharInfo._pageRegistered = CharInfo._pageRegistered or false
-	CharInfo._dockRegistered = CharInfo._dockRegistered or false
-	CharInfo._integrated     = CharInfo._integrated or false
-	CharInfo._ticker         = CharInfo._ticker or nil
+	CHARINFO._pageRegistered = CHARINFO._pageRegistered or false
+	CHARINFO._dockRegistered = CHARINFO._dockRegistered or false
+	CHARINFO._integrated     = CHARINFO._integrated or false
+	CHARINFO._ticker         = CHARINFO._ticker or nil
 
 	-- DB for account-wide character logging
-	CharInfo._db = CharInfo._db or nil
+	CHARINFO._db = CHARINFO._db or nil
 
 	local DB_DEFAULTS = {
 		profile = {},
@@ -198,7 +198,7 @@
 	-- #	UI PAGE
 	-- ###########################################################################
 
-	function CharInfo:TryRegisterPage()
+	function CHARINFO:TryRegisterPage()
 		if self._pageRegistered then return true end
 
 		local ui = UIRef()
@@ -345,7 +345,7 @@
 	-- #	RIGHT DOCK ICON
 	-- ###########################################################################
 
-	function CharInfo:TryRegisterDockIcon()
+	function CHARINFO:TryRegisterDockIcon()
 		if self._dockRegistered then return true end
 
 		local ui = UIRef()
@@ -376,7 +376,7 @@
 	-- #	INTEGRATION / RETRY
 	-- ###########################################################################
 
-	function CharInfo:TryIntegrateWithUIIfAvailable()
+	function CHARINFO:TryIntegrateWithUIIfAvailable()
 		if self._integrated then return true end
 
 		local okPage = self:TryRegisterPage()
@@ -392,7 +392,7 @@
 		return false
 	end
 
-	function CharInfo:StartIntegrationTicker()
+	function CHARINFO:StartIntegrationTicker()
 		if self._integrated then return end
 		if self._ticker then return end
 		if not _G.C_Timer or type(_G.C_Timer.NewTicker) ~= "function" then return end
@@ -400,10 +400,10 @@
 		local tries = 0
 		self._ticker = _G.C_Timer.NewTicker(0.50, function()
 			tries = tries + 1
-			if CharInfo:TryIntegrateWithUIIfAvailable() then return end
+			if CHARINFO:TryIntegrateWithUIIfAvailable() then return end
 			if tries >= 30 then
-				if CharInfo._ticker and CharInfo._ticker.Cancel then CharInfo._ticker:Cancel() end
-				CharInfo._ticker = nil
+				if CHARINFO._ticker and CHARINFO._ticker.Cancel then CHARINFO._ticker:Cancel() end
+				CHARINFO._ticker = nil
 				Log("WARN", "UI not available (gave up retries)", nil)
 			end
 		end)
@@ -413,7 +413,7 @@
 	-- #	ACE LIFECYCLE
 	-- ###########################################################################
 
-	function CharInfo:InitializeCharacterLog()
+	function CHARINFO:InitializeCharacterLog()
 		-- Register or fetch DB namespace for character logging
 		if GMS and GMS.DB and type(GMS.DB.RegisterModule) == "function" then
 			local ok, ns = pcall(function()
@@ -453,9 +453,9 @@
 		end
 	end
 
-	function CharInfo:OnEnable()
+	function CHARINFO:OnEnable()
 		-- Initialize and log character to account-wide DB
-		SafeCall(CharInfo.InitializeCharacterLog, CharInfo)
+		SafeCall(CHARINFO.InitializeCharacterLog, CHARINFO)
 
 		if self:TryIntegrateWithUIIfAvailable() then return end
 		self:StartIntegrationTicker()
@@ -467,7 +467,7 @@
 		end
 	end
 
-	function CharInfo:OnDisable()
+	function CHARINFO:OnDisable()
 		if self._ticker and self._ticker.Cancel then self._ticker:Cancel() end
 		self._ticker = nil
 	end
