@@ -462,7 +462,7 @@
 
 		if type(self.RegisterEvent) == "function" then
 			self:RegisterEvent("PLAYER_LOGIN", function()
-				SafeCall(CharInfo.TryIntegrateWithUIIfAvailable, CharInfo)
+				SafeCall(CHARINFO.TryIntegrateWithUIIfAvailable, CHARINFO)
 			end)
 		end
 	end
