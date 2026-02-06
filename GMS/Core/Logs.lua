@@ -20,7 +20,7 @@
 	--		TRACE, DEBUG, INFO, WARN, ERROR
 	-- ============================================================================
 
-	local LibStub = LibStub
+	local LibStub = _G.LibStub
 	if not LibStub then return end
 
 	local AceAddon = LibStub("AceAddon-3.0", true)
@@ -530,7 +530,27 @@
 	-- ###########################################################################
 
 	LOGS:Init()
-	RegisterLogsUI()
-	RegisterSlash()
 
-	GMS:Debug("LOGS Extension geladen")
+	-- Register UI and slash commands when the addon is enabled.
+	-- Attempt immediate registration (harmless no-ops if dependencies missing),
+	-- and also hook into GMS:OnEnable to ensure registration when the addon fully enables.
+	pcall(RegisterLogsUI)
+	pcall(RegisterSlash)
+
+	do
+		local oldOnEnable = GMS.OnEnable
+		if type(oldOnEnable) ~= "function" then oldOnEnable = nil end
+
+		function GMS:OnEnable(...)
+			if oldOnEnable then
+				pcall(oldOnEnable, self, ...)
+			end
+
+			-- try again when addon is enabled; Register* functions are idempotent
+			pcall(RegisterLogsUI)
+			pcall(RegisterSlash)
+		end
+	end
+
+	-- Use Info so the default minLevel (INFO) will show it
+	GMS:Info("LOGS Extension loaded")
