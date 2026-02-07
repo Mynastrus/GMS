@@ -29,6 +29,37 @@
 
 	local GMS = AceAddon:GetAddon("GMS", true)
 	if not GMS then return end
+	-- ###########################################################################
+	-- #	GLOBAL LOG BUFFER + LOCAL LOGGER
+	-- ###########################################################################
+
+	GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
+
+	local function now()
+		return GetTime and GetTime() or nil
+	end
+
+	-- Local-only logger for this file
+	local function LOCAL_LOCAL_LOG(level, source, msg, ...)
+		local entry = {
+			time   = now(),
+			level  = tostring(level or "INFO"),
+			source = tostring(source or "UI"),
+			msg    = tostring(msg or ""),
+		}
+
+		local n = select("#", ...)
+		if n > 0 then
+			entry.data = {}
+			for i = 1, n do
+				entry.data[i] = select(i, ...)
+			end
+		end
+
+		GMS._LOG_BUFFER[#GMS._LOG_BUFFER + 1] = entry
+	end
+
+	-- ###########################################################################
 
 	GMS:RegisterExtension({
 		key = "UI",
@@ -129,14 +160,6 @@
 	-- #	INTERNAL HELPERS
 	-- ###########################################################################
 
-	local function Log(level, message, context)
-		if type(GMS.Printf) == "function" then
-			GMS:Printf("[%s] %s", tostring(level or "INFO"), tostring(message or ""))
-		elseif type(GMS.Print) == "function" then
-			GMS:Print(string.format("[%s] %s", tostring(level or "INFO"), tostring(message or "")))
-		end
-	end
-
 	local function TRIM(s)
 		s = tostring(s or "")
 		s = string.gsub(s, "^%s+", "")
@@ -148,10 +171,7 @@
 		if type(fn) ~= "function" then return false end
 		local ok, err = pcall(fn, ...)
 		if not ok then
-			Log("ERROR", "UI error", { err = tostring(err) })
-			if type(GMS.Print) == "function" then
-				GMS:Print("UI Fehler: " .. tostring(err))
-			end
+			LOCAL_LOG("ERROR", "UI", "UI error", tostring(err))
 		end
 		return ok
 	end
@@ -605,11 +625,8 @@
 	end
 
 		-- Notify that UI core finished loading
-		pcall(function()
-			if GMS and type(GMS.Print) == "function" then
-				GMS:Print("UI wurde geladen")
-			end
-		end)
+		LOCAL_LOG("INFO", "UI", "UI file loaded")
+
 
 	-- ###########################################################################
 	-- #	PERSISTENZ (POSITION / SIZE)
@@ -1250,7 +1267,7 @@
 			end)
 		end
 
-		Log("DEBUG", "UI Init complete", nil)
+		LOCAL_LOG("DEBUG", "UI Init complete", nil)
 	end
 
 	function UI:Show()
@@ -1296,7 +1313,7 @@
 
 	function UI:RegisterUiSlashCommandIfAvailable()
 		if type(GMS.Slash_RegisterSubCommand) ~= "function" then
-			Log("WARN", "SlashCommands not available; cannot register /gms ui", nil)
+			LOCAL_LOG("WARN", "SlashCommands not available; cannot register /gms ui", nil)
 			return
 		end
 
@@ -1309,7 +1326,7 @@
 			owner = EXT_NAME,
 		})
 
-		Log("INFO", "Registered subcommand: /gms ui", nil)
+		LOCAL_LOG("INFO", "Registered subcommand: /gms ui", nil)
 	end
 
 	-- ###########################################################################
@@ -1330,7 +1347,7 @@
 		end
 
 		if not self:UI_IsReady() then
-			Log("WARN", "GMS:UI_Open failed (UI not ready)", { pageName = pageName })
+			LOCAL_LOG("WARN", "GMS:UI_Open failed (UI not ready)", { pageName = pageName })
 			return false
 		end
 
@@ -1365,4 +1382,6 @@
 		end)
 	end
 
+	LOCAL_LOG("INFO", "UI", "EXT:UI READY")
 	GMS:SetReady("EXT:UI")
+	
