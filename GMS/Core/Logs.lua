@@ -1,11 +1,13 @@
 	-- ============================================================================
 	--	GMS/Core/Logs.lua
 	--	LOGS EXTENSION (no GMS:NewModule)
-	--	- Ringbuffer (persistiert via AceDB)
+	--	- Ringbuffer (persistiert via AceDB, falls verfügbar)
 	--	- GMS:LOG(level, module, msg, ...)
 	--	- Speichert IMMER Timestamp, Level, Module, Message (+ optionale Data lesbar/JSON-ish)
 	--	- UI Page (AceGUI) + Live-Prepend wenn offen
 	--	- Slash: /gms logs -> öffnet LOGS Page
+	--	- UI Integration: kompatibel mit GMS.UI:RegisterPage(id, order, title, buildFn)
+	--	- RightDock: nutzt GMS.UI:AddRightDockIconTop(...)
 	-- ============================================================================
 
 	local LibStub = LibStub
@@ -27,8 +29,10 @@
 		local buf = GMS._LOG_BUFFER
 		if not buf then return end
 
-		local t = 0
-		if type(time) == "function" then
+		local t = nil
+		if type(GetTime) == "function" then
+			t = GetTime()
+		elseif type(time) == "function" then
 			t = time()
 		end
 
@@ -40,6 +44,8 @@
 			args = { ... },
 		}
 	end
+
+	-- ###########################################################################
 
 	GMS:RegisterExtension({
 		key = "LOGS",
@@ -53,7 +59,7 @@
 	if GMS.LOGS then return end
 
 	local AceDB = LibStub("AceDB-3.0", true)
-	local AceGUI = LibStub("AceGUI-3.0", true) -- optional (UI page)
+	local AceGUI = LibStub("AceGUI-3.0", true) -- optional
 
 	local LOGS = {}
 	GMS.LOGS = LOGS
@@ -84,10 +90,11 @@
 	}
 
 	LOGS._db = nil
-	LOGS._entries = nil -- points to profile.entries
+	LOGS._entries = nil
 	LOGS._ui = nil
 
 	LOGS._uiRegistered = false
+	LOGS._dockRegistered = false
 	LOGS._slashRegistered = false
 
 	-- ###########################################################################
@@ -230,40 +237,12 @@
 	local function trimToMax()
 		local p = profile()
 		local max = clamp(tonumber(p.maxEntries) or 400, 50, 5000)
-		p.maxEntries = max -- persist clamp result
+		p.maxEntries = max
 		local entries = LOGS._entries
 		if not entries then return end
 		while #entries > max do
 			table.remove(entries, 1)
 		end
-	end
-
-	-- ###########################################################################
-	-- #	UI BRIDGE (robust)
-	-- ###########################################################################
-
-	local function UI_RegisterPage(name, buildFn, opts)
-		if GMS.UI and type(GMS.UI.RegisterPage) == "function" then
-			return GMS.UI:RegisterPage(name, buildFn, opts)
-		end
-		if type(GMS.UI_RegisterPage) == "function" then
-			return GMS:UI_RegisterPage(name, buildFn, opts)
-		end
-	end
-
-	local function UI_RegisterDockIcon(name, opts)
-		if GMS.UI and type(GMS.UI.RegisterRightDockIcon) == "function" then
-			return GMS.UI:RegisterRightDockIcon(name, opts)
-		end
-		if type(GMS.UI_RegisterRightDockIcon) == "function" then
-			return GMS:UI_RegisterRightDockIcon(name, opts)
-		end
-	end
-
-	local function UI_Open(name)
-		if type(GMS.UI_Open) == "function" then return GMS:UI_Open(name) end
-		if type(GMS.UI_OpenPage) == "function" then return GMS:UI_OpenPage(name) end
-		if GMS.UI and type(GMS.UI.Open) == "function" then return GMS.UI:Open(name) end
 	end
 
 	-- ###########################################################################
@@ -285,12 +264,11 @@
 		else
 			LOCAL_LOG("WARN", "LOGS", "AceDB not available; fallback to in-memory only")
 		end
-		-- fallback: in-memory only
 		LOGS._db = nil
 		LOGS._entries = {}
 	end
 
-	-- PUBLIC CONFIG (persisted)
+	-- PUBLIC CONFIG
 	function GMS:Logs_SetLevel(level) profile().minLevel = toLevel(level) end
 	function GMS:Logs_GetLevel() return profile().minLevel end
 	function GMS:Logs_EnableChat(v) profile().chat = not not v end
@@ -344,7 +322,7 @@
 		}
 
 		-- mirror into global buffer (project standard)
-		LOCAL_LOG(entry.level, mod ~= "" and mod or "GMS", base, ...)
+		LOCAL_LOG(entry.level, (mod ~= "" and mod or "GMS"), base, ...)
 
 		local entries = LOGS._entries
 		if not entries then
@@ -368,6 +346,44 @@
 		if LOGS._ui and LOGS._ui.prependEntry and allowForOutput(lvl) then
 			pcall(LOGS._ui.prependEntry, entry)
 		end
+	end
+
+	-- ###########################################################################
+	-- #	UI BRIDGE (match GMS/Core/UI.lua API)
+	-- ###########################################################################
+
+	local function UI_Open(name)
+		if type(GMS.UI_Open) == "function" then return GMS:UI_Open(name) end
+		if GMS.UI and type(GMS.UI.Open) == "function" then return GMS.UI:Open(name) end
+		if GMS.UI and type(GMS.UI.Navigate) == "function" then
+			GMS.UI:Show()
+			return GMS.UI:Navigate(name)
+		end
+	end
+
+	local function UI_RegisterPage_Compat(pageId, order, title, buildFn)
+		if not (GMS.UI and type(GMS.UI.RegisterPage) == "function") then return false end
+		return GMS.UI:RegisterPage(pageId, order, title, buildFn) == true
+	end
+
+	local function UI_RegisterDockIcon_Compat(pageId, title)
+		if not (GMS.UI and type(GMS.UI.AddRightDockIconTop) == "function") then return false end
+		GMS.UI:AddRightDockIconTop({
+			id = pageId,
+			order = 90,
+			selectable = true,
+			icon = "Interface\\Icons\\INV_Misc_Note_05",
+			tooltipTitle = title or pageId,
+			tooltipText = "Logs anzeigen",
+			onClick = function()
+				if GMS.UI and type(GMS.UI.Navigate) == "function" then
+					GMS.UI:Navigate(pageId)
+				else
+					UI_Open(pageId)
+				end
+			end,
+		})
+		return true
 	end
 
 	-- ###########################################################################
@@ -398,18 +414,17 @@
 
 	local function RegisterLogsUI()
 		if LOGS._uiRegistered then return true end
-		if not AceGUI then return false end
-		if type(UI_RegisterPage) ~= "function" then return false end
-
-		-- UI system not ready yet?
-		local canPage = false
-		if (GMS.UI and type(GMS.UI.RegisterPage) == "function") or (type(GMS.UI_RegisterPage) == "function") then
-			canPage = true
+		if not AceGUI then
+			LOCAL_LOG("WARN", "LOGS", "AceGUI not available; cannot register Logs UI page")
+			return false
 		end
-		if not canPage then return false end
 
-		local PAGE_NAME = "LOGS"
-		local DISPLAY_NAME = "Logs"
+		if not (GMS.UI and type(GMS.UI.RegisterPage) == "function") then
+			return false
+		end
+
+		local PAGE_ID = "LOGS"
+		local TITLE = "Logs"
 
 		local function BuildPage(root)
 			root:SetLayout("List")
@@ -420,7 +435,7 @@
 			header:SetLayout("Flow")
 			root:AddChild(header)
 
-			local scroller -- forward decl
+			local scroller
 
 			local btnRefresh = AceGUI:Create("Button")
 			btnRefresh:SetText("Refresh")
@@ -465,7 +480,6 @@
 					RenderAll()
 					return
 				end
-				-- prepend widget
 				local w = BuildLogRow(entry)
 				table.insert(scroller.children, 1, w)
 				w.frame:SetParent(scroller.content)
@@ -500,27 +514,43 @@
 			RenderAll()
 		end
 
-		UI_RegisterPage(PAGE_NAME, BuildPage, { title = DISPLAY_NAME })
-		if type(UI_RegisterDockIcon) == "function" then
-			pcall(UI_RegisterDockIcon, PAGE_NAME, { title = DISPLAY_NAME })
+		local okPage = UI_RegisterPage_Compat(PAGE_ID, 90, TITLE, BuildPage)
+		if not okPage then return false end
+
+		if not LOGS._dockRegistered then
+			LOGS._dockRegistered = UI_RegisterDockIcon_Compat(PAGE_ID, TITLE) == true
 		end
 
 		LOGS._uiRegistered = true
-		LOCAL_LOG("INFO", "LOGS", "UI page registered")
+		LOCAL_LOG("INFO", "LOGS", "UI page registered (UI:RegisterPage compat)")
 		return true
 	end
 
 	-- ###########################################################################
-	-- #	SLASH: /gms logs
+	-- #	SLASH: /gms logs (match project slash API)
 	-- ###########################################################################
 
 	local function RegisterLogsSlash()
 		if LOGS._slashRegistered then return true end
 
+		if type(GMS.Slash_RegisterSubCommand) == "function" then
+			GMS:Slash_RegisterSubCommand("logs", function()
+				UI_Open("LOGS")
+			end, {
+				help = "/gms logs - öffnet die Logs UI",
+				alias = { "log" },
+				owner = "LOGS",
+			})
+
+			LOGS._slashRegistered = true
+			LOCAL_LOG("INFO", "LOGS", "Slash subcommand registered via GMS:Slash_RegisterSubCommand")
+			return true
+		end
+
+		-- fallback: if old SlashCommands table exists
 		local SC = GMS.SlashCommands
 		if type(SC) ~= "table" then return false end
 
-		-- 1) preferred API styles (if your SlashCommands extension provides them)
 		if type(SC.RegisterSubCommand) == "function" then
 			SC:RegisterSubCommand("logs", {
 				title = "Logs",
@@ -528,18 +558,10 @@
 				handler = function() UI_Open("LOGS") end,
 			})
 			LOGS._slashRegistered = true
-			LOCAL_LOG("INFO", "LOGS", "Slash subcommand registered via RegisterSubCommand")
+			LOCAL_LOG("INFO", "LOGS", "Slash subcommand registered via SlashCommands:RegisterSubCommand")
 			return true
 		end
 
-		if type(SC.Register) == "function" then
-			SC:Register("logs", function() UI_Open("LOGS") end, "Öffnet die Logs UI")
-			LOGS._slashRegistered = true
-			LOCAL_LOG("INFO", "LOGS", "Slash subcommand registered via Register")
-			return true
-		end
-
-		-- 2) fallback: SUB table pattern (passt zu deinem bisherigen Stil)
 		SC.SUB = SC.SUB or {}
 		SC.SUB.logs = SC.SUB.logs or {}
 		SC.SUB.logs.title = SC.SUB.logs.title or "Logs"
@@ -554,22 +576,28 @@
 	end
 
 	-- ###########################################################################
-	-- #	DEFERRED BOOT (UI/SlashCommands können später laden)
+	-- #	DEFERRED BOOT
 	-- ###########################################################################
+
+	local function TryAll()
+		RegisterLogsUI()
+		RegisterLogsSlash()
+	end
 
 	LOGS:Init()
 
-	GMS:OnReady("EXT:UI", function()
-		RegisterLogsUI()
-	end)
+	-- try immediate
+	TryAll()
 
-	GMS:OnReady("EXT:SLASH", function()
-		RegisterLogsSlash()
-	end)
+	-- try again when UI/Slash become ready
+	if type(GMS.OnReady) == "function" then
+		GMS:OnReady("EXT:UI", function()
+			RegisterLogsUI()
+		end)
+		GMS:OnReady("EXT:SLASH", function()
+			RegisterLogsSlash()
+		end)
+	end
 
-	-- wenn Logs selbst "bereit" sein soll (API steht nach Init):
 	GMS:SetReady("EXT:LOGS")
-
-	-- ###########################################################################
-	-- #	BOOT
-	-- ###########################################################################
+	LOCAL_LOG("INFO", "LOGS", "EXT:LOGS READY")
