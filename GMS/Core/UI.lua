@@ -122,14 +122,10 @@
 	-- ###########################################################################
 
 	local function Log(level, message, context)
-		if level == "ERROR" then
-			if type(GMS.LOG_Error) == "function" then GMS:LOG_Error(EXT_NAME, message, context) end
-		elseif level == "WARN" then
-			if type(GMS.LOG_Warn) == "function" then GMS:LOG_Warn(EXT_NAME, message, context) end
-		elseif level == "DEBUG" then
-			if type(GMS.LOG_Debug) == "function" then GMS:LOG_Debug(EXT_NAME, message, context) end
-		else
-			if type(GMS.LOG_Info) == "function" then GMS:LOG_Info(EXT_NAME, message, context) end
+		if type(GMS.Printf) == "function" then
+			GMS:Printf("[%s] %s", tostring(level or "INFO"), tostring(message or ""))
+		elseif type(GMS.Print) == "function" then
+			GMS:Print(string.format("[%s] %s", tostring(level or "INFO"), tostring(message or "")))
 		end
 	end
 

@@ -11,8 +11,12 @@
 
 	local AceDB = LibStub("AceDB-3.0", true)
 	if not AceDB then
-		if _G.GMS and type(_G.GMS.LOG_Warn) == "function" then
-			_G.GMS:LOG_Warn("DB", "AceDB-3.0 not available; skipping DB init", nil)
+		if _G.GMS then
+			if type(_G.GMS.LOG) == "function" then
+				_G.GMS:LOG("WARN", "DB", "AceDB-3.0 not available; skipping DB init")
+			elseif type(_G.GMS.Print) == "function" then
+				_G.GMS:Print("AceDB-3.0 not available; skipping DB init")
+			end
 		end
 		return
 	end
@@ -49,7 +53,11 @@
 
 	function GMS:InitializeStandardDatabases(force)
 		if not AceDB then
-			self:LOG_Warn("DB", "AceDB-3.0 not available", nil)
+			if type(self.LOG) == "function" then
+				self:LOG("WARN", "DB", "AceDB-3.0 not available")
+			else
+				self:Print("AceDB-3.0 not available")
+			end
 			return false
 		end
 
@@ -61,7 +69,11 @@
 		self.db = self.db or AceDB:New("GMS_DB", DB_DEFAULTS, true)
 		self.logging_db = self.logging_db or AceDB:New("GMS_Logging_DB", LOGGING_DEFAULTS, true)
 
-		self:LOG_Info("DB", "Standard databases initialized", nil)
+		if type(self.LOG) == "function" then
+			self:LOG("INFO", "DB", "Standard databases initialized")
+		else
+			self:Print("Standard databases initialized")
+		end
 		return true
 	end
 

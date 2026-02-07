@@ -50,14 +50,10 @@
 	--	@param context table|nil
 	-- ---------------------------------------------------------------------------
 	local function LOG(level, message, context)
-		if level == "ERROR" then
-			if GMS and GMS.LOG_Error then GMS:LOG_Error(MODULE_NAME, message, context) end
-		elseif level == "WARN" then
-			if GMS and GMS.LOG_Warn then GMS:LOG_Warn(MODULE_NAME, message, context) end
-		elseif level == "DEBUG" then
-			if GMS and GMS.LOG_Debug then GMS:LOG_Debug(MODULE_NAME, message, context) end
-		else
-			if GMS and GMS.LOG_Info then GMS:LOG_Info(MODULE_NAME, message, context) end
+		if type(GMS.Printf) == "function" then
+			GMS:Printf("[%s] %s", tostring(level or "INFO"), tostring(message or ""))
+		elseif type(GMS.Print) == "function" then
+			GMS:Print(string.format("[%s] %s", tostring(level or "INFO"), tostring(message or "")))
 		end
 	end
 

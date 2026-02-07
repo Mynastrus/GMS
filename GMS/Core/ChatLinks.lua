@@ -265,8 +265,10 @@
 		local fn = ChatLinks.CLICK_HANDLERS[action]
 		if type(fn) == "function" then
 			local ok, err = pcall(fn, action, link, text, button)
-			if not ok and type(GMS.LOG_Error) == "function" then
-				GMS:LOG_Error("CHATLINKS", "Click handler error", { action = action, error = tostring(err) })
+			if not ok then
+				if type(GMS.LOG) == "function" then
+					GMS:LOG("ERROR", "CHATLINKS", "Click handler error: %s", tostring(err))
+				end
 			end
 		end
 	end

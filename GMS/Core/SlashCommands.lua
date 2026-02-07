@@ -173,13 +173,12 @@
 
 		local ok, err = pcall(entry.handlerFn, tostring(arguments), tostring(fullInput), tostring(subCommand))
 		if not ok then
-			if type(GMS.LOG_Error) == "function" then
-				GMS:LOG_Error(EXT_NAME, "Subcommand handler error", { sub = subCommand, error = tostring(err) })
-			end
-			if type(GMS.Printf) == "function" then
-				GMS:Printf("Error executing '%s'. Check logs.", tostring(subCommand))
+			if type(GMS.LOG) == "function" then
+				GMS:LOG("ERROR", EXT_NAME, "Subcommand handler error: %s", tostring(err))
+			elseif type(GMS.Printf) == "function" then
+				GMS:Printf("%s: Subcommand handler error (%s)", EXT_NAME, tostring(err))
 			elseif type(GMS.Print) == "function" then
-				GMS:Print("Error executing '" .. tostring(subCommand) .. "'. Check logs.")
+				GMS:Print(EXT_NAME .. ": Subcommand handler error: " .. tostring(err))
 			end
 		end
 	end
@@ -191,15 +190,23 @@
 	function GMS:Slash_RegisterSubCommand(key, handlerFn, opts)
 		local normalizedKey = NormalizeSubCommandKey(key)
 		if normalizedKey == "" then
-			if type(GMS.LOG_Error) == "function" then
-				GMS:LOG_Error(EXT_NAME, "RegisterSubCommand failed: empty key", { key = key })
+			if type(GMS.LOG) == "function" then
+				GMS:LOG("ERROR", EXT_NAME, "RegisterSubCommand failed: empty key")
+			elseif type(GMS.Printf) == "function" then
+				GMS:Printf("%s: %s", EXT_NAME, "RegisterSubCommand failed: empty key")
+			elseif type(GMS.Print) == "function" then
+				GMS:Print("RegisterSubCommand failed: empty key")
 			end
 			return false
 		end
 
 		if type(handlerFn) ~= "function" then
-			if type(GMS.LOG_Error) == "function" then
-				GMS:LOG_Error(EXT_NAME, "RegisterSubCommand failed: handlerFn not function", { key = normalizedKey, handlerType = type(handlerFn) })
+			if type(GMS.LOG) == "function" then
+				GMS:LOG("ERROR", EXT_NAME, "RegisterSubCommand failed: handlerFn not function (key=%s, type=%s)", tostring(normalizedKey), tostring(type(handlerFn)))
+			elseif type(GMS.Printf) == "function" then
+				GMS:Printf("%s: %s", EXT_NAME, "RegisterSubCommand failed: handlerFn not function")
+			elseif type(GMS.Print) == "function" then
+				GMS:Print("RegisterSubCommand failed: handlerFn not function")
 			end
 			return false
 		end
@@ -214,9 +221,7 @@
 			owner = tostring(opts.owner or ""),
 		}
 
-		if type(GMS.LOG_Info) == "function" then
-			GMS:LOG_Info(EXT_NAME, "Subcommand registered", { key = normalizedKey, owner = opts.owner, help = opts.help })
-		end
+		-- Subcommand registered
 
 		return true
 	end
@@ -228,9 +233,7 @@
 		if SlashCommands.SUBCOMMAND_REGISTRY[normalizedKey] then
 			SlashCommands.SUBCOMMAND_REGISTRY[normalizedKey] = nil
 
-			if type(GMS.LOG_Info) == "function" then
-				GMS:LOG_Info(EXT_NAME, "Subcommand unregistered", { key = normalizedKey })
-			end
+			-- Subcommand unregistered
 
 			return true
 		end
