@@ -26,7 +26,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.2",
+	VERSION      = "1.3.3",
 }
 
 -- ###########################################################################
@@ -218,127 +218,29 @@ function EQUIP:_StartStorePolling()
 end
 
 -- ###########################################################################
--- #	EQUIPMENT SCAN
+-- #	EQUIPMENT SCAN (minimal: only item links + owner guid)
 -- ###########################################################################
 
 local INV_SLOTS = { 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 }
 
-local function _parseItemStringFromLink(link)
-	if type(link) ~= "string" then return nil end
-	return link:match("item:[%-:%d]+")
+local function _getPlayerGuid()
+	return UnitGUID and UnitGUID("player") or nil
 end
 
-local function _splitItemString(itemString)
-	if type(itemString) ~= "string" then return nil end
-	local parts, idx = {}, 0
-	for token in itemString:gmatch("([^:]+)") do
-		idx = idx + 1
-		parts[idx] = token
-	end
-	return parts
-end
-
-local function _extractEnchantAndGems(link)
-	local itemString = _parseItemStringFromLink(link)
-	if not itemString then return nil, nil end
-
-	local parts = _splitItemString(itemString)
-	if not parts or #parts < 3 then return nil, nil end
-
-	local enchantId = tonumber(parts[3]) or nil
-
-	local g1 = tonumber(parts[4] or "") or nil
-	local g2 = tonumber(parts[5] or "") or nil
-	local g3 = tonumber(parts[6] or "") or nil
-	local g4 = tonumber(parts[7] or "") or nil
-
-	local gems = nil
-	if g1 or g2 or g3 or g4 then
-		gems = { g1, g2, g3, g4 }
-	end
-
-	return enchantId, gems
-end
-
-local function _getPlayerIdentity()
-	local name, realm = nil, nil
-
-	if UnitFullName then
-		local n, r = UnitFullName("player")
-		if n and n ~= "" then name = n end
-		if r and r ~= "" then realm = r end
-	end
-	if not name and UnitName then
-		name = UnitName("player")
-	end
-
-	local class = nil
-	if UnitClass then
-		local _, classTag = UnitClass("player")
-		class = classTag
-	end
-
-	local race = nil
-	if UnitRace then
-		local raceName = UnitRace("player")
-		race = raceName
-	end
-
-	local level = UnitLevel and UnitLevel("player") or nil
-	local guid  = UnitGUID  and UnitGUID("player")  or nil
-
-	return guid, name, realm, class, race, level
-end
-
-local function _scanPlayerEquipment()
-	local guid, name, realm, class, race, level = _getPlayerIdentity()
-
-	local equippedIlvl, overallIlvl = nil, nil
-	if type(GetAverageItemLevel) == "function" then
-		local eq, total = GetAverageItemLevel()
-		if eq and eq > 0 then equippedIlvl = eq end
-		if total and total > 0 then overallIlvl = total end
-	end
+local function _scanPlayerEquipmentMinimal()
+	local guid = _getPlayerGuid()
 
 	local slots = {}
-
 	for _, slotId in ipairs(INV_SLOTS) do
-		local itemId = (GetInventoryItemID and GetInventoryItemID("player", slotId)) or nil
-		local link   = (GetInventoryItemLink and GetInventoryItemLink("player", slotId)) or nil
-
-		local itemLevel = nil
-		if link and type(GetDetailedItemLevelInfo) == "function" then
-			local ilvl = GetDetailedItemLevelInfo(link)
-			if ilvl and ilvl > 0 then itemLevel = ilvl end
-		end
-
-		local enchantId, gems = nil, nil
-		if link then
-			enchantId, gems = _extractEnchantAndGems(link)
-		end
-
-		slots[slotId] = {
-			slotId  = slotId,
-			itemId  = itemId,
-			link    = link,
-			ilvl    = itemLevel,
-			enchant = enchantId,
-			gems    = gems,
-		}
+		local link = (GetInventoryItemLink and GetInventoryItemLink("player", slotId)) or nil
+		-- store only link (or nil if empty)
+		slots[slotId] = link
 	end
 
 	return {
-		guid         = guid,
-		name         = name,
-		realm        = realm,
-		class        = class,
-		race         = race,
-		level        = level,
-		ilvl         = equippedIlvl or overallIlvl,
-		ilvlEquipped = equippedIlvl,
-		ilvlOverall  = overallIlvl,
-		slots        = slots,
-		ts           = _nowEpoch(),
+		guid  = guid,
+		ts    = _nowEpoch(),
+		slots = slots,
 	}
 end
 
@@ -361,10 +263,8 @@ function EQUIP:SaveSnapshot(snapshot)
 		return false
 	end
 
-	-- mindestens irgendein Key sollte existieren
-	local guidOrName = snapshot.guid or snapshot.name
-	if not guidOrName or guidOrName == "" then
-		LOCAL_LOG("WARN", "SaveSnapshot: missing character identity")
+	if not snapshot.guid or snapshot.guid == "" then
+		LOCAL_LOG("WARN", "SaveSnapshot: missing guid")
 		return false
 	end
 
@@ -372,10 +272,13 @@ function EQUIP:SaveSnapshot(snapshot)
 		snapshot.ts = _nowEpoch()
 	end
 
+	if type(snapshot.slots) ~= "table" then
+		snapshot.slots = {}
+	end
+
 	local store, isSv = _getStore()
 	store.snapshot = snapshot
 
-	-- Falls SV inzwischen verfügbar ist: MEM -> SV migrieren
 	self:_TryEnsureStore("save")
 
 	LOCAL_LOG("INFO", "Snapshot saved", isSv and "SV.global.characters" or "MEM")
@@ -397,7 +300,7 @@ function EQUIP:_ScheduleScan(delaySec, reason)
 	_schedule(delaySec or 0, function()
 		if token ~= self._scanToken then return end
 
-		local snap = _scanPlayerEquipment()
+		local snap = _scanPlayerEquipmentMinimal()
 		local ok = self:SaveSnapshot(snap)
 
 		if ok then
