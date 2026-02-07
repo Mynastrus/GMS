@@ -16,6 +16,14 @@
 	local GMS = AceAddon:GetAddon("GMS", true)
 	if not GMS then return end
 
+	GMS:RegisterExtension({
+		key = "SLASH",
+		name = "SlashCommands",
+		displayName = "Slash Commands",
+		version = 1,
+		desc = "/gms Command & Subcommands",
+	})
+
 	-- Für RegisterChatCommand muss GMS AceConsole gemixt haben
 	if type(GMS.RegisterChatCommand) ~= "function" then
 		return
@@ -276,9 +284,11 @@
         })
 	end
 
--- Notify that SlashCommands core finished loading
-pcall(function()
-	if GMS and type(GMS.Print) == "function" then
-		GMS:Print("SlashCommands wurde geladen")
-	end
-end)
+	-- Notify that SlashCommands core finished loading
+	pcall(function()
+		if GMS and type(GMS.Print) == "function" then
+			GMS:Print("SlashCommands wurde geladen")
+		end
+	end)
+
+	GMS:SetReady("EXT:SLASH")

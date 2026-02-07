@@ -17,6 +17,14 @@
 	local GMS = AceAddon:GetAddon("GMS", true)
 	if not GMS then return end
 
+	GMS:RegisterExtension({
+		key = "LOGS",
+		name = "LOGS",
+		displayName = "Logs",
+		version = 1,
+		desc = "Logging + UI page",
+	})
+
 	-- Prevent double-load
 	if GMS.LOGS then return end
 
@@ -512,29 +520,20 @@
 	-- #	DEFERRED BOOT (UI/SlashCommands können später laden)
 	-- ###########################################################################
 
-	function LOGS:TryWire()
-		local okUI = RegisterLogsUI()
-		local okSlash = RegisterLogsSlash()
+	LOGS:Init()
 
-		-- keep trying until both are wired
-		if okUI and okSlash then return end
+	GMS:OnReady("EXT:UI", function()
+		RegisterLogsUI()
+	end)
 
-		if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-			C_Timer.After(0.5, function()
-				if GMS and GMS.LOGS and GMS.LOGS.TryWire then
-					pcall(GMS.LOGS.TryWire, GMS.LOGS)
-				end
-			end)
-		end
-	end
+	GMS:OnReady("EXT:SLASH", function()
+		RegisterLogsSlash()
+	end)
+
+	-- wenn Logs selbst "bereit" sein soll (API steht nach Init):
+	GMS:SetReady("EXT:LOGS")
 
 	-- ###########################################################################
 	-- #	BOOT
 	-- ###########################################################################
 
-	LOGS:Init()
-	LOGS:TryWire()
-
-	if type(GMS.Print) == "function" then
-		pcall(function() GMS:Print("Logs.lua geladen") end)
-	end

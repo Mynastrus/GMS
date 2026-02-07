@@ -30,6 +30,14 @@
 	local GMS = AceAddon:GetAddon("GMS", true)
 	if not GMS then return end
 
+	GMS:RegisterExtension({
+		key = "UI",
+		name = "UI",
+		displayName = "UI",
+		version = 1,
+		desc = "UI Shell & Page Handling",
+	})
+
 	local AceGUI = LibStub("AceGUI-3.0", true)
 	local AceDB  = LibStub("AceDB-3.0", true)
 
@@ -1356,3 +1364,5 @@
 			UI:Open(GetActivePage())
 		end)
 	end
+
+	GMS:SetReady("EXT:UI")

@@ -54,6 +54,7 @@ Libs\LibDeflate\lib.xml
 # =========================
 
 Core\Core.lua
+Core\ModuleStates.lua
 Core\Database.lua
 
 Core\SlashCommands.lua
