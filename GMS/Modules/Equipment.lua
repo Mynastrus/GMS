@@ -143,7 +143,7 @@ function EQUIP:OnInitialize()
 			displayName = METADATA.DISPLAY_NAME,
 			version     = METADATA.VERSION,
 			readyKey    = "MOD:" .. MODULE_NAME,
-			state       = "init",
+			state       = { status = "init" },
 		}
 	end
 end
