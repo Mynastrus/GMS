@@ -29,18 +29,19 @@
 
 	local GMS = AceAddon:GetAddon("GMS", true)
 	if not GMS then return end
-	-- ###########################################################################
+	
+		-- ###########################################################################
 	-- #	GLOBAL LOG BUFFER + LOCAL LOGGER
 	-- ###########################################################################
 
 	GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
 
 	local function now()
-		return GetTime and GetTime() or nil
+		return type(GetTime) == "function" and GetTime() or nil
 	end
 
-	-- Local-only logger for this file
-	local function LOCAL_LOCAL_LOG(level, source, msg, ...)
+	-- Local-only logger for this file (project standard name)
+	local function LOCAL_LOG(level, source, msg, ...)
 		local entry = {
 			time   = now(),
 			level  = tostring(level or "INFO"),
