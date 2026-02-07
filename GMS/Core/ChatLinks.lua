@@ -1,22 +1,6 @@
 	-- ============================================================================
 	--	GMS/Core/ChatLinks.lua
 	--	ChatLinks EXTENSION
-	--	- Registry: Action -> { title, label, hint, tooltip, flags }
-	--	- Builder: GMS:ChatLink_Build(action, labelOverride, tooltipTitleOverride)
-	--	- Hover: Tooltip auf ChatFrame OnHyperlinkEnter/Leave (robust close)
-	--	- Click: SetItemRef dispatch (optional)
-	--
-	--	FEATURE: Tooltip-Inhalte pro Action wahlweise ein/ausblendbar:
-	--		flags = {
-	--			showLabel = true/false,
-	--			showHint = true/false,
-	--			showTooltipLines = true/false,
-	--			showActionFallback = true/false,
-	--		}
-	--
-	--	Tooltip-Titel:
-	--	- Default: entry.title
-	--	- Override: im Link als 3. Segment: |HGMS:ACTION:TITLE|h...|h
 	-- ============================================================================
 
 	local LibStub = _G.LibStub
@@ -29,6 +13,50 @@
 	if not GMS then return end
 
 	-- ###########################################################################
+	-- #	LOG BUFFER + LOCAL LOGGER
+	-- ###########################################################################
+
+	GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
+
+	local function now()
+		return GetTime and GetTime() or nil
+	end
+
+	-- Local-only logger for this file
+	local function LOCAL_LOG(level, source, msg, ...)
+		local entry = {
+			time   = now(),
+			level  = tostring(level or "INFO"),
+			source = tostring(source or "CHATLINKS"),
+			msg    = tostring(msg or ""),
+		}
+
+		local n = select("#", ...)
+		if n > 0 then
+			entry.data = {}
+			for i = 1, n do
+				entry.data[i] = select(i, ...)
+			end
+		end
+
+		GMS._LOG_BUFFER[#GMS._LOG_BUFFER + 1] = entry
+	end
+
+	-- ###########################################################################
+	-- #	MODULESTATES REGISTRATION
+	-- ###########################################################################
+
+	if type(GMS.RegisterExtension) == "function" then
+		GMS:RegisterExtension({
+			key = "CHATLINKS",
+			name = "ChatLinks",
+			displayName = "Chat Links",
+			version = 1,
+			desc = "Clickable chat links with tooltip and click handling",
+		})
+	end
+
+	-- ###########################################################################
 	-- #	REGISTRY
 	-- ###########################################################################
 
@@ -36,16 +64,11 @@
 	local ChatLinks = GMS.ChatLinks
 
 	ChatLinks.REGISTRY = ChatLinks.REGISTRY or {}
-
-	-- LinkType bewusst uppercase wie du willst
 	ChatLinks.LINK_TYPE = ChatLinks.LINK_TYPE or "GMS"
 
-	-- Default Farben (optional)
-	ChatLinks.COLOR = ChatLinks.COLOR or "FFFFCC00" -- gold
-	ChatLinks.COLOR_TOOLTIP_TITLE = ChatLinks.COLOR_TOOLTIP_TITLE or { 1, 1, 1 }
+	ChatLinks.COLOR = ChatLinks.COLOR or "FFFFCC00"
 	ChatLinks.COLOR_TOOLTIP_TEXT = ChatLinks.COLOR_TOOLTIP_TEXT or { 0.8, 0.8, 0.8 }
 
-	-- Default Tooltip-Flags (pro entry überschreibbar)
 	ChatLinks.DEFAULT_FLAGS = ChatLinks.DEFAULT_FLAGS or {
 		showLabel = true,
 		showHint = true,
@@ -53,31 +76,16 @@
 		showActionFallback = true,
 	}
 
-	local function UPPER(s)
-		return string.upper(tostring(s or ""))
-	end
-
-	local function TRIM(s)
-		s = tostring(s or "")
-		s = string.gsub(s, "^%s+", "")
-		s = string.gsub(s, "%s+$", "")
-		return s
-	end
+	local function UPPER(s) return string.upper(tostring(s or "")) end
+	local function TRIM(s) return tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "") end
 
 	local function MergeFlags(dst, src)
-		dst = dst or {}
-		src = src or {}
-		for k, v in pairs(src) do
-			dst[k] = v
-		end
+		for k, v in pairs(src or {}) do dst[k] = v end
 		return dst
 	end
 
 	local function ResolveFlags(entry)
-		local out = {}
-		-- defaults
-		out = MergeFlags(out, ChatLinks.DEFAULT_FLAGS)
-		-- entry overrides
+		local out = MergeFlags({}, ChatLinks.DEFAULT_FLAGS)
 		if entry and type(entry.flags) == "table" then
 			out = MergeFlags(out, entry.flags)
 		end
@@ -85,24 +93,12 @@
 	end
 
 	local function ParseLink(link)
-		-- Supports:
-		-- |HGMS:ACTION|h...|h
-		-- |HGMS:ACTION:TITLE|h...|h
 		local linkType, action, title = strsplit(":", tostring(link or ""))
-		linkType = UPPER(linkType)
+		if UPPER(linkType) ~= ChatLinks.LINK_TYPE then return end
 		action = UPPER(action)
-
-		if linkType ~= ChatLinks.LINK_TYPE then
-			return nil, nil
-		end
-
-		if action == "" then
-			return nil, nil
-		end
-
+		if action == "" then return end
 		title = TRIM(title)
 		if title == "" then title = nil end
-
 		return action, title
 	end
 
@@ -110,20 +106,12 @@
 	-- #	PUBLIC API
 	-- ###########################################################################
 
-	-- Definiert eine Action (Hover-Text + optional Hint + Tooltip-Titel + Flags)
-	-- spec = {
-	--		title = "|cff03A9F4[GMS]|r",				-- Tooltip-Titel (Default, optional)
-	--		label = "GMS öffnen",					-- Default Link-Label im Chat (optional)
-	--		hint = "/gms ui",						-- optional: kurzer Hinweis
-	--		tooltip = { "Zeile1", "Zeile2" },		-- optional: Tooltip-Zeilen
-	--		flags = { showLabel=false, ... },		-- optional: Anzeige steuern
-	-- }
 	function GMS:ChatLink_Define(action, spec)
 		action = UPPER(action)
 		if action == "" then return false end
 
 		spec = spec or {}
-		local entry = {
+		ChatLinks.REGISTRY[action] = {
 			action = action,
 			title = tostring(spec.title or "|cff03A9F4[GMS]|r"),
 			label = tostring(spec.label or action),
@@ -132,44 +120,35 @@
 			flags = spec.flags,
 		}
 
-		ChatLinks.REGISTRY[action] = entry
+		LOCAL_LOG("DEBUG", "CHATLINKS", "Defined action", action)
 		return true
 	end
 
-	-- Baut den tatsächlichen Chat-Link-String
 	function GMS:ChatLink_Build(action, labelOverride, tooltipTitleOverride)
 		action = UPPER(action)
-
-		local entry = ChatLinks.REGISTRY[action]
-		if not entry then
-			entry = { title = "|cff03A9F4[GMS]|r", label = action, action = action, hint = "", tooltip = nil, flags = nil }
-		end
-
-		local label = tostring(labelOverride or entry.label or action)
-		local color = tostring(ChatLinks.COLOR or "FFFFFFFF")
+		local entry = ChatLinks.REGISTRY[action] or { label = action }
+		local label = tostring(labelOverride or entry.label)
+		local color = ChatLinks.COLOR
 
 		local title = TRIM(tooltipTitleOverride)
 		if title == "" then
-			return string.format("|c%s|H%s:%s|h%s|h|r", color, ChatLinks.LINK_TYPE, action, label)
+			return ("|c%s|H%s:%s|h%s|h|r"):format(color, ChatLinks.LINK_TYPE, action, label)
 		end
 
-		-- ":" trennt Segmente -> im Titel bitte keine ":" verwenden
-		return string.format("|c%s|H%s:%s:%s|h%s|h|r", color, ChatLinks.LINK_TYPE, action, title, label)
+		return ("|c%s|H%s:%s:%s|h%s|h|r"):format(color, ChatLinks.LINK_TYPE, action, title, label)
 	end
 
-	-- Optional: Klick-Handler registrieren
 	ChatLinks.CLICK_HANDLERS = ChatLinks.CLICK_HANDLERS or {}
 
-	function GMS:ChatLink_OnClick(action, handlerFn)
+	function GMS:ChatLink_OnClick(action, fn)
 		action = UPPER(action)
-		if action == "" then return false end
-		if type(handlerFn) ~= "function" then return false end
-		ChatLinks.CLICK_HANDLERS[action] = handlerFn
+		if type(fn) ~= "function" then return false end
+		ChatLinks.CLICK_HANDLERS[action] = fn
 		return true
 	end
 
 	-- ###########################################################################
-	-- #	HOVER TOOLTIP (robust close)
+	-- #	TOOLTIP + CLICK
 	-- ###########################################################################
 
 	local function Tooltip_AddLine(tt, text)
@@ -177,104 +156,39 @@
 		tt:AddLine(tostring(text), c[1], c[2], c[3], true)
 	end
 
-	local function Tooltip_Show(frame, action, linkText, titleOverride)
+	local function Tooltip_Show(frame, link)
+		local action, titleOverride = ParseLink(link)
+		if not action then return end
+
 		local entry = ChatLinks.REGISTRY[action]
 		local flags = ResolveFlags(entry)
 
 		GameTooltip:SetOwner(frame, "ANCHOR_CURSOR")
-
-		-- Title: override > entry.title > default
-		local title = tostring(titleOverride or (entry and entry.title) or "|cff03A9F4[GMS]|r")
-		GameTooltip:SetText(title)
+		GameTooltip:SetText(titleOverride or (entry and entry.title) or "|cff03A9F4[GMS]|r")
 
 		if entry then
-			if flags.showLabel and entry.label and entry.label ~= "" then
-				Tooltip_AddLine(GameTooltip, entry.label)
-			end
-
-			if flags.showHint and entry.hint and entry.hint ~= "" then
+			if flags.showLabel and entry.label ~= "" then Tooltip_AddLine(GameTooltip, entry.label) end
+			if flags.showHint and entry.hint ~= "" then
 				Tooltip_AddLine(GameTooltip, "Befehl: |cFFFFCC00" .. entry.hint .. "|r")
-			end
-
-			if flags.showTooltipLines then
-				if type(entry.tooltip) == "table" then
-					for _, line in ipairs(entry.tooltip) do
-						if line and line ~= "" then
-							Tooltip_AddLine(GameTooltip, line)
-						end
-					end
-				end
-			end
-
-			if flags.showActionFallback then
-				-- Wenn nix angezeigt wurde (z.B. alles deaktiviert), gib wenigstens die Aktion aus
-				local hadAny = false
-				if flags.showLabel and entry.label and entry.label ~= "" then hadAny = true end
-				if flags.showHint and entry.hint and entry.hint ~= "" then hadAny = true end
-				if flags.showTooltipLines and type(entry.tooltip) == "table" and #entry.tooltip > 0 then hadAny = true end
-
-				if not hadAny then
-					Tooltip_AddLine(GameTooltip, "Aktion: " .. action)
-				end
-			end
-		else
-			if flags.showActionFallback then
-				Tooltip_AddLine(GameTooltip, "Aktion: " .. action)
 			end
 		end
 
 		GameTooltip:Show()
-
-		-- Tag: dieser Tooltip wurde von GMS ChatLinks geöffnet
-		GameTooltip.GMS_CHATLINK_ACTIVE = true
-		GameTooltip.GMS_CHATLINK_OWNER = frame
 	end
-
-	local function Tooltip_HideIfOurs(frame)
-		if not GameTooltip.GMS_CHATLINK_ACTIVE then
-			return
-		end
-
-		if GameTooltip.GMS_CHATLINK_OWNER and GameTooltip.GMS_CHATLINK_OWNER ~= frame then
-			return
-		end
-
-		GameTooltip:Hide()
-		GameTooltip.GMS_CHATLINK_ACTIVE = nil
-		GameTooltip.GMS_CHATLINK_OWNER = nil
-	end
-
-	local function OnHyperlinkEnter(frame, link, text)
-		local action, titleOverride = ParseLink(link)
-		if not action then return end
-		Tooltip_Show(frame, action, text, titleOverride)
-	end
-
-	local function OnHyperlinkLeave(frame, link, text)
-		Tooltip_HideIfOurs(frame)
-	end
-
-	-- ###########################################################################
-	-- #	CLICK DISPATCH
-	-- ###########################################################################
 
 	local function OnClick(link, text, button)
 		local action = select(1, ParseLink(link))
-		if not action then return end
-
-		local fn = ChatLinks.CLICK_HANDLERS[action]
-		if type(fn) == "function" then
+		local fn = action and ChatLinks.CLICK_HANDLERS[action]
+		if fn then
 			local ok, err = pcall(fn, action, link, text, button)
 			if not ok then
-				if type(GMS.LOG) == "function" then
-					GMS:LOG("ERROR", "CHATLINKS", "Click handler error: %s", tostring(err))
-				end
+				LOCAL_LOG("ERROR", "CHATLINKS", "Click handler error", err)
 			end
 		end
 	end
 
 	-- ###########################################################################
-	-- #	BOOTSTRAP HOOKS (einmalig)
+	-- #	HOOKS
 	-- ###########################################################################
 
 	if not ChatLinks._hooked then
@@ -283,55 +197,20 @@
 		for i = 1, NUM_CHAT_WINDOWS do
 			local chat = _G["ChatFrame" .. i]
 			if chat then
-				GMS:HookScript(chat, "OnHyperlinkEnter", OnHyperlinkEnter)
-				GMS:HookScript(chat, "OnHyperlinkLeave", OnHyperlinkLeave)
+				GMS:HookScript(chat, "OnHyperlinkEnter", Tooltip_Show)
+				GMS:HookScript(chat, "OnHyperlinkLeave", GameTooltip.Hide)
 			end
 		end
 
-		GMS:SecureHook("SetItemRef", function(link, text, button)
-			OnClick(link, text, button)
-		end)
+		GMS:SecureHook("SetItemRef", OnClick)
 	end
 
 	-- ###########################################################################
-	-- #	DEFAULT DEFINITIONS (Example)
+	-- #	READY
 	-- ###########################################################################
 
-	if not ChatLinks._defaultsLoaded then
-		ChatLinks._defaultsLoaded = true
-
-		-- Beispiel: Prefix-Link, aber im Tooltip nur den Hint anzeigen, sonst nix
-		GMS:ChatLink_Define("GMS", {
-			title = "|cff03A9F4GMS|r",
-			label = "|cff03A9F4[GMS]|r",
-			hint = "/gms",
-			tooltip = {
-				"Öffnet das GMS Menü.",
-			},
-			flags = {
-				showLabel = false,			-- label NICHT anzeigen
-				showHint = true,			-- hint anzeigen
-				showTooltipLines = false,	-- tooltip lines NICHT anzeigen
-				showActionFallback = false,	-- fallback NICHT anzeigen
-			},
-		})
-
-		GMS:ChatLink_OnClick("GMS", function()
-			GMS:SlashCommand("?")
-		end)
-
-		local link = GMS:ChatLink_Build("GMS")
-		GMS.CHAT_PREFIX = link
-
-		GMS:Print("Klick hier: " .. link)
-
-		-- Beispiel: gleiche Action, aber Tooltip-Titel pro Link überschreiben:
-		local link2 = GMS:ChatLink_Build("GMS", "/gms")
-		GMS:Print("Hover Title Override: " .. link2)
+	if type(GMS.SetReady) == "function" then
+		GMS:SetReady("EXT:CHATLINKS")
 	end
-		
-	pcall(function()
-		if GMS and type(GMS.LOG) == "function" then
-			GMS:LOG("INFO", "CHATLINKS", "ChatLinks wurde geladen")
-		end
-	end)
+
+	LOCAL_LOG("INFO", "CHATLINKS", "ChatLinks loaded")
