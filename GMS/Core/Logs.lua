@@ -1,26 +1,14 @@
 	-- ============================================================================
 	--	GMS/Core/Logs.lua
 	--	LOGS EXTENSION (no GMS:NewModule)
-	--	- Ringbuffer + Level-Filter + optionale Chat-Ausgabe
-	--	- Optional: AceDB-3.0 Settings
-	--	- Optional: UI-Page (AceGUI + GMS UI registry)
-	--	- Optional: SlashCommand (/gms logs ...) via GMS.SlashCommands
-	--
-	--	API:
-	--		GMS:Log(level, msg, ...)
-	--		GMS:Logf(level, fmt, ...)
-	--		GMS:Trace(...), :Debug(...), :Info(...), :Warn(...), :Error(...)
-	--		GMS:Logs_GetEntries([n], [minLevel])
-	--		GMS:Logs_Clear()
-	--		GMS:Logs_SetLevel(level) / :Logs_GetLevel()
-	--		GMS:Logs_EnableChat(true/false) / :Logs_IsChatEnabled()
-	--		GMS:Logs_SetMaxEntries(n) / :Logs_GetMaxEntries()
-	--
-	--	Levels:
-	--		TRACE, DEBUG, INFO, WARN, ERROR
+	--	- Ringbuffer (persistiert via AceDB)
+	--	- GMS:LOG(level, module, msg, ...)
+	--	- Speichert IMMER Timestamp, Level, Module, Message (+ optionale Data lesbar/JSON-ish)
+	--	- UI Page (AceGUI) + Live-Prepend wenn offen
+	--	- Slash: /gms logs -> öffnet LOGS Page
 	-- ============================================================================
 
-	local LibStub = _G.LibStub
+	local LibStub = LibStub
 	if not LibStub then return end
 
 	local AceAddon = LibStub("AceAddon-3.0", true)
@@ -32,308 +20,521 @@
 	-- Prevent double-load
 	if GMS.LOGS then return end
 
-	local AceDB	= LibStub("AceDB-3.0", true)
-	local AceGUI	= LibStub("AceGUI-3.0", true) -- optional, for UI page
-
-	-- ###########################################################################
-	-- #	STATE
-	-- ###########################################################################
+	local AceDB = LibStub("AceDB-3.0", true)
+	local AceGUI = LibStub("AceGUI-3.0", true) -- optional (UI page)
 
 	local LOGS = {}
+	GMS.LOGS = LOGS
 
-		-- ============================================================================
-		-- GMS/Core/Logs.lua
-		-- Unified logging: single `GMS:LOG(level, module, fmt, ...)` entrypoint
-		-- - ringbuffer (append newest to end), level filter, optional chat output
-		-- - AceGUI UI page + right-dock icon with live view (newest on top)
-		-- - Uses optional AceDB profile at `GMS.logging_db` or creates its own DB
-		-- ============================================================================
+	-- ###########################################################################
+	-- #	CONSTS / DEFAULTS
+	-- ###########################################################################
 
-		local LibStub = _G.LibStub
-		if not LibStub then return end
+	LOGS.LEVELS = { TRACE = 1, DEBUG = 2, INFO = 3, WARN = 4, ERROR = 5 }
+	LOGS.LEVEL_NAMES = { [1] = "TRACE", [2] = "DEBUG", [3] = "INFO", [4] = "WARN", [5] = "ERROR" }
 
-		local AceAddon = LibStub("AceAddon-3.0", true)
-		if not AceAddon then return end
+	local COLORS = {
+		TRACE = "|cff9d9d9d",
+		DEBUG = "|cff4da6ff",
+		INFO  = "|cff4dff88",
+		WARN  = "|cffffd24d",
+		ERROR = "|cffff4d4d",
+	}
 
-		local GMS = AceAddon:GetAddon("GMS", true)
-		if not GMS then return end
-
-		-- Prevent double-load
-		if GMS.LOGS then return end
-
-		local AceDB = LibStub("AceDB-3.0", true)
-		local AceGUI = LibStub("AceGUI-3.0", true) -- optional
-
-		local LOGS = {}
-		GMS.LOGS = LOGS
-
-		LOGS.LEVELS = { TRACE = 1, DEBUG = 2, INFO = 3, WARN = 4, ERROR = 5 }
-		LOGS.LEVEL_NAMES = { [1] = "TRACE", [2] = "DEBUG", [3] = "INFO", [4] = "WARN", [5] = "ERROR" }
-
-		LOGS.DEFAULTS = {
-			profile = { minLevel = LOGS.LEVELS.INFO, chat = true, maxEntries = 400, timestamp = true }
+	LOGS.DEFAULTS = {
+		profile = {
+			minLevel = LOGS.LEVELS.INFO,	-- Output/UI Filter (Speicher bleibt ALL)
+			chat = false,					-- optional Chat output
+			maxEntries = 400,				-- Ringbuffer Größe
+			timestampFormat = "%Y-%m-%d %H:%M:%S",
+			entries = {},					-- persistierter Ringbuffer
 		}
+	}
 
-		LOGS._db = nil
-		LOGS._entries = {} -- append new entries with table.insert
+	LOGS._db = nil
+	LOGS._entries = nil -- points to profile.entries
+	LOGS._ui = nil
 
-		local COLORS = {
-			TRACE = "|cff9d9d9d", -- gray
-			DEBUG = "|cff4da6ff", -- light blue
-			INFO  = "|cff4dff88", -- green
-			WARN  = "|cffffd24d", -- yellow
-			ERROR = "|cffff4d4d", -- red
-		}
+	LOGS._uiRegistered = false
+	LOGS._slashRegistered = false
 
-		local function clamp(n, lo, hi)
-			if n < lo then return lo end
-			if n > hi then return hi end
-			return n
+	-- ###########################################################################
+	-- #	HELPERS
+	-- ###########################################################################
+
+	local function clamp(n, lo, hi)
+		if n < lo then return lo end
+		if n > hi then return hi end
+		return n
+	end
+
+	local function toLevel(level)
+		if type(level) == "number" then return clamp(level, 1, 5) end
+		if type(level) == "string" then return LOGS.LEVELS[level:upper()] or LOGS.LEVELS.INFO end
+		return LOGS.LEVELS.INFO
+	end
+
+	local function levelName(n)
+		return LOGS.LEVEL_NAMES[n] or "INFO"
+	end
+
+	local function now(fmt)
+		if type(date) == "function" then
+			return date(fmt or "%Y-%m-%d %H:%M:%S")
+		end
+		return ""
+	end
+
+	local function profile()
+		return LOGS._db and LOGS._db.profile or LOGS.DEFAULTS.profile
+	end
+
+	local function allowForOutput(levelNum)
+		return levelNum >= (profile().minLevel or LOGS.LEVELS.INFO)
+	end
+
+	local function chatPrint(msg)
+		if type(GMS.Printf) == "function" then
+			GMS:Printf("%s", msg)
+		elseif type(GMS.Print) == "function" then
+			GMS:Print(msg)
+		else
+			print(msg)
+		end
+	end
+
+	-- JSON-ish / readable stringify (safe, bounded)
+	local function _escapeStr(s)
+		s = tostring(s)
+		s = s:gsub("\\", "\\\\"):gsub("\"", "\\\""):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\t", "\\t")
+		return "\"" .. s .. "\""
+	end
+
+	local function _isArray(t)
+		local n = 0
+		for k in pairs(t) do
+			if type(k) ~= "number" then return false end
+			n = n + 1
+		end
+		for i = 1, n do
+			if rawget(t, i) == nil then return false end
+		end
+		return true
+	end
+
+	local function _jsonish(v, seen, depth, maxDepth, maxItems)
+		local tv = type(v)
+		if tv == "nil" then return "null" end
+		if tv == "number" then return tostring(v) end
+		if tv == "boolean" then return v and "true" or "false" end
+		if tv == "string" then return _escapeStr(v) end
+		if tv == "function" then return "\"<function>\"" end
+		if tv == "userdata" then return "\"<userdata>\"" end
+		if tv == "thread" then return "\"<thread>\"" end
+		if tv ~= "table" then return _escapeStr(tostring(v)) end
+
+		if seen[v] then return "\"<cycle>\"" end
+		seen[v] = true
+
+		if depth >= maxDepth then
+			seen[v] = nil
+			return "\"<maxDepth>\""
 		end
 
-		local function now()
-			return type(date) == "function" and date("%H:%M:%S") or ""
+		local out = {}
+		local count = 0
+
+		if _isArray(v) then
+			out[#out + 1] = "["
+			for i = 1, #v do
+				count = count + 1
+				if count > maxItems then
+					out[#out + 1] = "\"<truncated>\""
+					break
+				end
+				if i > 1 then out[#out + 1] = "," end
+				out[#out + 1] = _jsonish(v[i], seen, depth + 1, maxDepth, maxItems)
+			end
+			out[#out + 1] = "]"
+		else
+			out[#out + 1] = "{"
+			local first = true
+			for k, val in pairs(v) do
+				count = count + 1
+				if count > maxItems then
+					if not first then out[#out + 1] = "," end
+					out[#out + 1] = _escapeStr("<truncated>") .. ":" .. _escapeStr("true")
+					break
+				end
+				if not first then out[#out + 1] = "," end
+				first = false
+				local kk = _escapeStr(type(k) == "string" and k or tostring(k))
+				out[#out + 1] = kk .. ":" .. _jsonish(val, seen, depth + 1, maxDepth, maxItems)
+			end
+			out[#out + 1] = "}"
 		end
 
-		local function toLevel(level)
-			if type(level) == "number" then return clamp(level, 1, 5) end
-			if type(level) == "string" then return LOGS.LEVELS[level:upper()] or LOGS.LEVELS.INFO end
-			return LOGS.LEVELS.INFO
-		end
+		seen[v] = nil
+		return table.concat(out, "")
+	end
 
-		local function levelName(n) return LOGS.LEVEL_NAMES[n] or "INFO" end
+	local function dataSuffix(...)
+		local n = select("#", ...)
+		if n <= 0 then return "" end
 
-		local function fmtSafe(fmt, ...)
-			if select("#", ...) == 0 then return tostring(fmt) end
-			local ok, out = pcall(string.format, tostring(fmt), ...)
-			if ok then return out end
-			local t = { tostring(fmt) }
-			for i = 1, select("#", ...) do t[#t + 1] = tostring(select(i, ...)) end
-			return table.concat(t, " ")
-		end
-
-		local function profile()
-			return LOGS._db and LOGS._db.profile or LOGS.DEFAULTS.profile
-		end
-
-		local function allow(levelNum)
-			return levelNum >= (profile().minLevel or LOGS.LEVELS.INFO)
-		end
-
-		local function chatPrint(msg)
-			if type(GMS.Printf) == "function" then
-				GMS:Printf("%s", msg)
-			elseif type(GMS.Print) == "function" then
-				GMS:Print(msg)
+		local parts = {}
+		for i = 1, n do
+			local v = select(i, ...)
+			if type(v) == "table" then
+				parts[#parts + 1] = _jsonish(v, {}, 0, 4, 80)
 			else
-				print(msg)
+				parts[#parts + 1] = tostring(v)
 			end
 		end
 
-		function LOGS:Init()
-			-- prefer shared logging DB
-			if GMS and GMS.logging_db then
-				LOGS._db = GMS.logging_db
+		return " | data=" .. table.concat(parts, " ")
+	end
+
+	local function trimToMax()
+		local p = profile()
+		local max = clamp(tonumber(p.maxEntries) or 400, 50, 5000)
+		p.maxEntries = max -- persist clamp result
+		local entries = LOGS._entries
+		if not entries then return end
+		while #entries > max do
+			table.remove(entries, 1)
+		end
+	end
+
+	-- ###########################################################################
+	-- #	UI BRIDGE (robust)
+	-- ###########################################################################
+
+	local function UI_RegisterPage(name, buildFn, opts)
+		if GMS.UI and type(GMS.UI.RegisterPage) == "function" then
+			return GMS.UI:RegisterPage(name, buildFn, opts)
+		end
+		if type(GMS.UI_RegisterPage) == "function" then
+			return GMS:UI_RegisterPage(name, buildFn, opts)
+		end
+	end
+
+	local function UI_RegisterDockIcon(name, opts)
+		if GMS.UI and type(GMS.UI.RegisterRightDockIcon) == "function" then
+			return GMS.UI:RegisterRightDockIcon(name, opts)
+		end
+		if type(GMS.UI_RegisterRightDockIcon) == "function" then
+			return GMS:UI_RegisterRightDockIcon(name, opts)
+		end
+	end
+
+	local function UI_Open(name)
+		if type(GMS.UI_Open) == "function" then return GMS:UI_Open(name) end
+		if type(GMS.UI_OpenPage) == "function" then return GMS:UI_OpenPage(name) end
+		if GMS.UI and type(GMS.UI.Open) == "function" then return GMS.UI:Open(name) end
+	end
+
+	-- ###########################################################################
+	-- #	INIT / DB
+	-- ###########################################################################
+
+	function LOGS:Init()
+		if AceDB then
+			local ok, db = pcall(AceDB.New, AceDB, "GMS_Logs_DB", LOGS.DEFAULTS, true)
+			if ok and db then
+				LOGS._db = db
+				LOGS._entries = db.profile.entries or {}
+				db.profile.entries = LOGS._entries
+				trimToMax()
 				return
 			end
-			-- prefer module DB via GMS.DB
-			if GMS and GMS.DB and type(GMS.DB.GetModuleDB) == "function" then
-				local ok, ns = pcall(function() return GMS.DB:GetModuleDB("LOGS") end)
-				if ok and ns then LOGS._db = ns; return end
-			end
-			-- fallback: create own DB
-			if AceDB then
-				local ok, db = pcall(AceDB.New, AceDB, "GMS_Logging_DB", LOGS.DEFAULTS, true)
-				if ok and db then LOGS._db = db end
-			end
+		end
+		-- fallback: in-memory only
+		LOGS._db = nil
+		LOGS._entries = {}
+	end
+
+	-- PUBLIC CONFIG (persisted)
+	function GMS:Logs_SetLevel(level) profile().minLevel = toLevel(level) end
+	function GMS:Logs_GetLevel() return profile().minLevel end
+	function GMS:Logs_EnableChat(v) profile().chat = not not v end
+	function GMS:Logs_IsChatEnabled() return not not profile().chat end
+	function GMS:Logs_SetMaxEntries(n) profile().maxEntries = clamp(tonumber(n) or 400, 50, 5000); trimToMax() end
+	function GMS:Logs_GetMaxEntries() return profile().maxEntries end
+	function GMS:Logs_Clear()
+		local p = profile()
+		p.entries = {}
+		LOGS._entries = p.entries
+		if LOGS._ui and LOGS._ui.scroller then
+			pcall(function() LOGS._ui.scroller:ReleaseChildren() end)
+		end
+	end
+
+	function GMS:Logs_GetEntries(n, minLevel)
+		local entries = LOGS._entries or {}
+		local want = tonumber(n) or #entries
+		if want < 1 then want = 1 end
+		if want > #entries then want = #entries end
+		local lvl = minLevel and toLevel(minLevel) or 1
+		local out = {}
+		for i = #entries, 1, -1 do
+			if #out >= want then break end
+			local e = entries[i]
+			if e and (e.levelNum or 1) >= lvl then out[#out + 1] = e end
+		end
+		return out
+	end
+
+	-- ###########################################################################
+	-- #	CORE: GMS:LOG(level, module, msg, ...)
+	-- ###########################################################################
+
+	function GMS:LOG(level, module, msg, ...)
+		local lvl = toLevel(level)
+		local mod = tostring(module or "")
+		local base = tostring(msg or "")
+		local text = base .. dataSuffix(...)
+
+		local p = profile()
+		local ts = now(p.timestampFormat or "%Y-%m-%d %H:%M:%S")
+
+		local entry = {
+			time = ts,
+			levelNum = lvl,
+			level = levelName(lvl),
+			module = mod,
+			msg = text,
+		}
+
+		local entries = LOGS._entries
+		if not entries then
+			LOGS._entries = {}
+			entries = LOGS._entries
+			if LOGS._db then LOGS._db.profile.entries = entries end
 		end
 
-		-- PUBLIC CONFIG
-		function GMS:Logs_SetLevel(level) profile().minLevel = toLevel(level) end
-		function GMS:Logs_GetLevel() return profile().minLevel end
-		function GMS:Logs_EnableChat(v) profile().chat = not not v end
-		function GMS:Logs_IsChatEnabled() return not not profile().chat end
-		function GMS:Logs_SetMaxEntries(n) profile().maxEntries = clamp(tonumber(n) or 400, 50, 5000) end
-		function GMS:Logs_GetMaxEntries() return profile().maxEntries end
-		function GMS:Logs_Clear() LOGS._entries = {} end
-		function GMS:Logs_GetEntries(n, minLevel)
-			local want = tonumber(n) or #LOGS._entries
-			if want < 1 then want = 1 end
-			if want > #LOGS._entries then want = #LOGS._entries end
-			local lvl = minLevel and toLevel(minLevel) or 1
-			local out = {}
-			for i = #LOGS._entries, 1, -1 do -- newest-first
-				if #out >= want then break end
-				local e = LOGS._entries[i]
-				if e and (e.levelNum or 1) >= lvl then out[#out + 1] = e end
-			end
-			return out
+		entries[#entries + 1] = entry
+		trimToMax()
+
+		-- chat output (filtered)
+		if p.chat and allowForOutput(lvl) then
+			local color = COLORS[entry.level] or "|cffffffff"
+			local m = (entry.module ~= "" and ("[" .. entry.module .. "]") or "")
+			chatPrint(string.format("%s[GMS][%s][%s]%s %s|r", color, entry.level, entry.time, m, entry.msg))
 		end
 
-		-- Core logging entrypoint required by the user: GMS:LOG(level, module, fmt, ...)
-		function GMS:LOG(level, module, fmt, ...)
-			local lvl = toLevel(level)
-			if not allow(lvl) then return end
-			local mod = nil
-			local msgFmt = nil
-			local extra = {}
-			-- support calls that omit module: GMS:LOG(level, fmt, ...)
-			if type(module) == "string" and fmt ~= nil then
-				mod = module
-				msgFmt = fmt
-				for i = 1, select('#', ...) do extra[#extra+1] = select(i, ...) end
-			elseif type(module) == "string" and fmt == nil then
-				-- called as GMS:LOG(level, msg, ...)
-				msgFmt = module
-				mod = nil
-				for i = 1, select('#', ...) do extra[#extra+1] = select(i, ...) end
-			else
-				-- fallback: everything after level is message
-				msgFmt = tostring(module or fmt or "")
-				for i = 1, select('#', ...) do extra[#extra+1] = select(i, ...) end
-			end
-			local text = fmtSafe(msgFmt, unpack(extra))
-			local ts = profile().timestamp and now() or nil
-			local entry = { levelNum = lvl, level = levelName(lvl), time = ts, module = tostring(mod or ""), msg = text }
-
-			-- append and trim
-			local max = clamp(profile().maxEntries or 400, 50, 5000)
-			table.insert(LOGS._entries, entry)
-			while #LOGS._entries > max do table.remove(LOGS._entries, 1) end
-
-			-- chat output
-			if profile().chat then
-				if ts then
-					chatPrint(string.format("[GMS][%s][%s] %s", entry.level, ts, text))
-				else
-					chatPrint(string.format("[GMS][%s] %s", entry.level, text))
-				end
-			end
-
-			-- notify UI if present
-			if LOGS._onAdd and type(LOGS._onAdd) == "function" then
-				pcall(LOGS._onAdd, entry)
-			end
+		-- live UI prepend if open
+		if LOGS._ui and LOGS._ui.prependEntry and allowForOutput(lvl) then
+			pcall(LOGS._ui.prependEntry, entry)
 		end
+	end
 
-		-- Provide thin compatibility wrappers
-		function GMS:LOGf(level, fmt, ...) return self:LOG(level, fmt, ...) end
+	-- ###########################################################################
+	-- #	UI PAGE
+	-- ###########################################################################
 
+	local function BuildLogRow(entry)
+		local grp = AceGUI:Create("SimpleGroup")
+		grp:SetFullWidth(true)
+		grp:SetLayout("List")
 
-		-- UI helpers (optional)
-		local function UI_RegisterPage(name, buildFn, opts)
-			if GMS.UI and type(GMS.UI.RegisterPage) == "function" then return GMS.UI:RegisterPage(name, buildFn, opts) end
-			if type(GMS.UI_RegisterPage) == "function" then return GMS:UI_RegisterPage(name, buildFn, opts) end
+		local color = COLORS[entry.level] or "|cffffffff"
+		local mod = entry.module ~= "" and (" [" .. entry.module .. "]") or ""
+		local header = string.format("%s[%s]%s %s%s", color, entry.level, "|r", entry.time or "", mod)
+
+		local hdr = AceGUI:Create("Label")
+		hdr:SetText(header)
+		hdr:SetFullWidth(true)
+		grp:AddChild(hdr)
+
+		local body = AceGUI:Create("Label")
+		body:SetText(color .. (entry.msg or "") .. "|r")
+		body:SetFullWidth(true)
+		grp:AddChild(body)
+
+		return grp
+	end
+
+	local function RegisterLogsUI()
+		if LOGS._uiRegistered then return true end
+		if not AceGUI then return false end
+		if type(UI_RegisterPage) ~= "function" then return false end
+
+		-- UI system not ready yet?
+		local canPage = false
+		if (GMS.UI and type(GMS.UI.RegisterPage) == "function") or (type(GMS.UI_RegisterPage) == "function") then
+			canPage = true
 		end
+		if not canPage then return false end
 
-		local function UI_RegisterDockIcon(name, opts)
-			if GMS.UI and type(GMS.UI.RegisterRightDockIcon) == "function" then return GMS.UI:RegisterRightDockIcon(name, opts) end
-			if type(GMS.UI_RegisterRightDockIcon) == "function" then return GMS:UI_RegisterRightDockIcon(name, opts) end
-		end
+		local PAGE_NAME = "LOGS"
+		local DISPLAY_NAME = "Logs"
 
-		local function UI_Open(name)
-			if type(GMS.UI_Open) == "function" then return GMS:UI_Open(name) end
-			if type(GMS.UI_OpenPage) == "function" then return GMS:UI_OpenPage(name) end
-		end
+		local function BuildPage(root)
+			root:SetLayout("List")
 
-		local function RegisterLogsUI()
-			if not AceGUI then return end
-			if not UI_RegisterPage then return end
+			local header = AceGUI:Create("InlineGroup")
+			header:SetTitle("Logs")
+			header:SetFullWidth(true)
+			header:SetLayout("Flow")
+			root:AddChild(header)
 
-			local PAGE_NAME = "LOGS"
-			local DISPLAY_NAME = "Logs"
+			local scroller -- forward decl
 
-			local function MkButton(text, onClick)
-				local b = AceGUI:Create("Button")
-				b:SetText(text)
-				b:SetWidth(120)
-				if onClick then b:SetCallback("OnClick", function() onClick() end) end
-				return b
-			end
+			local btnRefresh = AceGUI:Create("Button")
+			btnRefresh:SetText("Refresh")
+			btnRefresh:SetWidth(120)
+			header:AddChild(btnRefresh)
 
-			local function BuildLogWidget(entry)
-				local grp = AceGUI:Create("SimpleGroup")
-				grp:SetFullWidth(true)
-				grp:SetLayout("Flow")
+			local btnClear = AceGUI:Create("Button")
+			btnClear:SetText("Clear")
+			btnClear:SetWidth(120)
+			header:AddChild(btnClear)
 
-				local color = COLORS[entry.level] or "|cffffffff"
-				local title = string.format("%s[%s]%s %s", color, entry.level, "|r", entry.module ~= "" and ("("..entry.module..")") or "")
-				local ts = entry.time or ""
-				local msg = entry.msg or ""
+			local btnCopy = AceGUI:Create("Button")
+			btnCopy:SetText("Copy")
+			btnCopy:SetWidth(120)
+			header:AddChild(btnCopy)
 
-				local hdr = AceGUI:Create("Label")
-				hdr:SetText(title .. (ts ~= "" and (" ["..ts.."]") or ""))
-				hdr:SetFullWidth(true)
-				grp:AddChild(hdr)
+			local listGroup = AceGUI:Create("InlineGroup")
+			listGroup:SetTitle("Entries (newest first)")
+			listGroup:SetFullWidth(true)
+			listGroup:SetFullHeight(true)
+			listGroup:SetLayout("Fill")
+			root:AddChild(listGroup)
 
-				local body = AceGUI:Create("Label")
-				body:SetText(color .. msg .. "|r")
-				body:SetFullWidth(true)
-				grp:AddChild(body)
+			scroller = AceGUI:Create("ScrollFrame")
+			scroller:SetLayout("List")
+			listGroup:AddChild(scroller)
 
-				return grp
-			end
-
-			local function BuildPage(root)
-				root:SetLayout("List")
-
-				local header = AceGUI:Create("InlineGroup")
-				header:SetTitle("Logs")
-				header:SetFullWidth(true)
-				header:SetLayout("Flow")
-				root:AddChild(header)
-
-				local btnRefresh = MkButton("Refresh", function() end)
-				header:AddChild(btnRefresh)
-
-				local btnClear = MkButton("Clear", function()
-					GMS:Logs_Clear()
-					if scroller then scroller:ReleaseChildren() end
-				end)
-				header:AddChild(btnClear)
-
-				local listGroup = AceGUI:Create("InlineGroup")
-				listGroup:SetTitle("Entries")
-				listGroup:SetFullWidth(true)
-				listGroup:SetFullHeight(true)
-				listGroup:SetLayout("Fill")
-				root:AddChild(listGroup)
-
-				local scroller = AceGUI:Create("ScrollFrame")
-				scroller:SetLayout("List")
-				listGroup:AddChild(scroller)
-
-				local function Render()
-					scroller:ReleaseChildren()
-					-- newest first
-					for i = #LOGS._entries, 1, -1 do
-						local e = LOGS._entries[i]
-						local w = BuildLogWidget(e)
-						scroller:AddChild(w)
+			local function RenderAll()
+				scroller:ReleaseChildren()
+				local entries = LOGS._entries or {}
+				local minLvl = profile().minLevel or LOGS.LEVELS.INFO
+				for i = #entries, 1, -1 do
+					local e = entries[i]
+					if e and (e.levelNum or 1) >= minLvl then
+						scroller:AddChild(BuildLogRow(e))
 					end
 				end
-
-				-- live update hook
-				LOGS._onAdd = function(entry)
-					-- rebuild view with newest on top
-					pcall(Render)
-				end
-
-				btnRefresh:SetCallback("OnClick", function() Render() end)
-
-				Render()
 			end
 
-			UI_RegisterPage(PAGE_NAME, BuildPage, { title = DISPLAY_NAME })
-			UI_RegisterDockIcon(PAGE_NAME, { title = DISPLAY_NAME })
+			local function PrependEntry(entry)
+				if not scroller or not scroller.children then
+					RenderAll()
+					return
+				end
+				-- prepend widget
+				local w = BuildLogRow(entry)
+				table.insert(scroller.children, 1, w)
+				w.frame:SetParent(scroller.content)
+				scroller:DoLayout()
+			end
+
+			LOGS._ui = {
+				scroller = scroller,
+				renderAll = RenderAll,
+				prependEntry = PrependEntry,
+			}
+
+			btnRefresh:SetCallback("OnClick", function() RenderAll() end)
+			btnClear:SetCallback("OnClick", function() GMS:Logs_Clear(); RenderAll() end)
+
+			btnCopy:SetCallback("OnClick", function()
+				local entries = GMS:Logs_GetEntries(2000, profile().minLevel or 1)
+				local lines = {}
+				for i = 1, #entries do
+					local e = entries[i]
+					local mod = e.module ~= "" and (" [" .. e.module .. "]") or ""
+					lines[#lines + 1] = string.format("[%s][%s]%s %s", e.level, e.time or "", mod, e.msg or "")
+				end
+				local text = table.concat(lines, "\n")
+				if type(ChatFrame_OpenChat) == "function" then
+					ChatFrame_OpenChat(text)
+				else
+					chatPrint(text)
+				end
+			end)
+
+			RenderAll()
 		end
 
-		-- BOOT
-		LOGS:Init()
-		pcall(RegisterLogsUI)
+		UI_RegisterPage("LOGS", BuildPage, { title = DISPLAY_NAME })
+		if type(UI_RegisterDockIcon) == "function" then
+			pcall(UI_RegisterDockIcon, "LOGS", { title = DISPLAY_NAME })
+		end
 
-		-- expose short alias
-		GMS.LOGS = LOGS
+		LOGS._uiRegistered = true
+		return true
+	end
 
-		-- Notify loaded
-		if GMS and type(GMS.Print) == "function" then pcall(function() GMS:Print("Logs wurde geladen") end) end
+	-- ###########################################################################
+	-- #	SLASH: /gms logs
+	-- ###########################################################################
+
+	local function RegisterLogsSlash()
+		if LOGS._slashRegistered then return true end
+
+		local SC = GMS.SlashCommands
+		if type(SC) ~= "table" then return false end
+
+		-- 1) preferred API styles (if your SlashCommands extension provides them)
+		if type(SC.RegisterSubCommand) == "function" then
+			SC:RegisterSubCommand("logs", {
+				title = "Logs",
+				help = "/gms logs - öffnet die Logs UI",
+				handler = function() UI_Open("LOGS") end,
+			})
+			LOGS._slashRegistered = true
+			return true
+		end
+
+		if type(SC.Register) == "function" then
+			SC:Register("logs", function() UI_Open("LOGS") end, "Öffnet die Logs UI")
+			LOGS._slashRegistered = true
+			return true
+		end
+
+		-- 2) fallback: SUB table pattern (passt zu deinem bisherigen Stil)
+		SC.SUB = SC.SUB or {}
+		SC.SUB.logs = SC.SUB.logs or {}
+		SC.SUB.logs.title = SC.SUB.logs.title or "Logs"
+		SC.SUB.logs.desc = SC.SUB.logs.desc or "Öffnet die Logs UI"
+		SC.SUB.logs.run = function()
+			UI_Open("LOGS")
+		end
+
+		LOGS._slashRegistered = true
+		return true
+	end
+
+	-- ###########################################################################
+	-- #	DEFERRED BOOT (UI/SlashCommands können später laden)
+	-- ###########################################################################
+
+	function LOGS:TryWire()
+		local okUI = RegisterLogsUI()
+		local okSlash = RegisterLogsSlash()
+
+		-- keep trying until both are wired
+		if okUI and okSlash then return end
+
+		if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+			C_Timer.After(0.5, function()
+				if GMS and GMS.LOGS and GMS.LOGS.TryWire then
+					pcall(GMS.LOGS.TryWire, GMS.LOGS)
+				end
+			end)
+		end
+	end
+
+	-- ###########################################################################
+	-- #	BOOT
+	-- ###########################################################################
+
+	LOGS:Init()
+	LOGS:TryWire()
+
+	if type(GMS.Print) == "function" then
+		pcall(function() GMS:Print("Logs.lua geladen") end)
+	end

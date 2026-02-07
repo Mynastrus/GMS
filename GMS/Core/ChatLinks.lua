@@ -329,10 +329,9 @@
 		local link2 = GMS:ChatLink_Build("GMS", "/gms")
 		GMS:Print("Hover Title Override: " .. link2)
 	end
-
--- Notify that ChatLinks core finished loading
-pcall(function()
-    if GMS and type(GMS.Print) == "function" then
-        GMS:Print("ChatLinks wurde geladen")
-    end
-end)
+		
+	pcall(function()
+		if GMS and type(GMS.LOG) == "function" then
+			GMS:LOG("INFO", "CHATLINKS", "ChatLinks wurde geladen")
+		end
+	end)

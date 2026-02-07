@@ -54,7 +54,7 @@ Libs\LibDeflate\lib.xml
 # =========================
 
 Core\Core.lua
-	Core\Database.lua
+Core\Database.lua
 
 Core\SlashCommands.lua
 Core\ChatLinks.lua
