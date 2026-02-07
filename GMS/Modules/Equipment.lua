@@ -1,10 +1,9 @@
 -- ============================================================================
 --	GMS/Modules/Equipment.lua
 --	Equipment MODULE (Ace)
---	- Keine UI
---	- Spricht mit GMS.DB (AceDB) wenn verfügbar, sonst in-memory fallback
---	- Stellt API bereit zum Speichern/Laden von Equipment-Snapshots
---	- Auto-Scan: nach Login (mit Delay) + bei Änderungen
+--	- Auto-Scan: nach Login (delayed) + bei Änderungen (debounced)
+--	- Speichert Snapshot in GMS.DB (AceDB) sobald verfügbar, sonst in-memory buffer
+--	- Migrates in-memory snapshots -> DB sobald EXT:DB ready wird (OnReady + Polling)
 -- ============================================================================
 
 local LibStub = LibStub
@@ -25,7 +24,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.1.0",
+	VERSION      = "1.2.0",
 }
 
 -- ###########################################################################
@@ -76,22 +75,26 @@ if not EQUIP then
 end
 
 -- ###########################################################################
--- #	INTERNAL STORAGE
+-- #	CONFIG
 -- ###########################################################################
 
--- DB Pfad:
--- GMS.DB.profile.equipment = {
---   byGuid = { [guid] = snapshot },
---   byName = { ["Name-Realm"] = snapshot },
--- }
+local LOGIN_DELAY_SEC        = 4.0
+local LOGIN_SECOND_PASS_SEC  = 12.0
+local CHANGE_DEBOUNCE_SEC    = 0.35
 
-EQUIP._mem = {
-	byGuid = {},
-	byName = {},
-}
+local DB_POLL_MAX_TRIES      = 25
+local DB_POLL_INTERVAL_SEC   = 1.0
+
+-- ###########################################################################
+-- #	INTERNAL STORAGE (DB + MEM BUFFER)
+-- ###########################################################################
+
+EQUIP._mem = EQUIP._mem or { byGuid = {}, byName = {} }
+EQUIP._scanToken = EQUIP._scanToken or 0
+EQUIP._dbPollTries = EQUIP._dbPollTries or 0
 
 local function _dbAvailable()
-	return GMS.DB and GMS.DB.profile ~= nil
+	return (GMS.DB and GMS.DB.profile ~= nil) == true
 end
 
 local function _ensureDbTables()
@@ -132,49 +135,77 @@ local function _schedule(delay, fn)
 	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
 		C_Timer.After(tonumber(delay or 0) or 0, fn)
 	else
-		-- Fallback: sofort ausführen
 		fn()
 	end
+end
+
+function EQUIP:_MigrateMemToDb()
+	if not _dbAvailable() then return false end
+	local eq = _ensureDbTables()
+	if not eq then return false end
+
+	local moved = 0
+	for guid, snap in pairs(self._mem.byGuid or {}) do
+		eq.byGuid[guid] = snap
+		moved = moved + 1
+	end
+	for key, snap in pairs(self._mem.byName or {}) do
+		eq.byName[key] = snap
+	end
+
+	self._mem.byGuid = {}
+	self._mem.byName = {}
+
+	LOCAL_LOG("INFO", "Migrated equipment snapshots to DB", moved)
+	return true
+end
+
+function EQUIP:_TryEnsureDb(reason)
+	if _dbAvailable() then
+		_ensureDbTables()
+		self:_MigrateMemToDb()
+		return true
+	end
+	LOCAL_LOG("DEBUG", "DB not available yet", tostring(reason or "unknown"))
+	return false
+end
+
+function EQUIP:_StartDbPolling()
+	self._dbPollTries = 0
+
+	local function tick()
+		self._dbPollTries = (self._dbPollTries or 0) + 1
+
+		if self:_TryEnsureDb("poll") then
+			LOCAL_LOG("INFO", "DB became available (poll)", self._dbPollTries)
+			return
+		end
+
+		if self._dbPollTries >= DB_POLL_MAX_TRIES then
+			LOCAL_LOG("WARN", "DB still not available after polling; staying in memory", self._dbPollTries)
+			return
+		end
+
+		_schedule(DB_POLL_INTERVAL_SEC, tick)
+	end
+
+	_schedule(DB_POLL_INTERVAL_SEC, tick)
 end
 
 -- ###########################################################################
 -- #	EQUIPMENT SCAN
 -- ###########################################################################
 
-local INV_SLOTS = {
-	1,  -- Head
-	2,  -- Neck
-	3,  -- Shoulder
-	4,  -- Shirt
-	5,  -- Chest
-	6,  -- Waist
-	7,  -- Legs
-	8,  -- Feet
-	9,  -- Wrist
-	10, -- Hands
-	11, -- Finger1
-	12, -- Finger2
-	13, -- Trinket1
-	14, -- Trinket2
-	15, -- Back
-	16, -- MainHand
-	17, -- OffHand
-	18, -- Ranged
-	19, -- Tabard
-}
+local INV_SLOTS = { 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 }
 
 local function _parseItemStringFromLink(link)
 	if type(link) ~= "string" then return nil end
-	-- Extrahiert "item:...." aus einem normalen ItemLink
-	local itemString = link:match("item:[%-:%d]+")
-	return itemString
+	return link:match("item:[%-:%d]+")
 end
 
 local function _splitItemString(itemString)
 	if type(itemString) ~= "string" then return nil end
-	-- item:ITEMID:ENCHANT:...
-	local parts = {}
-	local idx = 0
+	local parts, idx = {}, 0
 	for token in itemString:gmatch("([^:]+)") do
 		idx = idx + 1
 		parts[idx] = token
@@ -189,20 +220,14 @@ local function _extractEnchantAndGems(link)
 	local parts = _splitItemString(itemString)
 	if not parts or #parts < 3 then return nil, nil end
 
-	-- parts[1] = "item"
-	-- parts[2] = itemId
-	-- parts[3] = enchantId
 	local enchantId = tonumber(parts[3]) or nil
 
-	-- Gems: in vielen Clients liegen 4 Gem-Slots danach (pos kann je nach client variieren,
-	-- aber klassische Struktur: gem1..gem4 direkt nach enchant)
-	-- Wir nehmen konservativ die nächsten 4 Felder.
-	local gems = nil
 	local g1 = tonumber(parts[4] or "") or nil
 	local g2 = tonumber(parts[5] or "") or nil
 	local g3 = tonumber(parts[6] or "") or nil
 	local g4 = tonumber(parts[7] or "") or nil
 
+	local gems = nil
 	if g1 or g2 or g3 or g4 then
 		gems = { g1, g2, g3, g4 }
 	end
@@ -211,11 +236,15 @@ local function _extractEnchantAndGems(link)
 end
 
 local function _getPlayerIdentity()
-	local name, realm = UnitName and UnitName("player") or nil, nil
+	local name, realm = nil, nil
+
 	if UnitFullName then
 		local n, r = UnitFullName("player")
 		if n and n ~= "" then name = n end
 		if r and r ~= "" then realm = r end
+	end
+	if not name and UnitName then
+		name = UnitName("player")
 	end
 
 	local class = nil
@@ -231,7 +260,7 @@ local function _getPlayerIdentity()
 	end
 
 	local level = UnitLevel and UnitLevel("player") or nil
-	local guid = UnitGUID and UnitGUID("player") or nil
+	local guid  = UnitGUID  and UnitGUID("player")  or nil
 
 	return guid, name, realm, class, race, level
 end
@@ -241,7 +270,6 @@ local function _scanPlayerEquipment()
 
 	local equippedIlvl, overallIlvl = nil, nil
 	if type(GetAverageItemLevel) == "function" then
-		-- returns: equipped, total
 		local eq, total = GetAverageItemLevel()
 		if eq and eq > 0 then equippedIlvl = eq end
 		if total and total > 0 then overallIlvl = total end
@@ -250,8 +278,8 @@ local function _scanPlayerEquipment()
 	local slots = {}
 
 	for _, slotId in ipairs(INV_SLOTS) do
-		local itemId = GetInventoryItemID and GetInventoryItemID("player", slotId) or nil
-		local link = GetInventoryItemLink and GetInventoryItemLink("player", slotId) or nil
+		local itemId = (GetInventoryItemID and GetInventoryItemID("player", slotId)) or nil
+		local link   = (GetInventoryItemLink and GetInventoryItemLink("player", slotId)) or nil
 
 		local itemLevel = nil
 		if link and type(GetDetailedItemLevelInfo) == "function" then
@@ -265,116 +293,28 @@ local function _scanPlayerEquipment()
 		end
 
 		slots[slotId] = {
-			slotId   = slotId,
-			itemId   = itemId,
-			link     = link,
-			ilvl     = itemLevel,
-			enchant  = enchantId,
-			gems     = gems,
+			slotId  = slotId,
+			itemId  = itemId,
+			link    = link,
+			ilvl    = itemLevel,
+			enchant = enchantId,
+			gems    = gems,
 		}
 	end
 
-	local snapshot = {
-		guid   = guid,
-		name   = name,
-		realm  = realm,
-		class  = class,
-		race   = race,
-		level  = level,
-		ilvl   = equippedIlvl or overallIlvl,
+	return {
+		guid         = guid,
+		name         = name,
+		realm        = realm,
+		class        = class,
+		race         = race,
+		level        = level,
+		ilvl         = equippedIlvl or overallIlvl,
 		ilvlEquipped = equippedIlvl,
 		ilvlOverall  = overallIlvl,
-		slots  = slots,
-		ts     = _nowEpoch(),
+		slots        = slots,
+		ts           = _nowEpoch(),
 	}
-
-	return snapshot
-end
-
--- ###########################################################################
--- #	AUTO-SCAN (Login + Changes)
--- ###########################################################################
-
-local LOGIN_DELAY_SEC = 4.0
-local CHANGE_DEBOUNCE_SEC = 0.35
-
-EQUIP._scanToken = 0
-
-function EQUIP:_ScheduleScan(delaySec, reason)
-	self._scanToken = (self._scanToken or 0) + 1
-	local token = self._scanToken
-
-	_schedule(delaySec or 0, function()
-		-- Token guard: nur der neueste geplante Scan darf laufen
-		if token ~= self._scanToken then return end
-
-		local snap = _scanPlayerEquipment()
-		local ok = self:SaveSnapshot(snap)
-
-		if ok then
-			LOCAL_LOG("INFO", "Equipment scanned + saved", tostring(reason or "unknown"), snap.guid or "-", _normNameRealm(snap.name, snap.realm) or "-")
-		else
-			LOCAL_LOG("WARN", "Equipment scan produced invalid snapshot", tostring(reason or "unknown"))
-		end
-	end)
-end
-
-function EQUIP:_OnPlayerLogin()
-	-- bewusst kurz warten, damit Inventory/ItemInfo stabil ist
-	self:_ScheduleScan(LOGIN_DELAY_SEC, "login-delay")
-
-	-- Optionaler zweiter Pass, falls ItemLinks beim ersten Mal noch nicht da sind
-	self:_ScheduleScan(LOGIN_DELAY_SEC + 8.0, "login-second-pass")
-end
-
-function EQUIP:_OnEquipmentChanged(slotId, hasItem)
-	self:_ScheduleScan(CHANGE_DEBOUNCE_SEC, "equip-changed")
-end
-
-function EQUIP:_OnUnitInventoryChanged(unit)
-	if unit ~= "player" then return end
-	self:_ScheduleScan(CHANGE_DEBOUNCE_SEC, "unit-inv-changed")
-end
-
--- ###########################################################################
--- #	LIFECYCLE
--- ###########################################################################
-
-function EQUIP:OnInitialize()
-	LOCAL_LOG("INFO", "Module initialized (no UI)")
-
-	-- Optional: Registry-Eintrag falls ModuleStates aktiv ist
-	if GMS.REGISTRY and GMS.REGISTRY.MOD then
-		GMS.REGISTRY.MOD[MODULE_NAME] = {
-			key = MODULE_NAME,
-			name = METADATA.INTERN_NAME,
-			displayName = METADATA.DISPLAY_NAME,
-			version = METADATA.VERSION,
-			readyKey = "MOD:" .. MODULE_NAME,
-			state = { status = "init" },
-		}
-	end
-end
-
-function EQUIP:OnEnable()
-	LOCAL_LOG("INFO", "Module enabled")
-
-	-- Wenn DB schon da ist, Tabellen direkt anlegen
-	if _dbAvailable() then
-		_ensureDbTables()
-		LOCAL_LOG("DEBUG", "DB available; tables ensured")
-	else
-		LOCAL_LOG("DEBUG", "DB not available; using in-memory store")
-	end
-
-	-- Events
-	self:RegisterEvent("PLAYER_LOGIN", "_OnPlayerLogin")
-	self:RegisterEvent("PLAYER_EQUIPMENT_CHANGED", "_OnEquipmentChanged")
-	self:RegisterEvent("UNIT_INVENTORY_CHANGED", "_OnUnitInventoryChanged")
-
-	if GMS.SetReady then
-		GMS:SetReady("MOD:" .. MODULE_NAME)
-	end
 end
 
 -- ###########################################################################
@@ -388,21 +328,6 @@ end
 function EQUIP:GetStore()
 	return _getStore()
 end
-
--- Snapshot-Format (empfohlen):
--- {
---   guid = "Player-...",
---   name = "Name",
---   realm = "Realm",
---   class = "WARRIOR",
---   ilvl = 512.3,
---   ilvlEquipped = 512.3,
---   ilvlOverall = 512.3,
---   slots = {
---     [slotId] = { itemId=..., link=..., ilvl=..., enchant=..., gems={...} },
---   },
---   ts = epochSeconds,
--- }
 
 function EQUIP:SaveSnapshot(snapshot)
 	if type(snapshot) ~= "table" then
@@ -422,72 +347,92 @@ function EQUIP:SaveSnapshot(snapshot)
 		snapshot.ts = _nowEpoch()
 	end
 
+	-- Erst in aktuellen Store (DB oder MEM) schreiben
 	local store = _getStore()
 
 	if guid and guid ~= "" then
 		store.byGuid[guid] = snapshot
 	end
-
 	if keyName then
 		store.byName[keyName] = snapshot
 	end
 
+	-- Falls DB inzwischen da ist: MEM -> DB migrieren
+	self:_TryEnsureDb("save")
+
+	LOCAL_LOG("INFO", "Snapshot saved", guid or "-", keyName or "-", self:UsesDatabase() and "DB" or "MEM")
 	return true
 end
 
-function EQUIP:GetSnapshotByGUID(guid)
-	if not guid or guid == "" then return nil end
-	local store = _getStore()
-	return store.byGuid[guid]
-end
-
-function EQUIP:GetSnapshotByName(name, realm)
-	local keyName = _normNameRealm(name, realm)
-	if not keyName then return nil end
-	local store = _getStore()
-	return store.byName[keyName]
-end
-
-function EQUIP:DeleteSnapshotByGUID(guid)
-	if not guid or guid == "" then return false end
-	local store = _getStore()
-	local snap = store.byGuid[guid]
-	if not snap then return false end
-
-	if snap.name and snap.name ~= "" then
-		local keyName = _normNameRealm(snap.name, snap.realm)
-		if keyName then store.byName[keyName] = nil end
-	end
-
-	store.byGuid[guid] = nil
-	LOCAL_LOG("INFO", "Snapshot deleted (guid)", guid)
-	return true
-end
-
-function EQUIP:DeleteSnapshotByName(name, realm)
-	local keyName = _normNameRealm(name, realm)
-	if not keyName then return false end
-	local store = _getStore()
-	local snap = store.byName[keyName]
-	if not snap then return false end
-
-	if snap.guid and snap.guid ~= "" then
-		store.byGuid[snap.guid] = nil
-	end
-
-	store.byName[keyName] = nil
-	LOCAL_LOG("INFO", "Snapshot deleted (name)", keyName)
-	return true
-end
-
-function EQUIP:ResetAll()
-	local store = _getStore()
-	store.byGuid = {}
-	store.byName = {}
-	LOCAL_LOG("WARN", "All equipment snapshots reset")
-end
-
--- Manuelles Triggern (z.B. Debug)
 function EQUIP:ScanNow(reason)
 	self:_ScheduleScan(0, reason or "manual")
+end
+
+-- ###########################################################################
+-- #	AUTO-SCAN
+-- ###########################################################################
+
+function EQUIP:_ScheduleScan(delaySec, reason)
+	self._scanToken = (self._scanToken or 0) + 1
+	local token = self._scanToken
+
+	_schedule(delaySec or 0, function()
+		if token ~= self._scanToken then return end
+		local snap = _scanPlayerEquipment()
+		local ok = self:SaveSnapshot(snap)
+		if ok then
+			LOCAL_LOG("INFO", "Equipment scanned + saved", tostring(reason or "unknown"))
+		else
+			LOCAL_LOG("WARN", "Equipment scan produced invalid snapshot", tostring(reason or "unknown"))
+		end
+	end)
+end
+
+function EQUIP:_OnPlayerLogin()
+	-- DB kann später kommen
+	self:_StartDbPolling()
+
+	-- bewusst warten
+	self:_ScheduleScan(LOGIN_DELAY_SEC, "login-delay")
+	self:_ScheduleScan(LOGIN_SECOND_PASS_SEC, "login-second-pass")
+end
+
+function EQUIP:_OnEquipmentChanged()
+	self:_ScheduleScan(CHANGE_DEBOUNCE_SEC, "equip-changed")
+end
+
+function EQUIP:_OnUnitInventoryChanged(unit)
+	if unit ~= "player" then return end
+	self:_ScheduleScan(CHANGE_DEBOUNCE_SEC, "unit-inv-changed")
+end
+
+-- ###########################################################################
+-- #	LIFECYCLE
+-- ###########################################################################
+
+function EQUIP:OnInitialize()
+	LOCAL_LOG("INFO", "Module initialized")
+
+	-- DB-ready Hook
+	if type(GMS.OnReady) == "function" then
+		GMS:OnReady("EXT:DB", function()
+			LOCAL_LOG("INFO", "EXT:DB ready -> ensure DB + migrate")
+			self:_TryEnsureDb("onready")
+		end)
+	end
+end
+
+function EQUIP:OnEnable()
+	LOCAL_LOG("INFO", "Module enabled")
+
+	self:RegisterEvent("PLAYER_LOGIN", "_OnPlayerLogin")
+	self:RegisterEvent("PLAYER_EQUIPMENT_CHANGED", "_OnEquipmentChanged")
+	self:RegisterEvent("UNIT_INVENTORY_CHANGED", "_OnUnitInventoryChanged")
+
+	-- falls DB schon da ist
+	self:_TryEnsureDb("enable")
+
+	if GMS.SetReady then
+		GMS:SetReady("MOD:" .. MODULE_NAME)
+	end
 end
