@@ -17,6 +17,30 @@
 	local GMS = AceAddon:GetAddon("GMS", true)
 	if not GMS then return end
 
+	-- ###########################################################################
+	-- #	PROJECT STANDARD: GLOBAL LOG BUFFER + LOCAL_LOG()
+	-- ###########################################################################
+
+	GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
+
+	local function LOCAL_LOG(level, source, msg, ...)
+		local buf = GMS._LOG_BUFFER
+		if not buf then return end
+
+		local t = 0
+		if type(time) == "function" then
+			t = time()
+		end
+
+		buf[#buf + 1] = {
+			t = t,
+			level = tostring(level or ""),
+			source = tostring(source or ""),
+			msg = tostring(msg or ""),
+			args = { ... },
+		}
+	end
+
 	GMS:RegisterExtension({
 		key = "LOGS",
 		name = "LOGS",
@@ -254,8 +278,12 @@
 				LOGS._entries = db.profile.entries or {}
 				db.profile.entries = LOGS._entries
 				trimToMax()
+				LOCAL_LOG("INFO", "LOGS", "AceDB initialized (persisted ringbuffer)")
 				return
 			end
+			LOCAL_LOG("WARN", "LOGS", "AceDB.New failed; fallback to in-memory only", ok, db)
+		else
+			LOCAL_LOG("WARN", "LOGS", "AceDB not available; fallback to in-memory only")
 		end
 		-- fallback: in-memory only
 		LOGS._db = nil
@@ -276,6 +304,7 @@
 		if LOGS._ui and LOGS._ui.scroller then
 			pcall(function() LOGS._ui.scroller:ReleaseChildren() end)
 		end
+		LOCAL_LOG("INFO", "LOGS", "Logs cleared")
 	end
 
 	function GMS:Logs_GetEntries(n, minLevel)
@@ -314,11 +343,15 @@
 			msg = text,
 		}
 
+		-- mirror into global buffer (project standard)
+		LOCAL_LOG(entry.level, mod ~= "" and mod or "GMS", base, ...)
+
 		local entries = LOGS._entries
 		if not entries then
 			LOGS._entries = {}
 			entries = LOGS._entries
 			if LOGS._db then LOGS._db.profile.entries = entries end
+			LOCAL_LOG("WARN", "LOGS", "Entries table missing; recreated at runtime")
 		end
 
 		entries[#entries + 1] = entry
@@ -467,12 +500,13 @@
 			RenderAll()
 		end
 
-		UI_RegisterPage("LOGS", BuildPage, { title = DISPLAY_NAME })
+		UI_RegisterPage(PAGE_NAME, BuildPage, { title = DISPLAY_NAME })
 		if type(UI_RegisterDockIcon) == "function" then
-			pcall(UI_RegisterDockIcon, "LOGS", { title = DISPLAY_NAME })
+			pcall(UI_RegisterDockIcon, PAGE_NAME, { title = DISPLAY_NAME })
 		end
 
 		LOGS._uiRegistered = true
+		LOCAL_LOG("INFO", "LOGS", "UI page registered")
 		return true
 	end
 
@@ -494,12 +528,14 @@
 				handler = function() UI_Open("LOGS") end,
 			})
 			LOGS._slashRegistered = true
+			LOCAL_LOG("INFO", "LOGS", "Slash subcommand registered via RegisterSubCommand")
 			return true
 		end
 
 		if type(SC.Register) == "function" then
 			SC:Register("logs", function() UI_Open("LOGS") end, "Öffnet die Logs UI")
 			LOGS._slashRegistered = true
+			LOCAL_LOG("INFO", "LOGS", "Slash subcommand registered via Register")
 			return true
 		end
 
@@ -513,6 +549,7 @@
 		end
 
 		LOGS._slashRegistered = true
+		LOCAL_LOG("INFO", "LOGS", "Slash subcommand registered via SC.SUB fallback")
 		return true
 	end
 
@@ -536,4 +573,3 @@
 	-- ###########################################################################
 	-- #	BOOT
 	-- ###########################################################################
-
