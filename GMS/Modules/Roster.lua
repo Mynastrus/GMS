@@ -11,7 +11,15 @@
 	--		- Async Build: X Einträge pro Frame (Token-Guard gegen alte Builds)
 	-- ============================================================================
 
-	local LibStub = _G.LibStub
+	local METADATA = {
+		TYPE = "MODULE",
+		INTERN_NAME = "ROSTER",
+		SHORT_NAME = "Roster",
+		DISPLAY_NAME = "Roster",
+		VERSION = "1.0.1",
+	}
+
+	local LibStub = LibStub
 	if not LibStub then return end
 
 	local AceAddon = LibStub("AceAddon-3.0", true)
@@ -22,6 +30,30 @@
 
 	local AceGUI = LibStub("AceGUI-3.0", true)
 	if not AceGUI then return end
+
+	-- ---------------------------------------------------------------------------
+	--	Logging (buffered)
+	-- ---------------------------------------------------------------------------
+	GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
+
+	local function LOCAL_LOG(level, msg, ...)
+		local entry = {
+			ts = (type(GetTime) == "function") and GetTime() or 0,
+			level = tostring(level or "INFO"),
+			type = tostring(METADATA.TYPE or "UNKNOWN"),
+			source = tostring(METADATA.SHORT_NAME or "UNKNOWN"),
+			msg = tostring(msg or ""),
+			args = { ... },
+		}
+
+		local buffer = GMS._LOG_BUFFER
+		local idx = #buffer + 1
+		buffer[idx] = entry
+
+		if type(GMS._LOG_NOTIFY) == "function" then
+			pcall(GMS._LOG_NOTIFY, entry, idx)
+		end
+	end
 
 	local MODULE_NAME = "ROSTER"
 	local DISPLAY_NAME = "Roster"
@@ -42,20 +74,6 @@
 	Roster._defaultColumnsSeeded = Roster._defaultColumnsSeeded or false
 	Roster._buildToken = Roster._buildToken or 0
 	Roster._lastListParent = Roster._lastListParent or nil
-
-	-- ---------------------------------------------------------------------------
-	--	Log-Helfer (nutzt GMS Logging Buffer, falls vorhanden)
-	--	@param level string
-	--	@param message string
-	--	@param context table|nil
-	-- ---------------------------------------------------------------------------
-	local function LOG(level, message, context)
-		if type(GMS.Printf) == "function" then
-			GMS:Printf("[%s] %s", tostring(level or "INFO"), tostring(message or ""))
-		elseif type(GMS.Print) == "function" then
-			GMS:Print(string.format("[%s] %s", tostring(level or "INFO"), tostring(message or "")))
-		end
-	end
 
 	-- ###########################################################################
 	-- #	NAME NORMALIZATION
@@ -796,7 +814,7 @@
 		end)
 
 		self._pageRegistered = true
-		LOG("INFO", "UI page registered", { page = "Roster" })
+		LOCAL_LOG("INFO", "UI page registered", { page = "Roster" })
 
 		return true
 	end
@@ -827,7 +845,7 @@
 		})
 
 		self._dockRegistered = true
-		LOG("INFO", "RightDock icon registered", { id = "Roster" })
+		LOCAL_LOG("INFO", "RightDock icon registered", { id = "Roster" })
 
 		return true
 	end
