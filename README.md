@@ -35,20 +35,22 @@ Das Projekt dient als **zentrale Plattform** für Gilden-bezogene Tools wie Rost
 
 ```text
 GMS/
-├─ GMS.lua                # Core Entry (AceAddon Bootstrap)
 ├─ GMS.toc
 │
 ├─ Core/
+│  ├─ Core.lua            # Core Entry (AceAddon Bootstrap)
+│  ├─ ChatLinks.lua       # ChatLinks functions
 │  ├─ UI.lua              # UI Shell & Page Handling
-│  ├─ Modules.lua         # Modul-Registry & Loader
-│  ├─ Logging.lua         # Logging Bootstrap
+│  ├─ Database.lua        # Database functions
+│  ├─ Logs.lua            # Logging Bootstrap
 │  └─ SlashCommands.lua   # /gms Command & Subcommands
 │
 ├─ Modules/
-│  ├─ Roster.lua          # Beispielmodul (Roster)
-│  └─ CharInfo.lua        # Beispielmodul (Character Info)
+│  ├─ Roster.lua          # Gildenroster
+│  └─ CharInfo.lua        # Character Overview
 │
 ├─ Libs/
 │  └─ Ace3/               # Eingebettete Ace3 Libraries
+│  └─ LibDeflate/         # LibDeflate
 │
 └─ README.md
