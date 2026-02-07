@@ -2,8 +2,9 @@
 --	GMS/Modules/Equipment.lua
 --	Equipment MODULE (Ace)
 --	- Auto-Scan: nach Login (delayed) + bei Änderungen (debounced)
---	- Speichert Snapshot in GMS.DB (AceDB) sobald verfügbar, sonst in-memory buffer
---	- Migrates in-memory snapshots -> DB sobald EXT:DB ready wird (OnReady + Polling)
+--	- Persistiert Snapshots in AceDB Namespace "Equipment" (GMS.DB:RegisterModule)
+--	- Speichert bewusst in ns.global (nicht profile)
+--	- Memory buffer falls DB noch nicht bereit ist, Migration sobald EXT:DB ready
 -- ============================================================================
 
 local LibStub = LibStub
@@ -24,7 +25,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.2.0",
+	VERSION      = "1.3.0",
 }
 
 -- ###########################################################################
@@ -86,48 +87,101 @@ local DB_POLL_MAX_TRIES      = 25
 local DB_POLL_INTERVAL_SEC   = 1.0
 
 -- ###########################################################################
--- #	INTERNAL STORAGE (DB + MEM BUFFER)
+-- #	DB (Namespace) + MEMORY BUFFER
 -- ###########################################################################
 
 EQUIP._mem = EQUIP._mem or { byGuid = {}, byName = {} }
+EQUIP._ns = EQUIP._ns or nil
+
 EQUIP._scanToken = EQUIP._scanToken or 0
 EQUIP._dbPollTries = EQUIP._dbPollTries or 0
 
-local function _dbAvailable()
-	return (GMS.DB and GMS.DB.profile ~= nil) == true
+local DEFAULTS = {
+	profile = {},
+	global = {
+		equipment = {
+			byGuid = {},
+			byName = {},
+		},
+	},
+}
+
+local function _dbReady()
+	return (GMS and GMS.db and GMS.DB and type(GMS.DB.RegisterModule) == "function") == true
 end
 
-local function _ensureDbTables()
-	if not _dbAvailable() then return nil end
-	local p = GMS.DB.profile
+function EQUIP:_EnsureNamespace()
+	if self._ns then return self._ns end
+	if not _dbReady() then return nil end
 
-	p.equipment = p.equipment or {}
-	p.equipment.byGuid = p.equipment.byGuid or {}
-	p.equipment.byName = p.equipment.byName or {}
+	local ns = GMS.DB:RegisterModule(MODULE_NAME, DEFAULTS)
+	if ns and ns.global then
+		ns.global.equipment = ns.global.equipment or {}
+		ns.global.equipment.byGuid = ns.global.equipment.byGuid or {}
+		ns.global.equipment.byName = ns.global.equipment.byName or {}
 
-	return p.equipment
-end
-
-local function _getStore()
-	if _dbAvailable() then
-		local eq = _ensureDbTables()
-		if eq then return eq end
+		self._ns = ns
+		LOCAL_LOG("INFO", "Equipment namespace ready (global storage)")
+		return ns
 	end
-	return EQUIP._mem
-end
 
-local function _normNameRealm(name, realm)
-	if not name or name == "" then return nil end
-	if realm and realm ~= "" then
-		return tostring(name) .. "-" .. tostring(realm)
-	end
-	return tostring(name)
-end
-
-local function _nowEpoch()
-	if type(GetServerTime) == "function" then return GetServerTime() end
-	if type(time) == "function" then return time() end
 	return nil
+end
+
+function EQUIP:_DbAvailable()
+	return self:_EnsureNamespace() ~= nil
+end
+
+function EQUIP:_GetDbStore()
+	local ns = self:_EnsureNamespace()
+	if not ns or not ns.global then return nil end
+
+	local g = ns.global
+	g.equipment = g.equipment or {}
+	g.equipment.byGuid = g.equipment.byGuid or {}
+	g.equipment.byName = g.equipment.byName or {}
+
+	return g.equipment
+end
+
+function EQUIP:_GetStore()
+	local dbStore = self:_GetDbStore()
+	if dbStore then
+		return dbStore, true
+	end
+	return self._mem, false
+end
+
+function EQUIP:_MigrateMemToDb()
+	local dbStore = self:_GetDbStore()
+	if not dbStore then return false end
+
+	local moved = 0
+
+	for guid, snap in pairs(self._mem.byGuid or {}) do
+		dbStore.byGuid[guid] = snap
+		moved = moved + 1
+	end
+
+	for key, snap in pairs(self._mem.byName or {}) do
+		dbStore.byName[key] = snap
+	end
+
+	self._mem.byGuid = {}
+	self._mem.byName = {}
+
+	LOCAL_LOG("INFO", "Migrated equipment snapshots to DB.global", moved)
+	return true
+end
+
+function EQUIP:_TryEnsureDb(reason)
+	if self:_DbAvailable() then
+		self:_MigrateMemToDb()
+		return true
+	end
+
+	LOCAL_LOG("DEBUG", "DB not available yet", tostring(reason or "unknown"))
+	return false
 end
 
 local function _schedule(delay, fn)
@@ -137,37 +191,6 @@ local function _schedule(delay, fn)
 	else
 		fn()
 	end
-end
-
-function EQUIP:_MigrateMemToDb()
-	if not _dbAvailable() then return false end
-	local eq = _ensureDbTables()
-	if not eq then return false end
-
-	local moved = 0
-	for guid, snap in pairs(self._mem.byGuid or {}) do
-		eq.byGuid[guid] = snap
-		moved = moved + 1
-	end
-	for key, snap in pairs(self._mem.byName or {}) do
-		eq.byName[key] = snap
-	end
-
-	self._mem.byGuid = {}
-	self._mem.byName = {}
-
-	LOCAL_LOG("INFO", "Migrated equipment snapshots to DB", moved)
-	return true
-end
-
-function EQUIP:_TryEnsureDb(reason)
-	if _dbAvailable() then
-		_ensureDbTables()
-		self:_MigrateMemToDb()
-		return true
-	end
-	LOCAL_LOG("DEBUG", "DB not available yet", tostring(reason or "unknown"))
-	return false
 end
 
 function EQUIP:_StartDbPolling()
@@ -190,6 +213,20 @@ function EQUIP:_StartDbPolling()
 	end
 
 	_schedule(DB_POLL_INTERVAL_SEC, tick)
+end
+
+local function _normNameRealm(name, realm)
+	if not name or name == "" then return nil end
+	if realm and realm ~= "" then
+		return tostring(name) .. "-" .. tostring(realm)
+	end
+	return tostring(name)
+end
+
+local function _nowEpoch()
+	if type(GetServerTime) == "function" then return GetServerTime() end
+	if type(time) == "function" then return time() end
+	return nil
 end
 
 -- ###########################################################################
@@ -322,11 +359,12 @@ end
 -- ###########################################################################
 
 function EQUIP:UsesDatabase()
-	return _dbAvailable() == true
+	return self:_DbAvailable() == true
 end
 
 function EQUIP:GetStore()
-	return _getStore()
+	local store, _ = self:_GetStore()
+	return store
 end
 
 function EQUIP:SaveSnapshot(snapshot)
@@ -347,8 +385,7 @@ function EQUIP:SaveSnapshot(snapshot)
 		snapshot.ts = _nowEpoch()
 	end
 
-	-- Erst in aktuellen Store (DB oder MEM) schreiben
-	local store = _getStore()
+	local store, isDb = self:_GetStore()
 
 	if guid and guid ~= "" then
 		store.byGuid[guid] = snapshot
@@ -360,7 +397,7 @@ function EQUIP:SaveSnapshot(snapshot)
 	-- Falls DB inzwischen da ist: MEM -> DB migrieren
 	self:_TryEnsureDb("save")
 
-	LOCAL_LOG("INFO", "Snapshot saved", guid or "-", keyName or "-", self:UsesDatabase() and "DB" or "MEM")
+	LOCAL_LOG("INFO", "Snapshot saved", guid or "-", keyName or "-", isDb and "DB.global" or "MEM")
 	return true
 end
 
@@ -378,8 +415,10 @@ function EQUIP:_ScheduleScan(delaySec, reason)
 
 	_schedule(delaySec or 0, function()
 		if token ~= self._scanToken then return end
+
 		local snap = _scanPlayerEquipment()
 		local ok = self:SaveSnapshot(snap)
+
 		if ok then
 			LOCAL_LOG("INFO", "Equipment scanned + saved", tostring(reason or "unknown"))
 		else
@@ -389,10 +428,7 @@ function EQUIP:_ScheduleScan(delaySec, reason)
 end
 
 function EQUIP:_OnPlayerLogin()
-	-- DB kann später kommen
 	self:_StartDbPolling()
-
-	-- bewusst warten
 	self:_ScheduleScan(LOGIN_DELAY_SEC, "login-delay")
 	self:_ScheduleScan(LOGIN_SECOND_PASS_SEC, "login-second-pass")
 end
@@ -413,7 +449,6 @@ end
 function EQUIP:OnInitialize()
 	LOCAL_LOG("INFO", "Module initialized")
 
-	-- DB-ready Hook
 	if type(GMS.OnReady) == "function" then
 		GMS:OnReady("EXT:DB", function()
 			LOCAL_LOG("INFO", "EXT:DB ready -> ensure DB + migrate")
@@ -429,7 +464,6 @@ function EQUIP:OnEnable()
 	self:RegisterEvent("PLAYER_EQUIPMENT_CHANGED", "_OnEquipmentChanged")
 	self:RegisterEvent("UNIT_INVENTORY_CHANGED", "_OnUnitInventoryChanged")
 
-	-- falls DB schon da ist
 	self:_TryEnsureDb("enable")
 
 	if GMS.SetReady then
