@@ -2,8 +2,9 @@
 --	GMS/Modules/Equipment.lua
 --	Equipment MODULE (Ace)
 --	- Auto-Scan: nach Login (delayed) + bei Änderungen (debounced)
---	- Persistiert Snapshots in GMS.db.global.equipment (SavedVariables: GMS_DB.global)
---	- Memory buffer falls DB noch nicht bereit ist, Migration sobald EXT:DB ready
+--	- Persistiert Snapshots direkt in SavedVariables (GMS_DB.global.guilds[key].EQUIPMENT)
+--	  und zusätzlich (best-effort) als Mirror in GMS.db.global.guilds[key].EQUIPMENT
+--	- Memory buffer falls DB/SV noch nicht bereit ist, Migration sobald möglich
 -- ============================================================================
 
 local LibStub = LibStub
@@ -24,7 +25,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.0",
+	VERSION      = "1.3.1",
 }
 
 -- ###########################################################################
@@ -86,35 +87,131 @@ local DB_POLL_MAX_TRIES      = 25
 local DB_POLL_INTERVAL_SEC   = 1.0
 
 -- ###########################################################################
--- #	INTERNAL STORAGE (DB.global + MEM BUFFER)
+-- #	INTERNAL STORAGE (SV/DB + MEM BUFFER)
 -- ###########################################################################
 
 EQUIP._mem = EQUIP._mem or { byGuid = {}, byName = {} }
 EQUIP._scanToken = EQUIP._scanToken or 0
 EQUIP._dbPollTries = EQUIP._dbPollTries or 0
 
-local function _dbAvailable()
-	-- Database.lua initialisiert: GMS.db (AceDB handle)
-	return (GMS and GMS.db and type(GMS.db) == "table" and GMS.db.global ~= nil) == true
+local function _schedule(delay, fn)
+	if type(fn) ~= "function" then return end
+	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+		C_Timer.After(tonumber(delay or 0) or 0, fn)
+	else
+		fn()
+	end
 end
 
-local function _ensureDbTables()
-	if not _dbAvailable() then return nil end
+local function _getGuildKey()
+	local realm = (GetNormalizedRealmName and GetNormalizedRealmName()) or (GetRealmName and GetRealmName()) or ""
+	local faction = (UnitFactionGroup and UnitFactionGroup("player")) or ""
+	local gname = (GetGuildInfo and GetGuildInfo("player")) or ""
+	if realm == "" or faction == "" or gname == "" then
+		return nil
+	end
+	return tostring(realm) .. "|" .. tostring(faction) .. "|" .. tostring(gname)
+end
 
-	local g = GMS.db.global
-	g.equipment = g.equipment or {}
-	g.equipment.byGuid = g.equipment.byGuid or {}
-	g.equipment.byName = g.equipment.byName or {}
+local function _svAvailable()
+	-- Wichtig: wir speichern bewusst direkt in der echten SavedVariable
+	return type(GMS_DB) == "table"
+end
 
-	return g.equipment
+local function _ensureSvTables()
+	if not _svAvailable() then return nil end
+
+	GMS_DB.global = GMS_DB.global or {}
+	GMS_DB.global.guilds = GMS_DB.global.guilds or {}
+
+	local key = _getGuildKey()
+	if not key then
+		return nil
+	end
+
+	local guild = GMS_DB.global.guilds[key]
+	if not guild then
+		guild = { __version = 1 }
+		GMS_DB.global.guilds[key] = guild
+	end
+
+	guild.EQUIPMENT = guild.EQUIPMENT or {}
+	guild.EQUIPMENT.byGuid = guild.EQUIPMENT.byGuid or {}
+	guild.EQUIPMENT.byName = guild.EQUIPMENT.byName or {}
+
+	-- Best-effort Mirror in AceDB Handle (falls vorhanden)
+	if GMS.db and GMS.db.global then
+		GMS.db.global.guilds = GMS.db.global.guilds or {}
+		local g2 = GMS.db.global.guilds[key]
+		if not g2 then
+			g2 = guild -- gleiche Referenz wenn möglich
+			GMS.db.global.guilds[key] = g2
+		end
+		g2.EQUIPMENT = guild.EQUIPMENT
+	end
+
+	return guild.EQUIPMENT
 end
 
 local function _getStore()
-	if _dbAvailable() then
-		local eq = _ensureDbTables()
-		if eq then return eq end
-	end
+	local eq = _ensureSvTables()
+	if eq then return eq end
 	return EQUIP._mem
+end
+
+function EQUIP:_MigrateMemToSv()
+	local eq = _ensureSvTables()
+	if not eq then
+		return false
+	end
+
+	local moved = 0
+	for guid, snap in pairs(self._mem.byGuid or {}) do
+		eq.byGuid[guid] = snap
+		moved = moved + 1
+	end
+	for key, snap in pairs(self._mem.byName or {}) do
+		eq.byName[key] = snap
+	end
+
+	self._mem.byGuid = {}
+	self._mem.byName = {}
+
+	LOCAL_LOG("INFO", "Migrated equipment snapshots to SV guild.EQUIPMENT", moved)
+	return true
+end
+
+function EQUIP:_TryEnsureStore(reason)
+	local eq = _ensureSvTables()
+	if eq then
+		self:_MigrateMemToSv()
+		return true
+	end
+
+	LOCAL_LOG("DEBUG", "SV store not available yet", tostring(reason or "unknown"))
+	return false
+end
+
+function EQUIP:_StartStorePolling()
+	self._dbPollTries = 0
+
+	local function tick()
+		self._dbPollTries = (self._dbPollTries or 0) + 1
+
+		if self:_TryEnsureStore("poll") then
+			LOCAL_LOG("INFO", "SV store became available (poll)", self._dbPollTries)
+			return
+		end
+
+		if self._dbPollTries >= DB_POLL_MAX_TRIES then
+			LOCAL_LOG("WARN", "SV store still not available after polling; staying in memory", self._dbPollTries)
+			return
+		end
+
+		_schedule(DB_POLL_INTERVAL_SEC, tick)
+	end
+
+	_schedule(DB_POLL_INTERVAL_SEC, tick)
 end
 
 local function _normNameRealm(name, realm)
@@ -129,68 +226,6 @@ local function _nowEpoch()
 	if type(GetServerTime) == "function" then return GetServerTime() end
 	if type(time) == "function" then return time() end
 	return nil
-end
-
-local function _schedule(delay, fn)
-	if type(fn) ~= "function" then return end
-	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-		C_Timer.After(tonumber(delay or 0) or 0, fn)
-	else
-		fn()
-	end
-end
-
-function EQUIP:_MigrateMemToDb()
-	if not _dbAvailable() then return false end
-	local eq = _ensureDbTables()
-	if not eq then return false end
-
-	local moved = 0
-	for guid, snap in pairs(self._mem.byGuid or {}) do
-		eq.byGuid[guid] = snap
-		moved = moved + 1
-	end
-	for key, snap in pairs(self._mem.byName or {}) do
-		eq.byName[key] = snap
-	end
-
-	self._mem.byGuid = {}
-	self._mem.byName = {}
-
-	LOCAL_LOG("INFO", "Migrated equipment snapshots to DB.global", moved)
-	return true
-end
-
-function EQUIP:_TryEnsureDb(reason)
-	if _dbAvailable() then
-		_ensureDbTables()
-		self:_MigrateMemToDb()
-		return true
-	end
-	LOCAL_LOG("DEBUG", "DB not available yet", tostring(reason or "unknown"))
-	return false
-end
-
-function EQUIP:_StartDbPolling()
-	self._dbPollTries = 0
-
-	local function tick()
-		self._dbPollTries = (self._dbPollTries or 0) + 1
-
-		if self:_TryEnsureDb("poll") then
-			LOCAL_LOG("INFO", "DB became available (poll)", self._dbPollTries)
-			return
-		end
-
-		if self._dbPollTries >= DB_POLL_MAX_TRIES then
-			LOCAL_LOG("WARN", "DB still not available after polling; staying in memory", self._dbPollTries)
-			return
-		end
-
-		_schedule(DB_POLL_INTERVAL_SEC, tick)
-	end
-
-	_schedule(DB_POLL_INTERVAL_SEC, tick)
 end
 
 -- ###########################################################################
@@ -323,7 +358,7 @@ end
 -- ###########################################################################
 
 function EQUIP:UsesDatabase()
-	return _dbAvailable() == true
+	return _svAvailable() == true
 end
 
 function EQUIP:GetStore()
@@ -357,9 +392,9 @@ function EQUIP:SaveSnapshot(snapshot)
 		store.byName[keyName] = snapshot
 	end
 
-	self:_TryEnsureDb("save")
+	self:_TryEnsureStore("save")
 
-	LOCAL_LOG("INFO", "Snapshot saved", guid or "-", keyName or "-", self:UsesDatabase() and "DB.global" or "MEM")
+	LOCAL_LOG("INFO", "Snapshot saved", guid or "-", keyName or "-", self:UsesDatabase() and "SV.guild" or "MEM")
 	return true
 end
 
@@ -388,7 +423,7 @@ function EQUIP:_ScheduleScan(delaySec, reason)
 end
 
 function EQUIP:_OnPlayerLogin()
-	self:_StartDbPolling()
+	self:_StartStorePolling()
 	self:_ScheduleScan(LOGIN_DELAY_SEC, "login-delay")
 	self:_ScheduleScan(LOGIN_SECOND_PASS_SEC, "login-second-pass")
 end
@@ -411,8 +446,8 @@ function EQUIP:OnInitialize()
 
 	if type(GMS.OnReady) == "function" then
 		GMS:OnReady("EXT:DB", function()
-			LOCAL_LOG("INFO", "EXT:DB ready -> ensure DB + migrate")
-			self:_TryEnsureDb("onready")
+			LOCAL_LOG("INFO", "EXT:DB ready -> ensure store + migrate")
+			self:_TryEnsureStore("onready")
 		end)
 	end
 end
@@ -424,7 +459,7 @@ function EQUIP:OnEnable()
 	self:RegisterEvent("PLAYER_EQUIPMENT_CHANGED", "_OnEquipmentChanged")
 	self:RegisterEvent("UNIT_INVENTORY_CHANGED", "_OnUnitInventoryChanged")
 
-	self:_TryEnsureDb("enable")
+	self:_TryEnsureStore("enable")
 
 	if GMS.SetReady then
 		GMS:SetReady("MOD:" .. MODULE_NAME)
