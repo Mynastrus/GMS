@@ -1,9 +1,10 @@
 -- ============================================================================
---  GMS/Modules/Equipment.lua
---  Equipment MODULE (Ace)
---  - Keine UI
---  - Spricht mit GMS.DB (AceDB) wenn verfügbar, sonst in-memory fallback
---  - Stellt API bereit zum Speichern/Laden von Equipment-Snapshots
+--	GMS/Modules/Equipment.lua
+--	Equipment MODULE (Ace)
+--	- Keine UI
+--	- Spricht mit GMS.DB (AceDB) wenn verfügbar, sonst in-memory fallback
+--	- Stellt API bereit zum Speichern/Laden von Equipment-Snapshots
+--	- Auto-Scan: nach Login (mit Delay) + bei Änderungen
 -- ============================================================================
 
 local LibStub = LibStub
@@ -16,7 +17,7 @@ local GMS = AceAddon:GetAddon("GMS", true)
 if not GMS then return end
 
 -- ###########################################################################
--- #  METADATA
+-- #	METADATA
 -- ###########################################################################
 
 local METADATA = {
@@ -24,11 +25,11 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.0.0",
+	VERSION      = "1.1.0",
 }
 
 -- ###########################################################################
--- #  LOG BUFFER + LOCAL LOGGER
+-- #	LOG BUFFER + LOCAL LOGGER
 -- ###########################################################################
 
 GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
@@ -64,7 +65,7 @@ local function LOCAL_LOG(level, msg, ...)
 end
 
 -- ###########################################################################
--- #  MODULE
+-- #	MODULE
 -- ###########################################################################
 
 local MODULE_NAME = "Equipment"
@@ -75,13 +76,14 @@ if not EQUIP then
 end
 
 -- ###########################################################################
--- #  INTERNAL STORAGE
+-- #	INTERNAL STORAGE
 -- ###########################################################################
+
 -- DB Pfad:
---   GMS.DB.profile.equipment = {
---      byGuid = { [guid] = snapshot },
---      byName = { ["Name-Realm"] = snapshot },
---   }
+-- GMS.DB.profile.equipment = {
+--   byGuid = { [guid] = snapshot },
+--   byName = { ["Name-Realm"] = snapshot },
+-- }
 
 EQUIP._mem = {
 	byGuid = {},
@@ -95,9 +97,11 @@ end
 local function _ensureDbTables()
 	if not _dbAvailable() then return nil end
 	local p = GMS.DB.profile
+
 	p.equipment = p.equipment or {}
 	p.equipment.byGuid = p.equipment.byGuid or {}
 	p.equipment.byName = p.equipment.byName or {}
+
 	return p.equipment
 end
 
@@ -118,18 +122,222 @@ local function _normNameRealm(name, realm)
 end
 
 local function _nowEpoch()
-	-- WoW: time() ist epoch seconds; GetServerTime() existiert in neueren Clients.
-	if type(GetServerTime) == "function" then
-		return GetServerTime()
-	end
-	if type(time) == "function" then
-		return time()
-	end
+	if type(GetServerTime) == "function" then return GetServerTime() end
+	if type(time) == "function" then return time() end
 	return nil
 end
 
+local function _schedule(delay, fn)
+	if type(fn) ~= "function" then return end
+	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+		C_Timer.After(tonumber(delay or 0) or 0, fn)
+	else
+		-- Fallback: sofort ausführen
+		fn()
+	end
+end
+
 -- ###########################################################################
--- #  LIFECYCLE
+-- #	EQUIPMENT SCAN
+-- ###########################################################################
+
+local INV_SLOTS = {
+	1,  -- Head
+	2,  -- Neck
+	3,  -- Shoulder
+	4,  -- Shirt
+	5,  -- Chest
+	6,  -- Waist
+	7,  -- Legs
+	8,  -- Feet
+	9,  -- Wrist
+	10, -- Hands
+	11, -- Finger1
+	12, -- Finger2
+	13, -- Trinket1
+	14, -- Trinket2
+	15, -- Back
+	16, -- MainHand
+	17, -- OffHand
+	18, -- Ranged
+	19, -- Tabard
+}
+
+local function _parseItemStringFromLink(link)
+	if type(link) ~= "string" then return nil end
+	-- Extrahiert "item:...." aus einem normalen ItemLink
+	local itemString = link:match("item:[%-:%d]+")
+	return itemString
+end
+
+local function _splitItemString(itemString)
+	if type(itemString) ~= "string" then return nil end
+	-- item:ITEMID:ENCHANT:...
+	local parts = {}
+	local idx = 0
+	for token in itemString:gmatch("([^:]+)") do
+		idx = idx + 1
+		parts[idx] = token
+	end
+	return parts
+end
+
+local function _extractEnchantAndGems(link)
+	local itemString = _parseItemStringFromLink(link)
+	if not itemString then return nil, nil end
+
+	local parts = _splitItemString(itemString)
+	if not parts or #parts < 3 then return nil, nil end
+
+	-- parts[1] = "item"
+	-- parts[2] = itemId
+	-- parts[3] = enchantId
+	local enchantId = tonumber(parts[3]) or nil
+
+	-- Gems: in vielen Clients liegen 4 Gem-Slots danach (pos kann je nach client variieren,
+	-- aber klassische Struktur: gem1..gem4 direkt nach enchant)
+	-- Wir nehmen konservativ die nächsten 4 Felder.
+	local gems = nil
+	local g1 = tonumber(parts[4] or "") or nil
+	local g2 = tonumber(parts[5] or "") or nil
+	local g3 = tonumber(parts[6] or "") or nil
+	local g4 = tonumber(parts[7] or "") or nil
+
+	if g1 or g2 or g3 or g4 then
+		gems = { g1, g2, g3, g4 }
+	end
+
+	return enchantId, gems
+end
+
+local function _getPlayerIdentity()
+	local name, realm = UnitName and UnitName("player") or nil, nil
+	if UnitFullName then
+		local n, r = UnitFullName("player")
+		if n and n ~= "" then name = n end
+		if r and r ~= "" then realm = r end
+	end
+
+	local class = nil
+	if UnitClass then
+		local _, classTag = UnitClass("player")
+		class = classTag
+	end
+
+	local race = nil
+	if UnitRace then
+		local raceName = UnitRace("player")
+		race = raceName
+	end
+
+	local level = UnitLevel and UnitLevel("player") or nil
+	local guid = UnitGUID and UnitGUID("player") or nil
+
+	return guid, name, realm, class, race, level
+end
+
+local function _scanPlayerEquipment()
+	local guid, name, realm, class, race, level = _getPlayerIdentity()
+
+	local equippedIlvl, overallIlvl = nil, nil
+	if type(GetAverageItemLevel) == "function" then
+		-- returns: equipped, total
+		local eq, total = GetAverageItemLevel()
+		if eq and eq > 0 then equippedIlvl = eq end
+		if total and total > 0 then overallIlvl = total end
+	end
+
+	local slots = {}
+
+	for _, slotId in ipairs(INV_SLOTS) do
+		local itemId = GetInventoryItemID and GetInventoryItemID("player", slotId) or nil
+		local link = GetInventoryItemLink and GetInventoryItemLink("player", slotId) or nil
+
+		local itemLevel = nil
+		if link and type(GetDetailedItemLevelInfo) == "function" then
+			local ilvl = GetDetailedItemLevelInfo(link)
+			if ilvl and ilvl > 0 then itemLevel = ilvl end
+		end
+
+		local enchantId, gems = nil, nil
+		if link then
+			enchantId, gems = _extractEnchantAndGems(link)
+		end
+
+		slots[slotId] = {
+			slotId   = slotId,
+			itemId   = itemId,
+			link     = link,
+			ilvl     = itemLevel,
+			enchant  = enchantId,
+			gems     = gems,
+		}
+	end
+
+	local snapshot = {
+		guid   = guid,
+		name   = name,
+		realm  = realm,
+		class  = class,
+		race   = race,
+		level  = level,
+		ilvl   = equippedIlvl or overallIlvl,
+		ilvlEquipped = equippedIlvl,
+		ilvlOverall  = overallIlvl,
+		slots  = slots,
+		ts     = _nowEpoch(),
+	}
+
+	return snapshot
+end
+
+-- ###########################################################################
+-- #	AUTO-SCAN (Login + Changes)
+-- ###########################################################################
+
+local LOGIN_DELAY_SEC = 4.0
+local CHANGE_DEBOUNCE_SEC = 0.35
+
+EQUIP._scanToken = 0
+
+function EQUIP:_ScheduleScan(delaySec, reason)
+	self._scanToken = (self._scanToken or 0) + 1
+	local token = self._scanToken
+
+	_schedule(delaySec or 0, function()
+		-- Token guard: nur der neueste geplante Scan darf laufen
+		if token ~= self._scanToken then return end
+
+		local snap = _scanPlayerEquipment()
+		local ok = self:SaveSnapshot(snap)
+
+		if ok then
+			LOCAL_LOG("INFO", "Equipment scanned + saved", tostring(reason or "unknown"), snap.guid or "-", _normNameRealm(snap.name, snap.realm) or "-")
+		else
+			LOCAL_LOG("WARN", "Equipment scan produced invalid snapshot", tostring(reason or "unknown"))
+		end
+	end)
+end
+
+function EQUIP:_OnPlayerLogin()
+	-- bewusst kurz warten, damit Inventory/ItemInfo stabil ist
+	self:_ScheduleScan(LOGIN_DELAY_SEC, "login-delay")
+
+	-- Optionaler zweiter Pass, falls ItemLinks beim ersten Mal noch nicht da sind
+	self:_ScheduleScan(LOGIN_DELAY_SEC + 8.0, "login-second-pass")
+end
+
+function EQUIP:_OnEquipmentChanged(slotId, hasItem)
+	self:_ScheduleScan(CHANGE_DEBOUNCE_SEC, "equip-changed")
+end
+
+function EQUIP:_OnUnitInventoryChanged(unit)
+	if unit ~= "player" then return end
+	self:_ScheduleScan(CHANGE_DEBOUNCE_SEC, "unit-inv-changed")
+end
+
+-- ###########################################################################
+-- #	LIFECYCLE
 -- ###########################################################################
 
 function EQUIP:OnInitialize()
@@ -138,12 +346,12 @@ function EQUIP:OnInitialize()
 	-- Optional: Registry-Eintrag falls ModuleStates aktiv ist
 	if GMS.REGISTRY and GMS.REGISTRY.MOD then
 		GMS.REGISTRY.MOD[MODULE_NAME] = {
-			key         = MODULE_NAME,
-			name        = METADATA.INTERN_NAME,
+			key = MODULE_NAME,
+			name = METADATA.INTERN_NAME,
 			displayName = METADATA.DISPLAY_NAME,
-			version     = METADATA.VERSION,
-			readyKey    = "MOD:" .. MODULE_NAME,
-			state       = { status = "init" },
+			version = METADATA.VERSION,
+			readyKey = "MOD:" .. MODULE_NAME,
+			state = { status = "init" },
 		}
 	end
 end
@@ -159,21 +367,24 @@ function EQUIP:OnEnable()
 		LOCAL_LOG("DEBUG", "DB not available; using in-memory store")
 	end
 
+	-- Events
+	self:RegisterEvent("PLAYER_LOGIN", "_OnPlayerLogin")
+	self:RegisterEvent("PLAYER_EQUIPMENT_CHANGED", "_OnEquipmentChanged")
+	self:RegisterEvent("UNIT_INVENTORY_CHANGED", "_OnUnitInventoryChanged")
+
 	if GMS.SetReady then
 		GMS:SetReady("MOD:" .. MODULE_NAME)
 	end
 end
 
 -- ###########################################################################
--- #  PUBLIC API
+-- #	PUBLIC API
 -- ###########################################################################
 
--- Gibt true zurück, wenn tatsächlich AceDB (GMS.DB) genutzt wird
 function EQUIP:UsesDatabase()
 	return _dbAvailable() == true
 end
 
--- Liefert den aktuellen Store (DB oder Memory). Nur lesen/diagnose.
 function EQUIP:GetStore()
 	return _getStore()
 end
@@ -185,9 +396,14 @@ end
 --   realm = "Realm",
 --   class = "WARRIOR",
 --   ilvl = 512.3,
---   slots = { [slotId]= { itemId=..., link=..., enchant=..., gems=... }, ... },
+--   ilvlEquipped = 512.3,
+--   ilvlOverall = 512.3,
+--   slots = {
+--     [slotId] = { itemId=..., link=..., ilvl=..., enchant=..., gems={...} },
+--   },
 --   ts = epochSeconds,
 -- }
+
 function EQUIP:SaveSnapshot(snapshot)
 	if type(snapshot) ~= "table" then
 		LOCAL_LOG("WARN", "SaveSnapshot: invalid snapshot type", type(snapshot))
@@ -211,11 +427,11 @@ function EQUIP:SaveSnapshot(snapshot)
 	if guid and guid ~= "" then
 		store.byGuid[guid] = snapshot
 	end
+
 	if keyName then
 		store.byName[keyName] = snapshot
 	end
 
-	LOCAL_LOG("INFO", "Snapshot saved", guid or "-", keyName or "-")
 	return true
 end
 
@@ -235,16 +451,12 @@ end
 function EQUIP:DeleteSnapshotByGUID(guid)
 	if not guid or guid == "" then return false end
 	local store = _getStore()
-
 	local snap = store.byGuid[guid]
 	if not snap then return false end
 
-	-- auch byName aufräumen, falls vorhanden
 	if snap.name and snap.name ~= "" then
 		local keyName = _normNameRealm(snap.name, snap.realm)
-		if keyName then
-			store.byName[keyName] = nil
-		end
+		if keyName then store.byName[keyName] = nil end
 	end
 
 	store.byGuid[guid] = nil
@@ -255,7 +467,6 @@ end
 function EQUIP:DeleteSnapshotByName(name, realm)
 	local keyName = _normNameRealm(name, realm)
 	if not keyName then return false end
-
 	local store = _getStore()
 	local snap = store.byName[keyName]
 	if not snap then return false end
@@ -269,10 +480,14 @@ function EQUIP:DeleteSnapshotByName(name, realm)
 	return true
 end
 
--- Optional: komplettes Löschen (z.B. Debug / Reset)
 function EQUIP:ResetAll()
 	local store = _getStore()
 	store.byGuid = {}
 	store.byName = {}
 	LOCAL_LOG("WARN", "All equipment snapshots reset")
+end
+
+-- Manuelles Triggern (z.B. Debug)
+function EQUIP:ScanNow(reason)
+	self:_ScheduleScan(0, reason or "manual")
 end
