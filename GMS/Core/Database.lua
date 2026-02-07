@@ -1,23 +1,20 @@
 	-- ============================================================================
 	--	GMS/Core/Database.lua
-	--	Registriert Standard-SavedVariables via AceDB-3.0
+	--	Database EXTENSION
+	--	- Registers standard SavedVariables via AceDB-3.0
 	-- ============================================================================
 
-	local ADDON_NAME = ...
 	local _G = _G
+
+	-- ---------------------------------------------------------------------------
+	--	Guards
+	-- ---------------------------------------------------------------------------
 
 	local LibStub = _G.LibStub
 	if not LibStub then return end
 
 	local AceDB = LibStub("AceDB-3.0", true)
 	if not AceDB then
-		if _G.GMS then
-			if type(_G.GMS.LOG) == "function" then
-				_G.GMS:LOG("WARN", "DB", "AceDB-3.0 not available; skipping DB init")
-			elseif type(_G.GMS.Print) == "function" then
-				_G.GMS:Print("AceDB-3.0 not available; skipping DB init")
-			end
-		end
 		return
 	end
 
@@ -28,36 +25,73 @@
 			GMS = AceAddon:GetAddon("GMS", true)
 		end
 	end
+	if not GMS then return end
 
-	if not GMS then
-		-- If GMS is not available, nothing sensible to attach to.
-		return
+	-- ###########################################################################
+	-- #	LOG BUFFER + LOCAL LOGGER
+	-- ###########################################################################
+
+	GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
+
+	local function now()
+		return GetTime and GetTime() or nil
 	end
 
-	-- Fallback defaults (Core may override these earlier)
-	local DB_DEFAULTS = GMS.DEFAULTS or {
-		profile = {
-			debug = false,
-		},
-		global = {
+	-- Local-only logger for this file
+	local function LOCAL_LOG(level, source, msg, ...)
+		local entry = {
+			time   = now(),
+			level  = tostring(level or "INFO"),
+			source = tostring(source or "DB"),
+			msg    = tostring(msg or ""),
+		}
+
+		local n = select("#", ...)
+		if n > 0 then
+			entry.data = {}
+			for i = 1, n do
+				entry.data[i] = select(i, ...)
+			end
+		end
+
+		GMS._LOG_BUFFER[#GMS._LOG_BUFFER + 1] = entry
+	end
+
+	-- ###########################################################################
+	-- #	ModuleStates REGISTRATION
+	-- ###########################################################################
+
+	if type(GMS.RegisterExtension) == "function" then
+		GMS:RegisterExtension({
+			key = "DB",
+			name = "Database",
+			displayName = "Database",
 			version = 1,
-		},
+			desc = "AceDB-based SavedVariables and module namespaces",
+		})
+	end
+
+	-- ###########################################################################
+	-- #	DEFAULTS
+	-- ###########################################################################
+
+	local DB_DEFAULTS = GMS.DEFAULTS or {
+		profile = { debug = false },
+		global  = { version = 1 },
 	}
 
 	local LOGGING_DEFAULTS = {
 		profile = {},
-		global = {
-			logs = {},
-		},
+		global  = { logs = {} },
 	}
+
+	-- ###########################################################################
+	-- #	STANDARD DATABASE INIT
+	-- ###########################################################################
 
 	function GMS:InitializeStandardDatabases(force)
 		if not AceDB then
-			if type(self.LOG) == "function" then
-				self:LOG("WARN", "DB", "AceDB-3.0 not available")
-			else
-				self:Print("AceDB-3.0 not available")
-			end
+			LOCAL_LOG("WARN", "DB", "AceDB-3.0 not available")
 			return false
 		end
 
@@ -65,56 +99,59 @@
 			return true
 		end
 
-		-- Create / bind SavedVariables via AceDB
 		self.db = self.db or AceDB:New("GMS_DB", DB_DEFAULTS, true)
 		self.logging_db = self.logging_db or AceDB:New("GMS_Logging_DB", LOGGING_DEFAULTS, true)
 
-		if type(self.LOG) == "function" then
-			self:LOG("INFO", "DB", "Standard databases initialized")
-		else
-			self:Print("Standard databases initialized")
-		end
+		LOCAL_LOG("INFO", "DB", "Standard databases initialized")
 		return true
 	end
 
-	-- Versuchen, beim File-Load die DBs zu initialisieren (harmless, falls Core später erneut init)
-	if type(GMS.InitializeStandardDatabases) == "function" then
-		_G.GMS = GMS
-		GMS:InitializeStandardDatabases(false)
-	end
+	-- Early init attempt (harmless if Core runs it again later)
+	pcall(function()
+		if type(GMS.InitializeStandardDatabases) == "function" then
+			GMS:InitializeStandardDatabases(false)
+		end
+	end)
 
-	-- ============================================================================
-	--	GMS.DB helper API
-	--
-	--	Provides a small wrapper to register per-module namespaces and retrieve them.
-	-- ============================================================================
+	-- ###########################################################################
+	-- #	GMS.DB HELPER API
+	-- ###########################################################################
 
 	GMS.DB = GMS.DB or {}
+	GMS.DB._parent = GMS
 
-	-- Register a module's DB namespace. `defaults` is optional table.
 	function GMS.DB:RegisterModule(moduleName, defaults, optionsProvider)
-		if not moduleName then return nil end
-		if not self._parent or not self._parent.db then return nil end
+		if not moduleName or not self._parent.db then
+			return nil
+		end
 
 		local ok, ns = pcall(function()
 			return self._parent.db:RegisterNamespace(moduleName, defaults)
 		end)
+
 		if ok and ns then
 			self._modules = self._modules or {}
 			self._modules[moduleName] = ns
-			-- if optionsProvider callback provided, call it to attach options (optional)
+
 			if type(optionsProvider) == "function" then
 				pcall(optionsProvider)
 			end
+
+			LOCAL_LOG("DEBUG", "DB", "Registered module DB", moduleName)
 			return ns
 		end
+
 		return nil
 	end
 
 	function GMS.DB:GetModuleDB(moduleName)
 		if not moduleName then return nil end
 		self._modules = self._modules or {}
-		if self._modules[moduleName] then return self._modules[moduleName] end
+
+		if self._modules[moduleName] then
+			return self._modules[moduleName]
+		end
+
 		if self.db then
 			local ok, ns = pcall(function()
 				return self.db:GetNamespace(moduleName, true)
@@ -127,14 +164,12 @@
 		return nil
 	end
 
-	-- attach parent references for convenience
-	GMS.DB._parent = GMS
+	-- ###########################################################################
+	-- #	READY
+	-- ###########################################################################
 
+	if type(GMS.SetReady) == "function" then
+		GMS:SetReady("EXT:DB")
+	end
 
-	-- Notify that Database core finished loading
-	pcall(function()
-		if GMS and type(GMS.Print) == "function" then
-			GMS:Print("Database wurde geladen")
-		end
-	end)
-
+	LOCAL_LOG("INFO", "DB", "Database extension loaded")
