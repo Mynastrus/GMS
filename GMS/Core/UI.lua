@@ -21,7 +21,7 @@
 	-- ============================================================================
 
 	local _G = _G
-	local LibStub = _G.LibStub
+	local LibStub = LibStub
 	if not LibStub then return end
 
 	local AceAddon = LibStub("AceAddon-3.0", true)
@@ -31,7 +31,19 @@
 	if not GMS then return end
 
 	-- ###########################################################################
-	-- #	GLOBAL LOG BUFFER + LOCAL LOGGER
+	-- #	METADATA (PROJECT STANDARD)
+	-- ###########################################################################
+
+	local METADATA = {
+		TYPE = "EXTENSION",
+		INTERN_NAME = "UI",
+		SHORT_NAME = "UI",
+		DISPLAY_NAME = "Guild Management System",
+		VERSION = "1.0.1",
+	}
+
+	-- ###########################################################################
+	-- #	GLOBAL LOG BUFFER + LOCAL LOGGER (PROJECT STANDARD)
 	-- ###########################################################################
 
 	GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
@@ -40,12 +52,12 @@
 		return type(GetTime) == "function" and GetTime() or nil
 	end
 
-	-- Local-only logger for this file (PROJECT STANDARD)
-	local function LOCAL_LOG(level, source, msg, ...)
+	local function LOCAL_LOG(level, msg, ...)
 		local entry = {
 			time   = now(),
 			level  = tostring(level or "INFO"),
-			source = tostring(source or "UI"),
+			type   = tostring(METADATA.TYPE or "UNKNOWN"),
+			source = tostring(METADATA.SHORT_NAME or "UNKNOWN"),
 			msg    = tostring(msg or ""),
 		}
 
@@ -57,7 +69,13 @@
 			end
 		end
 
-		GMS._LOG_BUFFER[#GMS._LOG_BUFFER + 1] = entry
+		local buf = GMS._LOG_BUFFER
+		local idx = #buf + 1
+		buf[idx] = entry
+
+		if type(GMS._LOG_NOTIFY) == "function" then
+			pcall(GMS._LOG_NOTIFY, entry, idx)
+		end
 	end
 
 	-- ###########################################################################
@@ -66,7 +84,7 @@
 		key = "UI",
 		name = "UI",
 		displayName = "UI",
-		version = 1,
+		version = METADATA.VERSION,
 		desc = "UI Shell & Page Handling",
 	})
 
@@ -172,7 +190,7 @@
 		if type(fn) ~= "function" then return false end
 		local ok, err = pcall(fn, ...)
 		if not ok then
-			LOCAL_LOG("ERROR", "UI", "UI error", tostring(err))
+			LOCAL_LOG("ERROR", "UI error", tostring(err))
 		end
 		return ok
 	end
@@ -625,9 +643,8 @@
 		end
 	end
 
-		-- Notify that UI core finished loading
-		LOCAL_LOG("INFO", "UI", "UI file loaded")
-
+	-- Notify that UI core finished loading
+	LOCAL_LOG("INFO", "UI file loaded")
 
 	-- ###########################################################################
 	-- #	PERSISTENZ (POSITION / SIZE)
@@ -1268,7 +1285,7 @@
 			end)
 		end
 
-		LOCAL_LOG("DEBUG", "UI Init complete", nil)
+		LOCAL_LOG("DEBUG", "UI Init complete")
 	end
 
 	function UI:Show()
@@ -1314,7 +1331,7 @@
 
 	function UI:RegisterUiSlashCommandIfAvailable()
 		if type(GMS.Slash_RegisterSubCommand) ~= "function" then
-			LOCAL_LOG("WARN", "SlashCommands not available; cannot register /gms ui", nil)
+			LOCAL_LOG("WARN", "SlashCommands not available; cannot register /gms ui")
 			return
 		end
 
@@ -1327,7 +1344,7 @@
 			owner = EXT_NAME,
 		})
 
-		LOCAL_LOG("INFO", "Registered subcommand: /gms ui", nil)
+		LOCAL_LOG("INFO", "Registered subcommand: /gms ui")
 	end
 
 	-- ###########################################################################
@@ -1365,8 +1382,7 @@
 		UI:RegisterUiSlashCommandIfAvailable()
 	end
 
-
-		-- ###########################################################################
+	-- ###########################################################################
 	-- #	DEV: AUTO OPEN AFTER RELOAD (test only)
 	-- ###########################################################################
 
@@ -1383,6 +1399,5 @@
 		end)
 	end
 
-	LOCAL_LOG("INFO", "UI", "EXT:UI READY")
+	LOCAL_LOG("INFO", "EXT:UI READY")
 	GMS:SetReady("EXT:UI")
-	
