@@ -1,161 +1,178 @@
-	-- ============================================================================
-	--	GMS/GMS.lua
-	--	GMS Core Entry (AceAddon)
-	-- ============================================================================
+-- ============================================================================
+--	GMS/GMS.lua
+--	GMS Core Entry (AceAddon)
+-- ============================================================================
 
-	local ADDON_NAME = ...
-	local _G = _G
+local ADDON_NAME = ...
+local _G = _G
 
-	-- ---------------------------------------------------------------------------
-	--	Guards
-	-- ---------------------------------------------------------------------------
+-- ###########################################################################
+-- #	METADATA (required)
+-- ###########################################################################
 
-	local LibStub = _G.LibStub
-	if not LibStub then return end
+local METADATA = {
+	TYPE			= "CORE",
+	INTERN_NAME		= "GMS_CORE",
+	SHORT_NAME		= "CORE",
+	DISPLAY_NAME	= "GMS Core",
+	VERSION			= "1.0.0",
+}
 
-	local AceAddon = LibStub("AceAddon-3.0", true)
-	if not AceAddon then return end
+-- ---------------------------------------------------------------------------
+--	Guards
+-- ---------------------------------------------------------------------------
 
-	-- ---------------------------------------------------------------------------
-	--	Ace Mixins (optional)
-	-- ---------------------------------------------------------------------------
+local LibStub = LibStub
+if not LibStub then return end
 
-	local AceConsole	= LibStub("AceConsole-3.0", true)
-	local AceEvent		= LibStub("AceEvent-3.0", true)
-	local AceTimer		= LibStub("AceTimer-3.0", true)
-	local AceComm		= LibStub("AceComm-3.0", true)
-	local AceSerializer	= LibStub("AceSerializer-3.0", true)
-	local AceHook		= LibStub("AceHook-3.0", true)
-	local AceBucket		= LibStub("AceBucket-3.0", true)
-	local AceDB			= LibStub("AceDB-3.0", true)
+local AceAddon = LibStub("AceAddon-3.0", true)
+if not AceAddon then return end
 
-	local Unpack = (table and table.unpack) or _G.unpack
+-- ---------------------------------------------------------------------------
+--	Ace Mixins (optional)
+-- ---------------------------------------------------------------------------
 
-	-- ---------------------------------------------------------------------------
-	--	GMS AceAddon erstellen oder aus Registry holen
-	-- ---------------------------------------------------------------------------
+local AceConsole	= LibStub("AceConsole-3.0", true)
+local AceEvent		= LibStub("AceEvent-3.0", true)
+local AceTimer		= LibStub("AceTimer-3.0", true)
+local AceComm		= LibStub("AceComm-3.0", true)
+local AceSerializer	= LibStub("AceSerializer-3.0", true)
+local AceHook		= LibStub("AceHook-3.0", true)
+local AceBucket		= LibStub("AceBucket-3.0", true)
+local AceDB			= LibStub("AceDB-3.0", true)
 
-	local GMS = AceAddon:GetAddon("GMS", true)
+local Unpack = (table and table.unpack) or _G.unpack
 
-	if not GMS then
-		local mixins = {}
-		if AceConsole		then mixins[#mixins + 1] = "AceConsole-3.0" end
-		if AceEvent			then mixins[#mixins + 1] = "AceEvent-3.0" end
-		if AceTimer			then mixins[#mixins + 1] = "AceTimer-3.0" end
-		if AceComm			then mixins[#mixins + 1] = "AceComm-3.0" end
-		if AceSerializer	then mixins[#mixins + 1] = "AceSerializer-3.0" end
-		if AceHook			then mixins[#mixins + 1] = "AceHook-3.0" end
-		if AceBucket		then mixins[#mixins + 1] = "AceBucket-3.0" end
+-- ---------------------------------------------------------------------------
+--	GMS AceAddon erstellen oder aus Registry holen
+-- ---------------------------------------------------------------------------
 
-		GMS = AceAddon:NewAddon("GMS", Unpack(mixins))
-	end
+local GMS = AceAddon:GetAddon("GMS", true)
 
-	-- ---------------------------------------------------------------------------
-	--	Global Export (für /run & Debugging)
-	-- ---------------------------------------------------------------------------
+if not GMS then
+	local mixins = {}
+	if AceConsole		then mixins[#mixins + 1] = "AceConsole-3.0" end
+	if AceEvent			then mixins[#mixins + 1] = "AceEvent-3.0" end
+	if AceTimer			then mixins[#mixins + 1] = "AceTimer-3.0" end
+	if AceComm			then mixins[#mixins + 1] = "AceComm-3.0" end
+	if AceSerializer	then mixins[#mixins + 1] = "AceSerializer-3.0" end
+	if AceHook			then mixins[#mixins + 1] = "AceHook-3.0" end
+	if AceBucket		then mixins[#mixins + 1] = "AceBucket-3.0" end
 
-	_G.GMS = GMS
+	GMS = AceAddon:NewAddon("GMS", Unpack(mixins))
+end
 
-	-- ###########################################################################
-	-- #	LOG BUFFER + LOCAL LOGGER (CORE ONLY)
-	-- ###########################################################################
+-- ---------------------------------------------------------------------------
+--	Global Export (für /run & Debugging)
+-- ---------------------------------------------------------------------------
 
-	GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
+_G.GMS = GMS
 
-	local function now()
-		return GetTime and GetTime() or nil
-	end
+-- ###########################################################################
+-- #	LOG BUFFER + LOCAL LOGGER
+-- ###########################################################################
 
-	-- Local-only logger for this file
-	local function LOCAL_LOG(level, source, msg, ...)
-		local entry = {
-			time   = now(),
-			level  = tostring(level or "INFO"),
-			source = tostring(source or "CORE"),
-			msg    = tostring(msg or ""),
-		}
+GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
 
-		local n = select("#", ...)
-		if n > 0 then
-			entry.data = {}
-			for i = 1, n do
-				entry.data[i] = select(i, ...)
-			end
-		end
+local function now()
+	return GetTime and GetTime() or nil
+end
 
-		GMS._LOG_BUFFER[#GMS._LOG_BUFFER + 1] = entry
-	end
-
-	-- ###########################################################################
-	-- #	META / CONSTANTS
-	-- ###########################################################################
-
-	GMS.ADDON_NAME			= ADDON_NAME
-	GMS.INTERNAL_ADDON_NAME	= tostring(ADDON_NAME or "GMS")
-	GMS.CHAT_PREFIX			= "|cff03A9F4[GMS]|r"
-
-	-- ###########################################################################
-	-- #	CHAT OUTPUT
-	-- ###########################################################################
-
-	function GMS:Print(msg)
-		if msg == nil then return end
-		print(("%s  %s"):format(self.CHAT_PREFIX, tostring(msg)))
-	end
-
-	function GMS:Printf(fmt, ...)
-		if fmt == nil then return end
-		local ok, rendered = pcall(string.format, tostring(fmt), ...)
-		self:Print(ok and rendered or fmt)
-	end
-
-	-- ###########################################################################
-	-- #	DB
-	-- ###########################################################################
-
-	GMS.DEFAULTS = GMS.DEFAULTS or {
-		profile = { debug = false },
-		global  = { version = 1 },
+local function LOCAL_LOG(level, msg, ...)
+	local entry = {
+		time	= now(),
+		level	= tostring(level or "INFO"),
+		type	= tostring(METADATA.TYPE or "UNKNOWN"),
+		source	= tostring(METADATA.SHORT_NAME or "UNKNOWN"),
+		msg		= tostring(msg or ""),
 	}
 
-	function GMS:InitializeDatabaseIfAvailable(force)
-		if not AceDB then
-			LOCAL_LOG("WARN", "CORE", "AceDB-3.0 not available")
-			return false
+	local n = select("#", ...)
+	if n > 0 then
+		entry.data = {}
+		for i = 1, n do
+			entry.data[i] = select(i, ...)
 		end
+	end
 
-		if self.db and not force then
-			return true
-		end
+	local idx = #GMS._LOG_BUFFER + 1
+	GMS._LOG_BUFFER[idx] = entry
 
-		if type(self.InitializeStandardDatabases) == "function" then
-			local ok, res = pcall(self.InitializeStandardDatabases, self, force)
-			if ok and res then
-				LOCAL_LOG("INFO", "CORE", "InitializeStandardDatabases used")
-				return true
-			end
-		end
+	if type(GMS._LOG_NOTIFY) == "function" then
+		GMS._LOG_NOTIFY(entry, idx)
+	end
+end
 
-		self.db = AceDB:New("GMS_DB", self.DEFAULTS, true)
-		LOCAL_LOG("INFO", "CORE", "AceDB initialized (fallback)")
+-- ###########################################################################
+-- #	META / CONSTANTS
+-- ###########################################################################
+
+GMS.ADDON_NAME			= ADDON_NAME
+GMS.INTERNAL_ADDON_NAME	= tostring(ADDON_NAME or "GMS")
+GMS.CHAT_PREFIX			= "|cff03A9F4[GMS]|r"
+
+-- ###########################################################################
+-- #	CHAT OUTPUT
+-- ###########################################################################
+
+function GMS:Print(msg)
+	if msg == nil then return end
+	print(("%s  %s"):format(self.CHAT_PREFIX, tostring(msg)))
+end
+
+function GMS:Printf(fmt, ...)
+	if fmt == nil then return end
+	local ok, rendered = pcall(string.format, tostring(fmt), ...)
+	self:Print(ok and rendered or fmt)
+end
+
+-- ###########################################################################
+-- #	DB
+-- ###########################################################################
+
+GMS.DEFAULTS = GMS.DEFAULTS or {
+	profile = { debug = false },
+	global  = { version = 1 },
+}
+
+function GMS:InitializeDatabaseIfAvailable(force)
+	if not AceDB then
+		LOCAL_LOG("WARN", "AceDB-3.0 not available")
+		return false
+	end
+
+	if self.db and not force then
 		return true
 	end
 
-	-- ###########################################################################
-	-- #	LIFECYCLE
-	-- ###########################################################################
-
-	function GMS:OnInitialize()
-		self:InitializeDatabaseIfAvailable(false)
-		LOCAL_LOG("INFO", "CORE", "OnInitialize")
+	if type(self.InitializeStandardDatabases) == "function" then
+		local ok, res = pcall(self.InitializeStandardDatabases, self, force)
+		if ok and res then
+			LOCAL_LOG("INFO", "InitializeStandardDatabases used")
+			return true
+		end
 	end
 
-	function GMS:OnEnable()
-		LOCAL_LOG("INFO", "CORE", "OnEnable")
-	end
+	self.db = AceDB:New("GMS_DB", self.DEFAULTS, true)
+	LOCAL_LOG("INFO", "AceDB initialized (fallback)")
+	return true
+end
 
-	function GMS:OnDisable()
-		LOCAL_LOG("INFO", "CORE", "OnDisable")
-	end
+-- ###########################################################################
+-- #	LIFECYCLE
+-- ###########################################################################
 
-	LOCAL_LOG("INFO", "CORE", "Core file loaded")
+function GMS:OnInitialize()
+	self:InitializeDatabaseIfAvailable(false)
+	LOCAL_LOG("INFO", "OnInitialize")
+end
+
+function GMS:OnEnable()
+	LOCAL_LOG("INFO", "OnEnable")
+end
+
+function GMS:OnDisable()
+	LOCAL_LOG("INFO", "OnDisable")
+end
+
+LOCAL_LOG("INFO", "Core file loaded")
