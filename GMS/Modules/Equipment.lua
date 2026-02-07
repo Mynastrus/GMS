@@ -2,9 +2,10 @@
 --	GMS/Modules/Equipment.lua
 --	Equipment MODULE (Ace)
 --	- Auto-Scan: nach Login (delayed) + bei Änderungen (debounced)
---	- Persistiert Snapshots direkt in SavedVariables (GMS_DB.global.guilds[key].EQUIPMENT)
---	  und zusätzlich (best-effort) als Mirror in GMS.db.global.guilds[key].EQUIPMENT
---	- Memory buffer falls DB/SV noch nicht bereit ist, Migration sobald möglich
+--	- Speichert Snapshot pro Charakter in SavedVariables: GMS_DB.global.characters[charKey].EQUIPMENT
+--	  (global, damit andere Chars es sehen können)
+--	- charKey: UnitGUID("player") (Fallback: Name-Realm)
+--	- Memory buffer falls SV noch nicht verfügbar ist, Migration sobald möglich
 -- ============================================================================
 
 local LibStub = LibStub
@@ -25,7 +26,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.1",
+	VERSION      = "1.3.2",
 }
 
 -- ###########################################################################
@@ -83,16 +84,24 @@ local LOGIN_DELAY_SEC        = 4.0
 local LOGIN_SECOND_PASS_SEC  = 12.0
 local CHANGE_DEBOUNCE_SEC    = 0.35
 
-local DB_POLL_MAX_TRIES      = 25
-local DB_POLL_INTERVAL_SEC   = 1.0
+local STORE_POLL_MAX_TRIES   = 25
+local STORE_POLL_INTERVAL    = 1.0
 
 -- ###########################################################################
--- #	INTERNAL STORAGE (SV/DB + MEM BUFFER)
+-- #	INTERNAL STATE
 -- ###########################################################################
 
-EQUIP._mem = EQUIP._mem or { byGuid = {}, byName = {} }
 EQUIP._scanToken = EQUIP._scanToken or 0
-EQUIP._dbPollTries = EQUIP._dbPollTries or 0
+EQUIP._pollTries = EQUIP._pollTries or 0
+
+-- Memory buffer, falls SavedVariables noch nicht verfügbar sind
+EQUIP._mem = EQUIP._mem or {
+	snapshot = nil,
+}
+
+-- ###########################################################################
+-- #	UTILS
+-- ###########################################################################
 
 local function _schedule(delay, fn)
 	if type(fn) ~= "function" then return end
@@ -103,82 +112,77 @@ local function _schedule(delay, fn)
 	end
 end
 
-local function _getGuildKey()
-	local realm = (GetNormalizedRealmName and GetNormalizedRealmName()) or (GetRealmName and GetRealmName()) or ""
-	local faction = (UnitFactionGroup and UnitFactionGroup("player")) or ""
-	local gname = (GetGuildInfo and GetGuildInfo("player")) or ""
-	if realm == "" or faction == "" or gname == "" then
-		return nil
-	end
-	return tostring(realm) .. "|" .. tostring(faction) .. "|" .. tostring(gname)
+local function _nowEpoch()
+	if type(GetServerTime) == "function" then return GetServerTime() end
+	if type(time) == "function" then return time() end
+	return nil
 end
 
 local function _svAvailable()
-	-- Wichtig: wir speichern bewusst direkt in der echten SavedVariable
 	return type(GMS_DB) == "table"
+end
+
+local function _getCharKey()
+	local guid = UnitGUID and UnitGUID("player") or nil
+	if guid and guid ~= "" then return guid end
+
+	local name, realm = nil, nil
+	if UnitFullName then
+		local n, r = UnitFullName("player")
+		if n and n ~= "" then name = n end
+		if r and r ~= "" then realm = r end
+	end
+	if not name and UnitName then
+		name = UnitName("player")
+	end
+
+	if name and name ~= "" then
+		if realm and realm ~= "" then
+			return tostring(name) .. "-" .. tostring(realm)
+		end
+		return tostring(name)
+	end
+
+	return nil
 end
 
 local function _ensureSvTables()
 	if not _svAvailable() then return nil end
 
+	local key = _getCharKey()
+	if not key then return nil end
+
 	GMS_DB.global = GMS_DB.global or {}
-	GMS_DB.global.guilds = GMS_DB.global.guilds or {}
+	GMS_DB.global.characters = GMS_DB.global.characters or {}
 
-	local key = _getGuildKey()
-	if not key then
-		return nil
+	local c = GMS_DB.global.characters[key]
+	if not c then
+		c = { __version = 1 }
+		GMS_DB.global.characters[key] = c
 	end
 
-	local guild = GMS_DB.global.guilds[key]
-	if not guild then
-		guild = { __version = 1 }
-		GMS_DB.global.guilds[key] = guild
-	end
-
-	guild.EQUIPMENT = guild.EQUIPMENT or {}
-	guild.EQUIPMENT.byGuid = guild.EQUIPMENT.byGuid or {}
-	guild.EQUIPMENT.byName = guild.EQUIPMENT.byName or {}
-
-	-- Best-effort Mirror in AceDB Handle (falls vorhanden)
-	if GMS.db and GMS.db.global then
-		GMS.db.global.guilds = GMS.db.global.guilds or {}
-		local g2 = GMS.db.global.guilds[key]
-		if not g2 then
-			g2 = guild -- gleiche Referenz wenn möglich
-			GMS.db.global.guilds[key] = g2
-		end
-		g2.EQUIPMENT = guild.EQUIPMENT
-	end
-
-	return guild.EQUIPMENT
+	c.EQUIPMENT = c.EQUIPMENT or {}
+	return c.EQUIPMENT, key
 end
 
 local function _getStore()
 	local eq = _ensureSvTables()
-	if eq then return eq end
-	return EQUIP._mem
+	if eq then return eq, true end
+	return EQUIP._mem, false
 end
 
 function EQUIP:_MigrateMemToSv()
 	local eq = _ensureSvTables()
-	if not eq then
-		return false
+	if not eq then return false end
+
+	if self._mem.snapshot then
+		eq.snapshot = self._mem.snapshot
+		self._mem.snapshot = nil
+		LOCAL_LOG("INFO", "Migrated buffered equipment snapshot to SV.global.characters")
+		return true
 	end
 
-	local moved = 0
-	for guid, snap in pairs(self._mem.byGuid or {}) do
-		eq.byGuid[guid] = snap
-		moved = moved + 1
-	end
-	for key, snap in pairs(self._mem.byName or {}) do
-		eq.byName[key] = snap
-	end
-
-	self._mem.byGuid = {}
-	self._mem.byName = {}
-
-	LOCAL_LOG("INFO", "Migrated equipment snapshots to SV guild.EQUIPMENT", moved)
-	return true
+	return false
 end
 
 function EQUIP:_TryEnsureStore(reason)
@@ -187,45 +191,30 @@ function EQUIP:_TryEnsureStore(reason)
 		self:_MigrateMemToSv()
 		return true
 	end
-
 	LOCAL_LOG("DEBUG", "SV store not available yet", tostring(reason or "unknown"))
 	return false
 end
 
 function EQUIP:_StartStorePolling()
-	self._dbPollTries = 0
+	self._pollTries = 0
 
 	local function tick()
-		self._dbPollTries = (self._dbPollTries or 0) + 1
+		self._pollTries = (self._pollTries or 0) + 1
 
 		if self:_TryEnsureStore("poll") then
-			LOCAL_LOG("INFO", "SV store became available (poll)", self._dbPollTries)
+			LOCAL_LOG("INFO", "SV store available (poll)", self._pollTries)
 			return
 		end
 
-		if self._dbPollTries >= DB_POLL_MAX_TRIES then
-			LOCAL_LOG("WARN", "SV store still not available after polling; staying in memory", self._dbPollTries)
+		if self._pollTries >= STORE_POLL_MAX_TRIES then
+			LOCAL_LOG("WARN", "SV store still not available after polling; staying in memory", self._pollTries)
 			return
 		end
 
-		_schedule(DB_POLL_INTERVAL_SEC, tick)
+		_schedule(STORE_POLL_INTERVAL, tick)
 	end
 
-	_schedule(DB_POLL_INTERVAL_SEC, tick)
-end
-
-local function _normNameRealm(name, realm)
-	if not name or name == "" then return nil end
-	if realm and realm ~= "" then
-		return tostring(name) .. "-" .. tostring(realm)
-	end
-	return tostring(name)
-end
-
-local function _nowEpoch()
-	if type(GetServerTime) == "function" then return GetServerTime() end
-	if type(time) == "function" then return time() end
-	return nil
+	_schedule(STORE_POLL_INTERVAL, tick)
 end
 
 -- ###########################################################################
@@ -362,7 +351,8 @@ function EQUIP:UsesDatabase()
 end
 
 function EQUIP:GetStore()
-	return _getStore()
+	local store = _getStore()
+	return store
 end
 
 function EQUIP:SaveSnapshot(snapshot)
@@ -371,11 +361,10 @@ function EQUIP:SaveSnapshot(snapshot)
 		return false
 	end
 
-	local guid = snapshot.guid
-	local keyName = _normNameRealm(snapshot.name, snapshot.realm)
-
-	if (not guid or guid == "") and (not keyName) then
-		LOCAL_LOG("WARN", "SaveSnapshot: missing guid and name-realm")
+	-- mindestens irgendein Key sollte existieren
+	local guidOrName = snapshot.guid or snapshot.name
+	if not guidOrName or guidOrName == "" then
+		LOCAL_LOG("WARN", "SaveSnapshot: missing character identity")
 		return false
 	end
 
@@ -383,18 +372,13 @@ function EQUIP:SaveSnapshot(snapshot)
 		snapshot.ts = _nowEpoch()
 	end
 
-	local store = _getStore()
+	local store, isSv = _getStore()
+	store.snapshot = snapshot
 
-	if guid and guid ~= "" then
-		store.byGuid[guid] = snapshot
-	end
-	if keyName then
-		store.byName[keyName] = snapshot
-	end
-
+	-- Falls SV inzwischen verfügbar ist: MEM -> SV migrieren
 	self:_TryEnsureStore("save")
 
-	LOCAL_LOG("INFO", "Snapshot saved", guid or "-", keyName or "-", self:UsesDatabase() and "SV.guild" or "MEM")
+	LOCAL_LOG("INFO", "Snapshot saved", isSv and "SV.global.characters" or "MEM")
 	return true
 end
 
@@ -412,8 +396,10 @@ function EQUIP:_ScheduleScan(delaySec, reason)
 
 	_schedule(delaySec or 0, function()
 		if token ~= self._scanToken then return end
+
 		local snap = _scanPlayerEquipment()
 		local ok = self:SaveSnapshot(snap)
+
 		if ok then
 			LOCAL_LOG("INFO", "Equipment scanned + saved", tostring(reason or "unknown"))
 		else
@@ -424,6 +410,8 @@ end
 
 function EQUIP:_OnPlayerLogin()
 	self:_StartStorePolling()
+
+	-- bewusst warten
 	self:_ScheduleScan(LOGIN_DELAY_SEC, "login-delay")
 	self:_ScheduleScan(LOGIN_SECOND_PASS_SEC, "login-second-pass")
 end
@@ -444,6 +432,7 @@ end
 function EQUIP:OnInitialize()
 	LOCAL_LOG("INFO", "Module initialized")
 
+	-- Store-ready Hook (DB init bedeutet i.d.R. auch: SV existiert)
 	if type(GMS.OnReady) == "function" then
 		GMS:OnReady("EXT:DB", function()
 			LOCAL_LOG("INFO", "EXT:DB ready -> ensure store + migrate")
