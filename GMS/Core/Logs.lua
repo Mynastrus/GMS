@@ -3,7 +3,9 @@
 --	LOGS EXTENSION (no GMS:NewModule)
 --	- Ingest: übernimmt Einträge aus GMS._LOG_BUFFER in eigenen Ringbuffer
 --	- Ringbuffer persistiert via AceDB (falls verfügbar), sonst in-memory
---	- UI Page (AceGUI) + Live-Update (Ticker) wenn offen
+--	- Notify Hook: LOCAL_LOG schreibt Buffer (SoT) + optional _LOG_NOTIFY(entry, idx)
+--	  Logs.lua installiert _LOG_NOTIFY und ingested gebatched
+--	- UI Page (AceGUI) + Live-Update (Notify + optional Ticker)
 --	- Slash: /gms logs -> öffnet LOGS Page
 --	- UI Integration: kompatibel mit GMS.UI:RegisterPage(id, order, title, buildFn)
 --	- RightDock: nutzt GMS.UI:AddRightDockIconTop(...)
@@ -32,6 +34,7 @@ local METADATA = {
 
 -- ###########################################################################
 -- #	PROJECT STANDARD: GLOBAL LOG BUFFER + LOCAL_LOG()
+-- #	ORDER FIX: Buffer first, then Notify(entry, idx)
 -- ###########################################################################
 
 GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
@@ -58,7 +61,12 @@ local function LOCAL_LOG(level, msg, ...)
 		end
 	end
 
-	GMS._LOG_BUFFER[#GMS._LOG_BUFFER + 1] = entry
+	local idx = #GMS._LOG_BUFFER + 1
+	GMS._LOG_BUFFER[idx] = entry
+
+	if type(GMS._LOG_NOTIFY) == "function" then
+		GMS._LOG_NOTIFY(entry, idx)
+	end
 end
 
 -- ###########################################################################
@@ -115,6 +123,10 @@ LOGS._dockRegistered = false
 LOGS._slashRegistered = false
 
 LOGS._ticker = nil
+
+-- Notify batching (avoid ingest per log line)
+LOGS._notifyPending = false
+LOGS._notifyScheduled = false
 
 -- ###########################################################################
 -- #	HELPERS
@@ -325,6 +337,54 @@ function LOGS:IngestGlobalBuffer()
 end
 
 -- ###########################################################################
+-- #	NOTIFY HOOK (batched ingest + optional live UI prepend)
+-- ###########################################################################
+
+local function _scheduleNotifyIngest()
+	if LOGS._notifyScheduled then
+		LOGS._notifyPending = true
+		return
+	end
+
+	LOGS._notifyScheduled = true
+	LOGS._notifyPending = false
+
+	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+		C_Timer.After(0, function()
+			LOGS._notifyScheduled = false
+
+			local added = LOGS:IngestGlobalBuffer()
+			if added <= 0 then return end
+
+			-- live UI: prepend only newly ingested entries (cheap)
+			if LOGS._ui and LOGS._ui.prependEntry then
+				local entries = LOGS._entries or {}
+				local minLvl = profile().minLevel or LOGS.LEVELS.INFO
+				for i = #entries - added + 1, #entries do
+					local e = entries[i]
+					if e and (e.levelNum or 1) >= minLvl then
+						pcall(LOGS._ui.prependEntry, e)
+					end
+				end
+			end
+
+			-- if more logs came in during schedule window, run once again
+			if LOGS._notifyPending then
+				_scheduleNotifyIngest()
+			end
+		end)
+	else
+		LOGS._notifyScheduled = false
+		LOGS:IngestGlobalBuffer()
+	end
+end
+
+-- Install notify handler: called by EVERY file's LOCAL_LOG after writing to buffer
+GMS._LOG_NOTIFY = function(_entry, _idx)
+	_scheduleNotifyIngest()
+end
+
+-- ###########################################################################
 -- #	INIT / DB
 -- ###########################################################################
 
@@ -389,65 +449,33 @@ end
 -- ###########################################################################
 -- #	OPTIONAL: LEGACY API (kept)
 -- #	GMS:LOG(level, module, msg, ...)
--- #	-> schreibt in den Ringbuffer (nicht in den globalen Buffer)
+-- #	-> schreibt in den Buffer (SoT) + notify
 -- ###########################################################################
 
 function GMS:LOG(level, module, msg, ...)
-	local lvl = toLevel(level)
-	local mod = tostring(module or "")
-	local base = tostring(msg or "")
+	GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
 
-	local parts = {}
+	local entry = {
+		time   = now(),
+		level  = tostring(level or "INFO"),
+		type   = "CORE",
+		source = tostring(module or "GMS"),
+		msg    = tostring(msg or ""),
+	}
+
 	local n = select("#", ...)
 	if n > 0 then
+		entry.data = {}
 		for i = 1, n do
-			local v = select(i, ...)
-			if type(v) == "table" then
-				parts[#parts + 1] = _jsonish(v, {}, 0, 4, 80)
-			else
-				parts[#parts + 1] = tostring(v)
-			end
+			entry.data[i] = select(i, ...)
 		end
 	end
 
-	local text = base
-	if #parts > 0 then
-		text = text .. " | data=" .. table.concat(parts, " ")
-	end
+	local idx = #GMS._LOG_BUFFER + 1
+	GMS._LOG_BUFFER[idx] = entry
 
-	local entry = {
-		time     = nowReadable(profile().timestampFormat or "%Y-%m-%d %H:%M:%S"),
-		levelNum = lvl,
-		level    = levelName(lvl),
-
-		-- legacy mapping
-		type     = "CORE",
-		source   = (mod ~= "" and mod or "GMS"),
-
-		msg      = text,
-	}
-
-	local entries = LOGS._entries
-	if not entries then
-		LOGS._entries = {}
-		entries = LOGS._entries
-		if LOGS._db then LOGS._db.profile.entries = entries end
-	end
-
-	entries[#entries + 1] = entry
-	trimToMax()
-
-	-- chat output (filtered)
-	local p = profile()
-	if p.chat and allowForOutput(lvl) then
-		local color = COLORS[entry.level] or "|cffffffff"
-		local origin = "[" .. entry.type .. ":" .. entry.source .. "]"
-		chatPrint(string.format("%s[GMS][%s][%s]%s %s|r", color, entry.level, entry.time, origin, entry.msg))
-	end
-
-	-- live UI prepend if open
-	if LOGS._ui and LOGS._ui.prependEntry and allowForOutput(lvl) then
-		pcall(LOGS._ui.prependEntry, entry)
+	if type(GMS._LOG_NOTIFY) == "function" then
+		GMS._LOG_NOTIFY(entry, idx)
 	end
 end
 
@@ -569,7 +597,6 @@ local function RegisterLogsUI()
 		listGroup:AddChild(scroller)
 
 		local function RenderAll()
-			-- ingest newest buffer entries first
 			LOGS:IngestGlobalBuffer()
 
 			scroller:ReleaseChildren()
@@ -660,7 +687,6 @@ local function RegisterLogsSlash()
 		return true
 	end
 
-	-- fallback: if old SlashCommands table exists
 	local SC = GMS.SlashCommands
 	if type(SC) ~= "table" then return false end
 
@@ -689,7 +715,7 @@ local function RegisterLogsSlash()
 end
 
 -- ###########################################################################
--- #	LIVE INGEST (ticker)
+-- #	LIVE INGEST (ticker) - optional (notify already handles most cases)
 -- ###########################################################################
 
 local function StartTicker()
@@ -699,7 +725,6 @@ local function StartTicker()
 	LOGS._ticker = C_Timer.NewTicker(1.0, function()
 		local added = LOGS:IngestGlobalBuffer()
 		if added > 0 and LOGS._ui and LOGS._ui.prependEntry then
-			-- prepend only the last 'added' entries (cheap)
 			local entries = LOGS._entries or {}
 			local minLvl = profile().minLevel or LOGS.LEVELS.INFO
 			for i = #entries - added + 1, #entries do
