@@ -26,7 +26,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.3",
+	VERSION      = "1.3.4",
 }
 
 -- ###########################################################################
@@ -80,12 +80,12 @@ end
 -- #	CONFIG
 -- ###########################################################################
 
-local LOGIN_DELAY_SEC        = 4.0
-local LOGIN_SECOND_PASS_SEC  = 12.0
-local CHANGE_DEBOUNCE_SEC    = 0.35
+local LOGIN_DELAY_SEC       = 4.0
+local LOGIN_SECOND_PASS_SEC = 12.0
+local CHANGE_DEBOUNCE_SEC   = 0.35
 
-local STORE_POLL_MAX_TRIES   = 25
-local STORE_POLL_INTERVAL    = 1.0
+local STORE_POLL_MAX_TRIES = 25
+local STORE_POLL_INTERVAL  = 1.0
 
 -- ###########################################################################
 -- #	INTERNAL STATE
@@ -221,7 +221,7 @@ end
 -- #	EQUIPMENT SCAN (minimal: only item links + owner guid)
 -- ###########################################################################
 
-local INV_SLOTS = { 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 }
+local INV_SLOTS = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }
 
 local function _getPlayerGuid()
 	return UnitGUID and UnitGUID("player") or nil
@@ -353,7 +353,11 @@ function EQUIP:OnEnable()
 
 	self:_TryEnsureStore("enable")
 
-	if GMS.SetReady then
-		GMS:SetReady("MOD:" .. MODULE_NAME)
-	end
+	self:_TryEnsureStore("enable")
+
+	GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
+end
+
+function EQUIP:OnDisable()
+	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end

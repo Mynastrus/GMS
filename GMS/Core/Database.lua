@@ -6,10 +6,10 @@
 
 local METADATA = {
 	TYPE = "EXTENSION",
-	INTERN_NAME = "DATABASE",
+	INTERN_NAME = "DB",
 	SHORT_NAME = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION = "1.0.1",
+	VERSION = "1.0.2",
 }
 
 local _G = _G
@@ -180,8 +180,6 @@ end
 -- #	READY
 -- ###########################################################################
 
-if type(GMS.SetReady) == "function" then
-	GMS:SetReady("EXT:DB")
-end
+GMS:SetReady("EXT:" .. METADATA.INTERN_NAME)
 
 LOCAL_LOG("INFO", "Database extension loaded")

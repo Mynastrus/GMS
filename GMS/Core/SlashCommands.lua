@@ -12,7 +12,7 @@ local METADATA = {
 	INTERN_NAME = "SLASH",
 	SHORT_NAME = "SLASH",
 	DISPLAY_NAME = "Slash Commands",
-	VERSION = "1.0.1",
+	VERSION = "1.0.2",
 }
 
 -- ---------------------------------------------------------------------------
@@ -272,8 +272,6 @@ if not SlashCommands._defaultsLoaded then
 	})
 end
 
-if type(GMS.SetReady) == "function" then
-	GMS:SetReady("EXT:" .. METADATA.INTERN_NAME)
-end
+GMS:SetReady("EXT:" .. METADATA.INTERN_NAME)
 
 LOCAL_LOG("INFO", "SlashCommands extension loaded")

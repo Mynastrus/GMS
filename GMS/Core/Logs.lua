@@ -25,11 +25,11 @@ if not GMS then return end
 -- ###########################################################################
 
 local METADATA = {
-	TYPE         = "EXT",       -- CORE | EXT | MOD
+	TYPE         = "EXT", -- CORE | EXT | MOD
 	INTERN_NAME  = "LOGS",
 	SHORT_NAME   = "LOGS",
 	DISPLAY_NAME = "Logs",
-	VERSION      = "1.0.1",
+	VERSION      = "1.0.2",
 }
 
 -- ###########################################################################
@@ -105,12 +105,12 @@ local COLORS = {
 
 LOGS.DEFAULTS = {
 	profile = {
-		minLevel = LOGS.LEVELS.INFO,	-- Output/UI Filter (Speicher bleibt ALL)
-		chat = false,					-- optional Chat output
-		maxEntries = 400,				-- Ringbuffer Größe
+		minLevel = LOGS.LEVELS.INFO, -- Output/UI Filter (Speicher bleibt ALL)
+		chat = false, -- optional Chat output
+		maxEntries = 400, -- Ringbuffer Größe
 		timestampFormat = "%Y-%m-%d %H:%M:%S",
-		entries = {},					-- persistierter Ringbuffer (unsere Logs)
-		ingestPos = 0,					-- Cursor: letzter ingesteter Index aus GMS._LOG_BUFFER
+		entries = {}, -- persistierter Ringbuffer (unsere Logs)
+		ingestPos = 0, -- Cursor: letzter ingesteter Index aus GMS._LOG_BUFFER
 	}
 }
 
@@ -294,13 +294,13 @@ local function _mapGlobalEntry(e)
 		levelNum = lvl,
 		level    = levelName(lvl),
 
-		type     = srcType,
-		source   = srcName,
+		type   = srcType,
+		source = srcName,
 
-		msg      = msg,
+		msg = msg,
 
 		-- optional: raw timing from GetTime()
-		t        = e.time,
+		t = e.time,
 	}
 end
 
@@ -413,11 +413,17 @@ end
 
 -- PUBLIC CONFIG
 function GMS:Logs_SetLevel(level) profile().minLevel = toLevel(level) end
+
 function GMS:Logs_GetLevel() return profile().minLevel end
+
 function GMS:Logs_EnableChat(v) profile().chat = not not v end
+
 function GMS:Logs_IsChatEnabled() return not not profile().chat end
+
 function GMS:Logs_SetMaxEntries(n) profile().maxEntries = clamp(tonumber(n) or 400, 50, 5000); trimToMax() end
+
 function GMS:Logs_GetMaxEntries() return profile().maxEntries end
+
 function GMS:Logs_Clear()
 	local p = profile()
 	p.entries = {}
@@ -790,14 +796,11 @@ LOGS:IngestGlobalBuffer()
 TryAll()
 
 -- try again when UI/Slash become ready
-if type(GMS.OnReady) == "function" then
-	GMS:OnReady("EXT:UI", function()
-		RegisterLogsUI()
-	end)
-	GMS:OnReady("EXT:SLASH", function()
-		RegisterLogsSlash()
-	end)
-end
+GMS:OnReady("EXT:SLASH", function()
+	RegisterLogsSlash()
+end)
+
+GMS:SetReady("EXT:" .. METADATA.INTERN_NAME)
 
 GMS:SetReady("EXT:LOGS")
 LOCAL_LOG("INFO", "EXT:LOGS READY")

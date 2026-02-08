@@ -21,7 +21,7 @@ local METADATA = {
 	INTERN_NAME = "CHATLINKS",
 	SHORT_NAME = "ChatLinks",
 	DISPLAY_NAME = "Chat Links",
-	VERSION = "1.0.1",
+	VERSION = "1.0.2",
 }
 
 -- ###########################################################################
@@ -95,6 +95,7 @@ ChatLinks.DEFAULT_FLAGS = ChatLinks.DEFAULT_FLAGS or {
 }
 
 local function UPPER(s) return string.upper(tostring(s or "")) end
+
 local function TRIM(s) return tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "") end
 
 local function MergeFlags(dst, src)
@@ -227,8 +228,6 @@ end
 -- #	READY
 -- ###########################################################################
 
-if type(GMS.SetReady) == "function" then
-	GMS:SetReady("EXT:CHATLINKS")
-end
+GMS:SetReady("EXT:" .. METADATA.INTERN_NAME)
 
 LOCAL_LOG("INFO", "ChatLinks loaded")

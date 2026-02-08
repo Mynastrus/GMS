@@ -14,7 +14,7 @@ local METADATA = {
 	INTERN_NAME  = "MythicPlus",
 	SHORT_NAME   = "MYTHIC",
 	DISPLAY_NAME = "Mythic Plus",
-	VERSION      = "1.1.0",
+	VERSION      = "1.1.1",
 }
 
 -- Ensure global log buffer exists
@@ -156,6 +156,12 @@ function MYTHIC:OnEnable()
 	if IsLoggedIn() then
 		self:ScanMythicPlusData()
 	end
+
+	GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
+end
+
+function MYTHIC:OnDisable()
+	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
 
 function MYTHIC:OnPlayerLogin()
