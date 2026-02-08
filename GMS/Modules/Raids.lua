@@ -12,7 +12,8 @@
 --      * Boss kill -> delayed scan
 --  - EJ ist tricky:
 --      * Blizzard_EncounterJournal wird bei Bedarf geladen
---      * Catalog-Build erst nach bestätigter EJ-Bereitschaft (EJ_DIFFICULTY_UPDATE / Probe)
+--      * Catalog-Build erst nach bestätigter EJ-Bereitschaft
+--      * _ejReady darf NUR true sein, wenn alle EJ APIs vorhanden sind
 -- ============================================================================
 
 local LibStub = LibStub
@@ -33,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.1",
+	VERSION      = "1.2.3",
 }
 
 -- ###########################################################################
@@ -263,14 +264,13 @@ local function buildExpansionRaidCatalog()
 		return catalog
 	end
 
-	local expansionName = getExpansionName()
-	local numTiers = EJ_GetNumTiers() or 0
-
+	local numTiers = EJ_GetNumTiers and (EJ_GetNumTiers() or 0) or 0
 	if numTiers <= 0 then
 		catalog.source = "EJ_NOT_READY"
 		return catalog
 	end
 
+	local expansionName = getExpansionName()
 	local tiersToScan = {}
 
 	if expansionName and expansionName ~= "" then
@@ -360,8 +360,7 @@ function RAIDS:_TryLoadEncounterJournal()
 end
 
 function RAIDS:_ProbeEJReady()
-	-- EJ API might exist but still be uninitialized. A simple, reliable probe:
-	-- - numTiers > 0 means EJ has initialized its tier data.
+	-- Strict: only ready if EJ APIs are present AND tiers are initialized
 	if not ejApiPresent() then
 		return false
 	end
@@ -380,10 +379,8 @@ function RAIDS:ADDON_LOADED(_, addonName)
 
 	self:UnregisterEvent("ADDON_LOADED")
 
-	-- We still need to wait for EJ to fully initialize. Start listening.
 	self:RegisterEvent("EJ_DIFFICULTY_UPDATE", "OnEJReady")
 
-	-- Quick probe shortly after load (covers cases where EJ is ready immediately).
 	if C_Timer and C_Timer.After then
 		C_Timer.After(0.2, function()
 			if self:_ProbeEJReady() then
@@ -394,23 +391,34 @@ function RAIDS:ADDON_LOADED(_, addonName)
 end
 
 function RAIDS:OnEJReady()
-	-- Authoritative "EJ is ready" moment.
-	-- This can be called via EJ_DIFFICULTY_UPDATE or via probe.
-	if self._ejReady ~= true then
-		self._ejReady = true
+	-- STRICT: do not accept readiness if APIs are still missing
+	if not ejApiPresent() then
+		self._ejReady = false
+		LOCAL_LOG("WARN", "EJ ready event received but EJ API still missing")
+		self:_TryLoadEncounterJournal()
+		return
 	end
 
-	-- If we were registered for EJ_DIFFICULTY_UPDATE, we can drop it now.
+	-- Also ensure tiers are initialized
+	local n = EJ_GetNumTiers and (EJ_GetNumTiers() or 0) or 0
+	if n <= 0 then
+		self._ejReady = false
+		LOCAL_LOG("WARN", "EJ ready event received but tiers not initialized yet")
+		return
+	end
+
+	self._ejReady = true
+
 	if self.UnregisterEvent then
 		self:UnregisterEvent("EJ_DIFFICULTY_UPDATE")
 	end
 
 	LOCAL_LOG("INFO", "Encounter Journal fully initialized (EJ_DIFFICULTY_UPDATE)")
 
-	-- FORCE rebuild catalog now (this fixes early EJ_MISSING / EJ_NOT_READY builds)
+	-- Force rebuild (now safe)
 	self:RebuildCatalog()
 
-	-- If a scan was waiting on catalog, run it now.
+	-- Resume deferred scan
 	if self._scanWantedAfterCatalog then
 		self._scanWantedAfterCatalog = nil
 		self:_ScheduleScan("ej_ready_final", 0.5)
@@ -427,8 +435,16 @@ function RAIDS:_EnsureCatalogReady()
 		return true
 	end
 
-	-- Hard gate: do not rebuild until EJ is truly ready
+	-- Hard gate
 	if not self._ejReady then
+		return false
+	end
+
+	-- Safety: ejReady but API missing -> revert
+	if not ejApiPresent() then
+		self._ejReady = false
+		LOCAL_LOG("WARN", "EJ ready flag set but EJ API missing; reverting to not-ready")
+		self:_TryLoadEncounterJournal()
 		return false
 	end
 
@@ -485,10 +501,7 @@ function RAIDS:OnEnable()
 	if not self:_TryLoadEncounterJournal() then
 		self:RegisterEvent("ADDON_LOADED")
 	else
-		-- EJ addon is loaded; wait for readiness signal
 		self:RegisterEvent("EJ_DIFFICULTY_UPDATE", "OnEJReady")
-
-		-- Probe once shortly after enable (covers cases where EJ is already ready)
 		if C_Timer and C_Timer.After then
 			C_Timer.After(0.2, function()
 				if self:_ProbeEJReady() then
@@ -513,7 +526,7 @@ function RAIDS:OnEnable()
 		LOCAL_LOG("WARN", "Saved instances API not available")
 	end
 
-	-- Try to build EJ catalog early (will be gated until EJ is ready)
+	-- Try to build EJ catalog early (gated until EJ is ready)
 	self:_EnsureCatalogReady()
 end
 
@@ -548,6 +561,20 @@ end
 -- ###########################################################################
 
 function RAIDS:RebuildCatalog()
+	-- HARD GATE: never rebuild before EJ is truly ready
+	if not self._ejReady then
+		LOCAL_LOG("WARN", "RebuildCatalog blocked: EJ not ready")
+		return false
+	end
+
+	-- EXTRA SAFETY: ejReady must also mean API present
+	if not ejApiPresent() then
+		self._ejReady = false
+		LOCAL_LOG("WARN", "RebuildCatalog blocked: EJ API missing; reverting ejReady")
+		self:_TryLoadEncounterJournal()
+		return false
+	end
+
 	local store = ensureStore()
 	if not store then return false end
 
@@ -714,11 +741,13 @@ function RAIDS:OnUpdateInstanceInfo()
 		end
 	end
 
-	-- If mapping failed, do one forced rebuild + rescan (EJ names can shift / localization timing)
+	-- If mapping failed, do one forced rebuild + rescan (only if EJ is ready)
 	if unresolved > 0 then
-		LOCAL_LOG("WARN", "Unresolved raid name->instanceID mappings, forcing rebuild+rescan", unresolved)
-		self:RebuildCatalog()
-		self:_ScheduleScan("rescan_after_unresolved", 2.0)
+		LOCAL_LOG("WARN", "Unresolved raid name->instanceID mappings", unresolved)
+		if self._ejReady then
+			self:RebuildCatalog()
+			self:_ScheduleScan("rescan_after_unresolved", 2.0)
+		end
 	end
 
 	LOCAL_LOG("INFO", "Raid scan ingested", ingested, "reason", self._pendingReason or "?", "unresolved", unresolved)
