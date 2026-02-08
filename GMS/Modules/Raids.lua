@@ -10,7 +10,9 @@
 --  - Auto-Update:
 --      * Login -> delayed scan
 --      * Boss kill -> delayed scan
---  - EJ ist tricky: Catalog wird mit Retries aufgebaut
+--  - EJ ist tricky:
+--      * Blizzard_EncounterJournal wird bei Bedarf geladen
+--      * Catalog-Build erst nach bestätigter EJ-Bereitschaft (EJ_DIFFICULTY_UPDATE / Probe)
 -- ============================================================================
 
 local LibStub = LibStub
@@ -31,7 +33,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.0",
+	VERSION      = "1.2.1",
 }
 
 -- ###########################################################################
@@ -225,10 +227,10 @@ local function cleanupExpiredCurrent(raidEntry, tsNow, graceSeconds)
 end
 
 -- ###########################################################################
--- # ENCOUNTER JOURNAL CATALOG (all raids of the current expansion) - RETRY SAFE
+-- # EJ BOOTSTRAP + CATALOG (all raids of the current expansion) - READY SAFE
 -- ###########################################################################
 
-local function ejAvailable()
+local function ejApiPresent()
 	return EJ_GetNumTiers and EJ_SelectTier and EJ_GetInstanceByIndex
 		and EJ_SelectInstance and EJ_GetInstanceInfo
 		and EJ_GetNumEncounters and EJ_GetEncounterInfoByIndex
@@ -236,7 +238,6 @@ local function ejAvailable()
 end
 
 local function getExpansionName()
-	-- Best-effort: Retail typically has GetExpansionLevel + GetExpansionDisplayInfo
 	if GetExpansionLevel and GetExpansionDisplayInfo then
 		local expID = GetExpansionLevel()
 		if expID then
@@ -257,7 +258,7 @@ local function buildExpansionRaidCatalog()
 		source = "EJ",
 	}
 
-	if not ejAvailable() then
+	if not ejApiPresent() then
 		catalog.source = "EJ_MISSING"
 		return catalog
 	end
@@ -265,9 +266,13 @@ local function buildExpansionRaidCatalog()
 	local expansionName = getExpansionName()
 	local numTiers = EJ_GetNumTiers() or 0
 
+	if numTiers <= 0 then
+		catalog.source = "EJ_NOT_READY"
+		return catalog
+	end
+
 	local tiersToScan = {}
 
-	-- Primary: all tiers containing expansionName
 	if expansionName and expansionName ~= "" then
 		for t = 1, numTiers do
 			local tierName = EJ_GetTierInfo(t)
@@ -277,7 +282,6 @@ local function buildExpansionRaidCatalog()
 		end
 	end
 
-	-- Fallback: at least current tier (prevents "empty catalog" on weird clients)
 	if #tiersToScan == 0 then
 		local cur = EJ_GetCurrentTier and EJ_GetCurrentTier() or nil
 		if cur then
@@ -294,7 +298,7 @@ local function buildExpansionRaidCatalog()
 
 		local idx = 1
 		while true do
-			local instanceID = EJ_GetInstanceByIndex(idx, true) -- isRaid = true
+			local instanceID = EJ_GetInstanceByIndex(idx, true)
 			if not instanceID then break end
 
 			EJ_SelectInstance(instanceID)
@@ -337,64 +341,105 @@ local function catalogIsUsable(catalog)
 		and type(catalog.nameToInstanceID) == "table"
 end
 
+function RAIDS:_TryLoadEncounterJournal()
+	if ejApiPresent() then
+		return true
+	end
+
+	if LoadAddOn then
+		local loaded, reason = LoadAddOn("Blizzard_EncounterJournal")
+		if loaded then
+			return true
+		end
+		LOCAL_LOG("WARN", "LoadAddOn(Blizzard_EncounterJournal) failed", reason)
+	else
+		LOCAL_LOG("WARN", "LoadAddOn not available")
+	end
+
+	return false
+end
+
+function RAIDS:_ProbeEJReady()
+	-- EJ API might exist but still be uninitialized. A simple, reliable probe:
+	-- - numTiers > 0 means EJ has initialized its tier data.
+	if not ejApiPresent() then
+		return false
+	end
+
+	local n = EJ_GetNumTiers and EJ_GetNumTiers() or 0
+	if n and n > 0 then
+		self._ejReady = true
+		return true
+	end
+
+	return false
+end
+
+function RAIDS:ADDON_LOADED(_, addonName)
+	if addonName ~= "Blizzard_EncounterJournal" then return end
+
+	self:UnregisterEvent("ADDON_LOADED")
+
+	-- We still need to wait for EJ to fully initialize. Start listening.
+	self:RegisterEvent("EJ_DIFFICULTY_UPDATE", "OnEJReady")
+
+	-- Quick probe shortly after load (covers cases where EJ is ready immediately).
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0.2, function()
+			if self:_ProbeEJReady() then
+				self:OnEJReady()
+			end
+		end)
+	end
+end
+
+function RAIDS:OnEJReady()
+	-- Authoritative "EJ is ready" moment.
+	-- This can be called via EJ_DIFFICULTY_UPDATE or via probe.
+	if self._ejReady ~= true then
+		self._ejReady = true
+	end
+
+	-- If we were registered for EJ_DIFFICULTY_UPDATE, we can drop it now.
+	if self.UnregisterEvent then
+		self:UnregisterEvent("EJ_DIFFICULTY_UPDATE")
+	end
+
+	LOCAL_LOG("INFO", "Encounter Journal fully initialized (EJ_DIFFICULTY_UPDATE)")
+
+	-- FORCE rebuild catalog now (this fixes early EJ_MISSING / EJ_NOT_READY builds)
+	self:RebuildCatalog()
+
+	-- If a scan was waiting on catalog, run it now.
+	if self._scanWantedAfterCatalog then
+		self._scanWantedAfterCatalog = nil
+		self:_ScheduleScan("ej_ready_final", 0.5)
+	end
+end
+
 function RAIDS:_EnsureCatalogReady()
 	local store = ensureStore()
 	if not store then return false end
 
 	store.catalog = store.catalog or {}
+
 	if catalogIsUsable(store.catalog) then
 		return true
 	end
 
-	-- Build once
+	-- Hard gate: do not rebuild until EJ is truly ready
+	if not self._ejReady then
+		return false
+	end
+
 	store.catalog = buildExpansionRaidCatalog()
 	if catalogIsUsable(store.catalog) then
 		LOCAL_LOG("INFO", "EJ catalog built", store.catalog.source)
 		return true
 	end
 
-	-- Not ready yet -> schedule retries
-	self:_ScheduleCatalogRetry("catalog_not_ready")
+	LOCAL_LOG("WARN", "EJ catalog build failed", store.catalog.source or "unknown")
 	return false
-end
-
-function RAIDS:_ScheduleCatalogRetry(reason)
-	if self._catalogRetryTimer then
-		-- already scheduled
-		return
-	end
-
-	self._catalogRetries = (self._catalogRetries or 0) + 1
-	local attempt = self._catalogRetries
-
-	-- Backoff: 0.5s, 1s, 2s, 4s, then stop
-	local delay = 0.5
-	if attempt == 2 then delay = 1 end
-	if attempt == 3 then delay = 2 end
-	if attempt == 4 then delay = 4 end
-	if attempt >= 5 then
-		self._catalogRetryTimer = nil
-		LOCAL_LOG("WARN", "EJ catalog retry paused (waiting for EJ readiness)", reason)
-		-- Wait for EJ_DIFFICULTY_UPDATE instead of hard failing
-		return
-	end
-	if not C_Timer or not C_Timer.After then
-		LOCAL_LOG("WARN", "C_Timer missing, cannot retry EJ catalog")
-		return
-	end
-
-	self._catalogRetryTimer = true
-	C_Timer.After(delay, function()
-		self._catalogRetryTimer = nil
-		local ok = self:_EnsureCatalogReady()
-		LOCAL_LOG(ok and "INFO" or "WARN", "EJ catalog retry", attempt, ok, reason)
-
-		-- If we were waiting to scan but catalog wasn't ready, try scanning again
-		if ok and self._scanWantedAfterCatalog then
-			self._scanWantedAfterCatalog = nil
-			self:ScanNow("catalog_ready")
-		end
-	end)
 end
 
 -- ###########################################################################
@@ -408,7 +453,6 @@ function RAIDS:_ScheduleScan(reason, delay)
 
 	delay = tonumber(delay) or 0
 
-	-- Debounce: one pending timer at a time
 	self._scanToken = (self._scanToken or 0) + 1
 	local token = self._scanToken
 
@@ -423,77 +467,35 @@ function RAIDS:_ScheduleScan(reason, delay)
 end
 
 -- ###########################################################################
--- # EJ BOOTSTRAP (Blizzard_EncounterJournal can be lazy-loaded)
--- ###########################################################################
-
-function RAIDS:_TryLoadEncounterJournal()
-	-- If EJ functions already exist, we're good
-	if EJ_GetNumTiers and EJ_SelectTier and EJ_GetInstanceByIndex then
-		return true
-	end
-
-	-- Try to load Blizzard Encounter Journal UI addon
-	if LoadAddOn then
-		local loaded, reason = LoadAddOn("Blizzard_EncounterJournal")
-		if loaded then
-			return true
-		else
-			-- reason can be: "DISABLED", "MISSING", "CORRUPT", "INCOMPATIBLE", etc.
-			LOCAL_LOG("WARN", "LoadAddOn(Blizzard_EncounterJournal) failed", reason)
-		end
-	else
-		LOCAL_LOG("WARN", "LoadAddOn not available")
-	end
-
-	return false
-end
-
-function RAIDS:ADDON_LOADED(_, addonName)
-	if addonName ~= "Blizzard_EncounterJournal" then return end
-
-	-- Now EJ APIs should exist
-	self:UnregisterEvent("ADDON_LOADED")
-
-	LOCAL_LOG("INFO", "Blizzard_EncounterJournal loaded, rebuilding catalog")
-	self:RebuildCatalog()
-
-	-- If we deferred scans while EJ wasn't ready, do one now
-	self:_ScheduleScan("ej_loaded", 1.0)
-end
-
-function RAIDS:OnEJReady()
-	-- This fires when EJ has fully initialized its tiers and instances
-	self:UnregisterEvent("EJ_DIFFICULTY_UPDATE")
-
-	LOCAL_LOG("INFO", "Encounter Journal fully initialized (EJ_DIFFICULTY_UPDATE)")
-
-	-- Reset retry counter (important!)
-	self._catalogRetries = 0
-
-	-- Rebuild catalog now that EJ is truly ready
-	self:RebuildCatalog()
-
-	-- Trigger a clean scan afterwards
-	self:_ScheduleScan("ej_fully_ready", 1.0)
-end
-
--- ###########################################################################
 -- # LIFECYCLE
 -- ###########################################################################
 
 function RAIDS:OnInitialize()
 	LOCAL_LOG("INFO", "Initializing Raids module", METADATA.VERSION)
 	self._pendingScan = false
-	self._catalogRetries = 0
 	self._scanToken = 0
+	self._ejReady = false
+	self._scanWantedAfterCatalog = nil
 end
 
 function RAIDS:OnEnable()
 	LOCAL_LOG("INFO", "Enabling Raids module")
 
-	-- Ensure Encounter Journal API is available (can be lazy-loaded)
+	-- Ensure Encounter Journal API exists (can be lazy-loaded)
 	if not self:_TryLoadEncounterJournal() then
 		self:RegisterEvent("ADDON_LOADED")
+	else
+		-- EJ addon is loaded; wait for readiness signal
+		self:RegisterEvent("EJ_DIFFICULTY_UPDATE", "OnEJReady")
+
+		-- Probe once shortly after enable (covers cases where EJ is already ready)
+		if C_Timer and C_Timer.After then
+			C_Timer.After(0.2, function()
+				if self:_ProbeEJReady() then
+					self:OnEJReady()
+				end
+			end)
+		end
 	end
 
 	-- Register events
@@ -501,10 +503,8 @@ function RAIDS:OnEnable()
 	self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnEnteringWorld")
 
 	-- Boss kill / encounter end -> schedule a scan
-	-- (ENCOUNTER_END is reliable for raid bosses; BOSS_KILL is also useful)
 	self:RegisterEvent("ENCOUNTER_END", "OnEncounterEnd")
 	self:RegisterEvent("BOSS_KILL", "OnBossKill")
-	self:RegisterEvent("EJ_DIFFICULTY_UPDATE", "OnEJReady")
 
 	-- SavedInstances update
 	if RequestRaidInfo and GetNumSavedInstances and GetSavedInstanceInfo then
@@ -513,10 +513,9 @@ function RAIDS:OnEnable()
 		LOCAL_LOG("WARN", "Saved instances API not available")
 	end
 
-	-- Try to build EJ catalog early (best-effort, with retries)
+	-- Try to build EJ catalog early (will be gated until EJ is ready)
 	self:_EnsureCatalogReady()
 end
-
 
 function RAIDS:OnDisable()
 	LOCAL_LOG("INFO", "Disabling Raids module")
@@ -527,25 +526,20 @@ end
 -- ###########################################################################
 
 function RAIDS:OnPlayerLogin()
-	-- Login: wait a short moment so SavedInstances/EJ are ready
 	self:_ScheduleScan("login", 2.0)
 end
 
 function RAIDS:OnEnteringWorld()
-	-- Entering world: light debounce
 	self:_ScheduleScan("entering_world", 1.0)
 end
 
-function RAIDS:OnEncounterEnd(_, encounterID, encounterName, difficultyID, groupSize, success)
-	-- success == 1 => boss killed
+function RAIDS:OnEncounterEnd(_, _, _, _, _, success)
 	if success == 1 then
-		-- Wait a bit so instance info updates are available
 		self:_ScheduleScan("encounter_end", 1.0)
 	end
 end
 
 function RAIDS:OnBossKill()
-	-- Some kills fire this; also schedule
 	self:_ScheduleScan("boss_kill", 1.0)
 end
 
@@ -558,10 +552,9 @@ function RAIDS:RebuildCatalog()
 	if not store then return false end
 
 	store.catalog = buildExpansionRaidCatalog()
-	self._catalogRetries = 0
-
 	local ok = catalogIsUsable(store.catalog)
-	LOCAL_LOG(ok and "INFO" or "WARN", "Catalog rebuilt", store.catalog.source)
+
+	LOCAL_LOG(ok and "INFO" or "WARN", "Catalog rebuild", store.catalog.source or "unknown")
 	return ok
 end
 
@@ -576,10 +569,9 @@ function RAIDS:ScanNow(reason)
 		return false
 	end
 
-	-- Ensure EJ catalog; if not ready, defer scan until catalog is ready
 	if not self:_EnsureCatalogReady() then
 		self._scanWantedAfterCatalog = true
-		LOCAL_LOG("WARN", "Scan deferred until EJ catalog ready", reason)
+		LOCAL_LOG("WARN", "Scan deferred until catalog ready", reason)
 		return false
 	end
 
@@ -616,10 +608,9 @@ function RAIDS:OnUpdateInstanceInfo()
 		return
 	end
 
-	-- Catalog must be usable here
 	if not self:_EnsureCatalogReady() then
 		self._scanWantedAfterCatalog = true
-		LOCAL_LOG("WARN", "Ingest skipped: EJ catalog not ready")
+		LOCAL_LOG("WARN", "Ingest skipped: catalog not ready")
 		return
 	end
 
@@ -654,7 +645,6 @@ function RAIDS:OnUpdateInstanceInfo()
 			= GetSavedInstanceInfo(i)
 
 		if isRaid == true and type(name) == "string" and name ~= "" then
-			-- Map SavedInstance raid name -> EJ instanceID
 			local instanceID = catalog.nameToInstanceID and catalog.nameToInstanceID[name] or nil
 			if not instanceID then
 				unresolved = unresolved + 1
@@ -678,7 +668,7 @@ function RAIDS:OnUpdateInstanceInfo()
 					end
 				end
 
-				-- Only keep CURRENT if it is lockout-relevant
+				-- Only keep CURRENT if lockout-relevant
 				if locked == true or extended == true or killed > 0 then
 					local raidEntry = raidsStore[instanceID]
 					if type(raidEntry) ~= "table" then
@@ -690,7 +680,6 @@ function RAIDS:OnUpdateInstanceInfo()
 					raidEntry.name = (catRaid and catRaid.name) or name
 					raidEntry.total = total
 					raidEntry.current = raidEntry.current or {}
-					raidEntry.bestByDiff = raidEntry.bestByDiff or {}
 
 					local dID = tonumber(diffID) or diffID
 					if type(dID) == "number" then
@@ -714,7 +703,6 @@ function RAIDS:OnUpdateInstanceInfo()
 							cur.resetAt = tsNow + reset
 						end
 
-						-- Persist BEST from current progress
 						updateBest(raidEntry, dID, killed, total)
 
 						raidEntry.lastScan = tsNow
@@ -726,10 +714,10 @@ function RAIDS:OnUpdateInstanceInfo()
 		end
 	end
 
-	-- If some raids couldn't be mapped (EJ tricky), attempt a catalog rebuild and rescan
+	-- If mapping failed, do one forced rebuild + rescan (EJ names can shift / localization timing)
 	if unresolved > 0 then
-		LOCAL_LOG("WARN", "Some raids unresolved (name->instanceID). Scheduling catalog rebuild+rescan", unresolved)
-		self:_ScheduleCatalogRetry("unresolved_mapping")
+		LOCAL_LOG("WARN", "Unresolved raid name->instanceID mappings, forcing rebuild+rescan", unresolved)
+		self:RebuildCatalog()
 		self:_ScheduleScan("rescan_after_unresolved", 2.0)
 	end
 
