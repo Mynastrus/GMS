@@ -31,7 +31,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.1.0",
+	VERSION      = "1.2.0",
 }
 
 -- ###########################################################################
@@ -374,10 +374,10 @@ function RAIDS:_ScheduleCatalogRetry(reason)
 	if attempt == 4 then delay = 4 end
 	if attempt >= 5 then
 		self._catalogRetryTimer = nil
-		LOCAL_LOG("WARN", "EJ catalog retry limit reached", reason)
+		LOCAL_LOG("WARN", "EJ catalog retry paused (waiting for EJ readiness)", reason)
+		-- Wait for EJ_DIFFICULTY_UPDATE instead of hard failing
 		return
 	end
-
 	if not C_Timer or not C_Timer.After then
 		LOCAL_LOG("WARN", "C_Timer missing, cannot retry EJ catalog")
 		return
@@ -461,6 +461,22 @@ function RAIDS:ADDON_LOADED(_, addonName)
 	self:_ScheduleScan("ej_loaded", 1.0)
 end
 
+function RAIDS:OnEJReady()
+	-- This fires when EJ has fully initialized its tiers and instances
+	self:UnregisterEvent("EJ_DIFFICULTY_UPDATE")
+
+	LOCAL_LOG("INFO", "Encounter Journal fully initialized (EJ_DIFFICULTY_UPDATE)")
+
+	-- Reset retry counter (important!)
+	self._catalogRetries = 0
+
+	-- Rebuild catalog now that EJ is truly ready
+	self:RebuildCatalog()
+
+	-- Trigger a clean scan afterwards
+	self:_ScheduleScan("ej_fully_ready", 1.0)
+end
+
 -- ###########################################################################
 -- # LIFECYCLE
 -- ###########################################################################
@@ -488,6 +504,7 @@ function RAIDS:OnEnable()
 	-- (ENCOUNTER_END is reliable for raid bosses; BOSS_KILL is also useful)
 	self:RegisterEvent("ENCOUNTER_END", "OnEncounterEnd")
 	self:RegisterEvent("BOSS_KILL", "OnBossKill")
+	self:RegisterEvent("EJ_DIFFICULTY_UPDATE", "OnEJReady")
 
 	-- SavedInstances update
 	if RequestRaidInfo and GetNumSavedInstances and GetSavedInstanceInfo then
