@@ -19,7 +19,7 @@ local METADATA = {
 	INTERN_NAME = "MODULESTATES",
 	SHORT_NAME = "ModuleStates",
 	DISPLAY_NAME = "Module States",
-	VERSION = "1.0.1",
+	VERSION = "1.1.0",
 }
 
 local LibStub = LibStub
@@ -121,19 +121,19 @@ local function ensureMod(key)
 	return t[key]
 end
 
-local function updateRegistryState(readyKey)
+local function updateRegistryState(readyKey, isReady)
 	if type(readyKey) ~= "string" then return end
 	local prefix, key = readyKey:match("^([^:]+):(.+)$")
 	if not prefix or not key then return end
 
 	if prefix == "EXT" then
 		local e = ensureExt(key)
-		e.state.READY = true
-		e.state.READY_AT = now()
+		e.state.READY = isReady
+		if isReady then e.state.READY_AT = now() end
 	elseif prefix == "MOD" then
 		local m = ensureMod(key)
-		m.state.READY = true
-		m.state.READY_AT = now()
+		m.state.READY = isReady
+		if isReady then m.state.READY_AT = now() end
 	end
 end
 
@@ -207,7 +207,7 @@ function GMS:SetReady(key)
 	end
 
 	GMS._READY[key] = true
-	updateRegistryState(key)
+	updateRegistryState(key, true)
 
 	LOCAL_LOG("INFO", "READY", key)
 
@@ -218,6 +218,27 @@ function GMS:SetReady(key)
 		end
 		GMS._READY_HOOKS[key] = nil
 	end
+end
+
+function GMS:SetNotReady(key)
+	if type(key) ~= "string" or key == "" then return end
+
+	-- Normalize EXT:* keys
+	do
+		local pfx, rest = key:match("^([^:]+):(.+)$")
+		if pfx == "EXT" and rest then
+			key = "EXT:" .. normExtKey(rest)
+		end
+	end
+
+	if not GMS._READY[key] then
+		return
+	end
+
+	GMS._READY[key] = false
+	updateRegistryState(key, false)
+
+	LOCAL_LOG("INFO", "UNREADY", key)
 end
 
 function GMS:OnReady(key, fn)

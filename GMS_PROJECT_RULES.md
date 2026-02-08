@@ -186,7 +186,40 @@ end)
 
 ---
 
-## 7. Arbeits- & Antwortregeln für GMS
+## 7. Modul-Status & Lifecycle (Pflicht)
+
+Jede Erweiterung (Extension) und jedes Modul **MUSS** sich beim Core registrieren, wenn es bereit ist.
+Dies geschieht über die Funktion `GMS:SetReady(key)`.
+
+### 7.1 Extensions (Core-Erweiterungen)
+
+* Format: `EXT:<INTERN_NAME>`
+* Zeitpunkt: **Am Ende der Datei** (Top-Level)
+
+```lua
+-- Am Ende der Datei:
+GMS:SetReady("EXT:" .. METADATA.INTERN_NAME)
+```
+
+### 7.2 Module (Ace3)
+
+* Format: `MOD:<INTERN_NAME>`
+* Zeitpunkt: **Innerhalb von `OnEnable()`**
+
+```lua
+function MODULE:OnEnable()
+	-- ... initialization ...
+	GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
+end
+
+function MODULE:OnDisable()
+	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
+end
+```
+
+---
+
+## 8. Arbeits- & Antwortregeln für GMS
 
 * Keine stillen Änderungen
 * Jede strukturelle Entscheidung wird begründet
@@ -195,7 +228,7 @@ end)
 
 ---
 
-## 8. Nebenregel
+## 9. Nebenregel
 
 * Alle gelieferten `/run`-Befehle:
 
@@ -203,7 +236,7 @@ end)
 
 ---
 
-## 9. Gültigkeit
+## 10. Gültigkeit
 
 Dieses Regelwerk ist **verbindlich und dauerhaft gültig** für das Projekt GMS.
 Änderungen am Regelwerk erfolgen **nur explizit** und werden versioniert dokumentiert.
