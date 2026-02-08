@@ -25,11 +25,11 @@ if not GMS then return end
 -- ###########################################################################
 
 local METADATA = {
-	TYPE         = "EXT",		-- CORE | EXT | MOD
+	TYPE         = "EXT",       -- CORE | EXT | MOD
 	INTERN_NAME  = "LOGS",
 	SHORT_NAME   = "LOGS",
 	DISPLAY_NAME = "Logs",
-	VERSION      = 1,
+	VERSION      = "1.0.1",
 }
 
 -- ###########################################################################
@@ -588,13 +588,44 @@ local function RegisterLogsUI()
 		local listGroup = AceGUI:Create("InlineGroup")
 		listGroup:SetTitle("Entries (newest first)")
 		listGroup:SetFullWidth(true)
-		listGroup:SetFullHeight(true)
 		listGroup:SetLayout("Fill")
 		root:AddChild(listGroup)
 
 		local scroller = AceGUI:Create("ScrollFrame")
 		scroller:SetLayout("List")
+		scroller:SetFullWidth(true)
+		scroller:SetFullHeight(true)
 		listGroup:AddChild(scroller)
+
+		-- Make entries container consume remaining height under the header (AceGUI List-parent workaround)
+		local function UpdateEntriesHeight()
+			if not (root and root.frame and header and header.frame and listGroup and listGroup.frame) then return end
+
+			local rootH = root.frame:GetHeight() or 0
+			local headerH = header.frame:GetHeight() or 0
+
+			local padding = 28
+			local minH = 140
+
+			local avail = rootH - headerH - padding
+			if avail < minH then avail = minH end
+
+			listGroup:SetHeight(avail)
+			scroller:SetFullHeight(true)
+
+			if root.DoLayout then root:DoLayout() end
+		end
+
+		UpdateEntriesHeight()
+		if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+			C_Timer.After(0, UpdateEntriesHeight)
+		end
+
+		if root.frame and type(root.frame.HookScript) == "function" then
+			root.frame:HookScript("OnSizeChanged", function()
+				UpdateEntriesHeight()
+			end)
+		end
 
 		local function RenderAll()
 			LOGS:IngestGlobalBuffer()
@@ -608,6 +639,8 @@ local function RegisterLogsUI()
 					scroller:AddChild(BuildLogRow(e))
 				end
 			end
+
+			UpdateEntriesHeight()
 		end
 
 		local function PrependEntry(entry)
@@ -619,6 +652,7 @@ local function RegisterLogsUI()
 			table.insert(scroller.children, 1, w)
 			w.frame:SetParent(scroller.content)
 			scroller:DoLayout()
+			UpdateEntriesHeight()
 		end
 
 		LOGS._ui = {
