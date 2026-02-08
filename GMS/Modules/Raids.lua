@@ -31,7 +31,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.0.0",
+	VERSION      = "1.1.0",
 }
 
 -- ###########################################################################
@@ -423,6 +423,45 @@ function RAIDS:_ScheduleScan(reason, delay)
 end
 
 -- ###########################################################################
+-- # EJ BOOTSTRAP (Blizzard_EncounterJournal can be lazy-loaded)
+-- ###########################################################################
+
+function RAIDS:_TryLoadEncounterJournal()
+	-- If EJ functions already exist, we're good
+	if EJ_GetNumTiers and EJ_SelectTier and EJ_GetInstanceByIndex then
+		return true
+	end
+
+	-- Try to load Blizzard Encounter Journal UI addon
+	if LoadAddOn then
+		local loaded, reason = LoadAddOn("Blizzard_EncounterJournal")
+		if loaded then
+			return true
+		else
+			-- reason can be: "DISABLED", "MISSING", "CORRUPT", "INCOMPATIBLE", etc.
+			LOCAL_LOG("WARN", "LoadAddOn(Blizzard_EncounterJournal) failed", reason)
+		end
+	else
+		LOCAL_LOG("WARN", "LoadAddOn not available")
+	end
+
+	return false
+end
+
+function RAIDS:ADDON_LOADED(_, addonName)
+	if addonName ~= "Blizzard_EncounterJournal" then return end
+
+	-- Now EJ APIs should exist
+	self:UnregisterEvent("ADDON_LOADED")
+
+	LOCAL_LOG("INFO", "Blizzard_EncounterJournal loaded, rebuilding catalog")
+	self:RebuildCatalog()
+
+	-- If we deferred scans while EJ wasn't ready, do one now
+	self:_ScheduleScan("ej_loaded", 1.0)
+end
+
+-- ###########################################################################
 -- # LIFECYCLE
 -- ###########################################################################
 
@@ -435,6 +474,11 @@ end
 
 function RAIDS:OnEnable()
 	LOCAL_LOG("INFO", "Enabling Raids module")
+
+	-- Ensure Encounter Journal API is available (can be lazy-loaded)
+	if not self:_TryLoadEncounterJournal() then
+		self:RegisterEvent("ADDON_LOADED")
+	end
 
 	-- Register events
 	self:RegisterEvent("PLAYER_LOGIN", "OnPlayerLogin")
@@ -455,6 +499,7 @@ function RAIDS:OnEnable()
 	-- Try to build EJ catalog early (best-effort, with retries)
 	self:_EnsureCatalogReady()
 end
+
 
 function RAIDS:OnDisable()
 	LOCAL_LOG("INFO", "Disabling Raids module")
