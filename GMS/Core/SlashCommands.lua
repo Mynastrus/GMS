@@ -8,11 +8,11 @@
 -- ###########################################################################
 
 local METADATA = {
-	TYPE = "EXTENSION",
+	TYPE = "EXT",
 	INTERN_NAME = "SLASH",
 	SHORT_NAME = "SLASH",
 	DISPLAY_NAME = "Slash Commands",
-	VERSION = "1.0.2",
+	VERSION = "1.0.3",
 }
 
 -- ---------------------------------------------------------------------------

@@ -10,11 +10,11 @@ local GMS = AceAddon:GetAddon("GMS", true)
 if not GMS then return end
 
 local METADATA = {
-	TYPE         = "MODULE",
+	TYPE         = "MOD",
 	INTERN_NAME  = "MythicPlus",
 	SHORT_NAME   = "MYTHIC",
 	DISPLAY_NAME = "Mythic Plus",
-	VERSION      = "1.1.1",
+	VERSION      = "1.1.2",
 }
 
 -- Ensure global log buffer exists

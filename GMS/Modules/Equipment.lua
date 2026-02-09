@@ -22,11 +22,11 @@ if not GMS then return end
 -- ###########################################################################
 
 local METADATA = {
-	TYPE         = "MODULE",
+	TYPE         = "MOD",
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.5",
+	VERSION      = "1.3.6",
 }
 
 -- ###########################################################################

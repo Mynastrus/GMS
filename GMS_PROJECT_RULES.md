@@ -33,6 +33,10 @@ local METADATA = {
 **Verbindliche Regeln:**
 
 * Kein Feld darf fehlen
+* `TYPE` **MUSS** einer der folgenden Werte sein:
+  * `"CORE"` für die Addon-Basis (Core.lua)
+  * `"MOD"` für Module
+  * `"EXT"` für Extensions (Core-Erweiterungen)
 * `VERSION` **immer als String**
 * Versionsformat **exakt**: `"1.0.0"`
 

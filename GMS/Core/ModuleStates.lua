@@ -15,11 +15,11 @@
 -- ============================================================================
 
 local METADATA = {
-	TYPE = "CORE",
-	INTERN_NAME = "MODULESTATES",
-	SHORT_NAME = "ModuleStates",
+	TYPE         = "EXT",
+	INTERN_NAME  = "MODULESTATES",
+	SHORT_NAME   = "ModuleStates",
 	DISPLAY_NAME = "Module States",
-	VERSION = "1.1.0",
+	VERSION      = "1.1.1",
 }
 
 local LibStub = LibStub

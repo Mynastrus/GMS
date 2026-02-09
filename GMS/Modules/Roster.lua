@@ -12,11 +12,11 @@
 -- ============================================================================
 
 local METADATA = {
-	TYPE = "MODULE",
-	INTERN_NAME = "ROSTER",
-	SHORT_NAME = "Roster",
+	TYPE         = "MOD",
+	INTERN_NAME  = "ROSTER",
+	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION = "1.0.3",
+	VERSION      = "1.0.4",
 }
 
 local LibStub = LibStub

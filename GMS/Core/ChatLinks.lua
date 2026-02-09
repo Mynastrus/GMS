@@ -17,11 +17,11 @@ if not GMS then return end
 -- ###########################################################################
 
 local METADATA = {
-	TYPE = "EXTENSION",
-	INTERN_NAME = "CHATLINKS",
+	TYPE = "EXT",
+	INTERN_NAME = "ChatLinks",
 	SHORT_NAME = "ChatLinks",
-	DISPLAY_NAME = "Chat Links",
-	VERSION = "1.0.2",
+	DISPLAY_NAME = "ChatLinks",
+	VERSION = "1.2.1",
 }
 
 -- ###########################################################################

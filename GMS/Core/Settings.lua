@@ -22,11 +22,11 @@ local AceGUI = LibStub("AceGUI-3.0", true)
 -- ###########################################################################
 
 local METADATA = {
-	TYPE         = "EXTENSION",
+	TYPE         = "EXT",
 	INTERN_NAME  = "SETTINGS",
 	SHORT_NAME   = "Settings",
 	DISPLAY_NAME = "Einstellungen",
-	VERSION      = "1.1.0",
+	VERSION      = "1.1.1",
 }
 
 -- ###########################################################################

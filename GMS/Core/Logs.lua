@@ -25,11 +25,11 @@ if not GMS then return end
 -- ###########################################################################
 
 local METADATA = {
-	TYPE         = "EXT", -- CORE | EXT | MOD
+	TYPE         = "EXT",
 	INTERN_NAME  = "LOGS",
-	SHORT_NAME   = "LOGS",
-	DISPLAY_NAME = "Logs",
-	VERSION      = "1.0.2",
+	SHORT_NAME   = "Logs",
+	DISPLAY_NAME = "Logging Console",
+	VERSION      = "1.1.3",
 }
 
 -- ###########################################################################

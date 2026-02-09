@@ -35,11 +35,11 @@ if not GMS then return end
 -- ###########################################################################
 
 local METADATA = {
-	TYPE = "EXTENSION",
-	INTERN_NAME = "UI",
-	SHORT_NAME = "UI",
+	TYPE         = "EXT",
+	INTERN_NAME  = "UI",
+	SHORT_NAME   = "UI",
 	DISPLAY_NAME = "Guild Management System",
-	VERSION = "1.0.3",
+	VERSION      = "1.0.4",
 }
 
 -- ###########################################################################

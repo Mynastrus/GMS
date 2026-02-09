@@ -13,11 +13,11 @@ local _G = _G
 -- ###########################################################################
 
 local METADATA = {
-	TYPE         = "MODULE",
+	TYPE         = "MOD",
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.3",
+	VERSION      = "1.0.4",
 }
 
 local LibStub = LibStub

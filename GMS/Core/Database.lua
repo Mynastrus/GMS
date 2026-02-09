@@ -5,11 +5,11 @@
 -- ============================================================================
 
 local METADATA = {
-	TYPE = "EXTENSION",
-	INTERN_NAME = "DB",
-	SHORT_NAME = "DB",
+	TYPE         = "EXT",
+	INTERN_NAME  = "DB",
+	SHORT_NAME   = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION = "1.0.2",
+	VERSION      = "1.0.3",
 }
 
 local _G = _G
