@@ -92,8 +92,11 @@ local DB_DEFAULTS = GMS.DEFAULTS or {
 }
 
 local LOGGING_DEFAULTS = {
+	char = {
+		logs = {},
+	},
 	profile = {},
-	global = { logs = {} },
+	global = {},
 }
 
 -- ###########################################################################

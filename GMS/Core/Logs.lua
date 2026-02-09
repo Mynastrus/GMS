@@ -95,23 +95,22 @@ GMS.LOGS = LOGS
 LOGS.LEVELS = { TRACE = 1, DEBUG = 2, INFO = 3, WARN = 4, ERROR = 5 }
 LOGS.LEVEL_NAMES = { [1] = "TRACE", [2] = "DEBUG", [3] = "INFO", [4] = "WARN", [5] = "ERROR" }
 
+-- Registry Defaults (zentral verwaltet via GMS:RegisterModuleOptions)
+local REG_DEFAULTS = {
+	maxEntries = 400,
+	logTRACE   = false,
+	logDEBUG   = false,
+	logINFO    = true,
+	logWARN    = true,
+	logERROR   = true,
+}
+
 local COLORS = {
 	TRACE = "|cff9d9d9d",
 	DEBUG = "|cff4da6ff",
 	INFO  = "|cff4dff88",
 	WARN  = "|cffffd24d",
 	ERROR = "|cffff4d4d",
-}
-
-LOGS.DEFAULTS = {
-	profile = {
-		minLevel = LOGS.LEVELS.INFO, -- Output/UI Filter (Speicher bleibt ALL)
-		chat = false, -- optional Chat output
-		maxEntries = 400, -- Ringbuffer Größe
-		timestampFormat = "%Y-%m-%d %H:%M:%S",
-		entries = {}, -- persistierter Ringbuffer (unsere Logs)
-		ingestPos = 0, -- Cursor: letzter ingesteter Index aus GMS._LOG_BUFFER
-	}
 }
 
 LOGS._db = nil
@@ -156,11 +155,12 @@ local function nowReadable(fmt)
 end
 
 local function profile()
-	return (LOGS._db and LOGS._db.profile) or LOGS.DEFAULTS.profile
+	return GMS:GetModuleOptions("LOGS") or REG_DEFAULTS
 end
 
 local function allowForOutput(levelNum)
-	return levelNum >= (profile().minLevel or LOGS.LEVELS.INFO)
+	local name = levelName(levelNum)
+	return profile()["log" .. name] == true
 end
 
 local function chatPrint(msg)
@@ -323,15 +323,19 @@ function LOGS:IngestGlobalBuffer()
 	end
 
 	local added = 0
+	local prof = profile()
 	for i = start, last do
 		local e = buf[i]
 		if type(e) == "table" then
-			entries[#entries + 1] = _mapGlobalEntry(e)
-			added = added + 1
+			local mapped = _mapGlobalEntry(e)
+			if prof["log" .. mapped.level] then
+				entries[#entries + 1] = mapped
+				added = added + 1
+			end
 		end
 	end
 
-	p.ingestPos = last
+	prof.ingestPos = last
 	trimToMax()
 	return added
 end
@@ -389,26 +393,22 @@ end
 -- ###########################################################################
 
 function LOGS:Init()
-	if AceDB then
-		local ok, db = pcall(AceDB.New, AceDB, "GMS_Logs_DB", LOGS.DEFAULTS, true)
-		if ok and db then
-			LOGS._db = db
-			LOGS._entries = db.profile.entries or {}
-			db.profile.entries = LOGS._entries
+	GMS:RegisterModuleOptions("LOGS", REG_DEFAULTS, "PROFILE")
 
-			db.profile.ingestPos = tonumber(db.profile.ingestPos) or 0
-			trimToMax()
+	if GMS.logging_db then
+		LOGS._db = GMS.logging_db
+		LOGS._entries = GMS.logging_db.char.logs or {}
+		GMS.logging_db.char.logs = LOGS._entries
 
-			LOCAL_LOG("INFO", "AceDB initialized (persisted ringbuffer)")
-			return
-		end
-		LOCAL_LOG("WARN", "AceDB.New failed; fallback to in-memory only", ok, db)
+		local p = profile()
+		p.ingestPos = tonumber(p.ingestPos) or 0
+		trimToMax()
+
+		LOCAL_LOG("INFO", "Logging initialized (GMS_Logging_DB char-scoped)")
 	else
-		LOCAL_LOG("WARN", "AceDB not available; fallback to in-memory only")
+		LOCAL_LOG("WARN", "GMS.logging_db not available; fallback to in-memory only")
+		LOGS._entries = {}
 	end
-
-	LOGS._db = nil
-	LOGS._entries = {}
 end
 
 -- PUBLIC CONFIG
