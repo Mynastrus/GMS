@@ -974,7 +974,7 @@ function UI:SeedRightDockPlaceholders()
 		tooltipTitle = "Optionen",
 		tooltipText = "Einstellungen",
 		onClick = function()
-			UI:Navigate("OPTIONS")
+			UI:Navigate("SETTINGS")
 		end,
 	})
 end
