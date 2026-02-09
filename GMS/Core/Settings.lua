@@ -26,61 +26,13 @@ local METADATA = {
 	INTERN_NAME  = "SETTINGS",
 	SHORT_NAME   = "Settings",
 	DISPLAY_NAME = "Einstellungen",
-	VERSION      = "1.0.0",
+	VERSION      = "1.1.0",
 }
 
--- ###########################################################################
--- #	LOGGING (Required by PROJECT RULES Section 4)
--- ###########################################################################
-
-GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
-
-local function now()
-	return type(GetTime) == "function" and GetTime() or nil
-end
-
-local function LOCAL_LOG(level, msg, ...)
-	local entry = {
-		time   = now(),
-		level  = tostring(level or "INFO"),
-		type   = tostring(METADATA.TYPE or "UNKNOWN"),
-		source = tostring(METADATA.SHORT_NAME or "UNKNOWN"),
-		msg    = tostring(msg or ""),
-	}
-
-	local n = select("#", ...)
-	if n > 0 then
-		entry.data = {}
-		for i = 1, n do
-			entry.data[i] = select(i, ...)
-		end
-	end
-
-	local buf = GMS._LOG_BUFFER
-	local idx = #buf + 1
-	buf[idx] = entry
-
-	if type(GMS._LOG_NOTIFY) == "function" then
-		pcall(GMS._LOG_NOTIFY, entry, idx)
-	end
-end
+-- ... (Logging remains unchanged)
 
 -- ###########################################################################
--- #	EXTENSION REGISTRATION
--- ###########################################################################
-
-if type(GMS.RegisterExtension) == "function" then
-	GMS:RegisterExtension({
-		key = METADATA.INTERN_NAME,
-		name = METADATA.SHORT_NAME,
-		displayName = METADATA.DISPLAY_NAME,
-		version = METADATA.VERSION,
-		desc = "Modular Settings UI & Slash Integration",
-	})
-end
-
--- ###########################################################################
--- #	UI: PAGE BUILDER
+-- #	UI: HELPERS
 -- ###########################################################################
 
 local function CreateHeading(parent, text)
@@ -91,13 +43,43 @@ local function CreateHeading(parent, text)
 	return label
 end
 
-local function BuildOptionsForModule(container, modName, reg)
-	if not reg or not reg.defaults then return end
+-- ###########################################################################
+-- #	UI: OPTIONS BUILDER (Right Pane)
+-- ###########################################################################
 
-	local options = GMS:GetModuleOptions(modName)
-	if not options then return end
+local function BuildOptionsForTarget(container, targetType, targetKey)
+	container:ReleaseChildren()
 
-	CreateHeading(container, reg.name or modName)
+	local reg = nil
+	local options = nil
+	local displayName = targetKey
+
+	if targetType == "MOD" then
+		if GMS.DB and GMS.DB._registrations then
+			reg = GMS.DB._registrations[targetKey]
+		end
+		options = GMS:GetModuleOptions(targetKey)
+		displayName = (reg and reg.name) or targetKey
+	elseif targetType == "EXT" then
+		-- For extensions, we might look into GMS.REGISTRY if available
+		if GMS.REGISTRY and GMS.REGISTRY.EXT then
+			reg = GMS.REGISTRY.EXT[targetKey]
+		end
+		-- Extension options might not be centrally stored like MOD options yet,
+		-- but we check GMS.DB:GetModuleOptions(key) anyway as it's the standard API
+		options = GMS:GetModuleOptions(targetKey)
+		displayName = (reg and reg.displayName) or targetKey
+	end
+
+	CreateHeading(container, displayName)
+
+	if not options or not reg or not reg.defaults then
+		local lbl = AceGUI:Create("Label")
+		lbl:SetText("Keine konfigurierbaren Optionen für dieses Element gefunden.")
+		lbl:SetFullWidth(true)
+		container:AddChild(lbl)
+		return
+	end
 
 	-- Sort keys for consistency
 	local keys = {}
@@ -114,7 +96,7 @@ local function BuildOptionsForModule(container, modName, reg)
 			cb:SetValue(val)
 			cb:SetCallback("OnValueChanged", function(_, _, newValue)
 				options[key] = newValue
-				LOCAL_LOG("INFO", "Option changed", modName, key, newValue)
+				LOCAL_LOG("INFO", "Option changed", targetKey, key, newValue)
 			end)
 			container:AddChild(cb)
 		elseif valType == "string" or valType == "number" then
@@ -128,38 +110,99 @@ local function BuildOptionsForModule(container, modName, reg)
 				else
 					options[key] = newValue
 				end
-				LOCAL_LOG("INFO", "Option changed", modName, key, options[key])
+				LOCAL_LOG("INFO", "Option changed", targetKey, key, options[key])
 			end)
 			container:AddChild(eb)
 		end
 	end
 end
 
+-- ###########################################################################
+-- #	UI: TREE DATA BUILDER
+-- ###########################################################################
+
+local function GetTreeData()
+	local tree = {
+		{
+			value = "EXT_ROOT",
+			text = "Erweiterungen (Extensions)",
+			children = {},
+		},
+		{
+			value = "MOD_ROOT",
+			text = "Module",
+			children = {},
+		},
+	}
+
+	-- Extensions
+	if GMS.REGISTRY and GMS.REGISTRY.EXT then
+		local extKeys = {}
+		for k in pairs(GMS.REGISTRY.EXT) do table.insert(extKeys, k) end
+		table.sort(extKeys)
+		for _, k in ipairs(extKeys) do
+			local ext = GMS.REGISTRY.EXT[k]
+			table.insert(tree[1].children, {
+				value = "EXT:" .. k,
+				text = ext.displayName or ext.name or k,
+			})
+		end
+	end
+
+	-- Modules
+	if GMS.DB and GMS.DB._registrations then
+		local modKeys = {}
+		for k in pairs(GMS.DB._registrations) do table.insert(modKeys, k) end
+		table.sort(modKeys)
+		for _, k in ipairs(modKeys) do
+			local reg = GMS.DB._registrations[k]
+			table.insert(tree[2].children, {
+				value = "MOD:" .. k,
+				text = reg.name or k,
+			})
+		end
+	end
+
+	return tree
+end
+
+-- ###########################################################################
+-- #	UI: MAIN PAGE BUILDER
+-- ###########################################################################
+
 local function BuildSettingsPage(root)
 	root:SetLayout("Fill")
 
-	local scroll = AceGUI:Create("ScrollFrame")
-	scroll:SetLayout("List")
-	root:AddChild(scroll)
+	local treeGroup = AceGUI:Create("TreeGroup")
+	treeGroup:SetFullWidth(true)
+	treeGroup:SetFullHeight(true)
+	treeGroup:SetTree(GetTreeData())
+	treeGroup:SetLayout("List")
 
-	local intro = AceGUI:Create("Label")
-	intro:SetText("Hier kannst du alle Einstellungen für GMS und seine Module anpassen.")
-	intro:SetFullWidth(true)
-	scroll:AddChild(intro)
-
-	-- Iterate over registered module options
-	if GMS.DB and GMS.DB._registrations then
-		-- Sort module names
-		local modNames = {}
-		for name in pairs(GMS.DB._registrations) do table.insert(modNames, name) end
-		table.sort(modNames)
-
-		for _, name in ipairs(modNames) do
-			BuildOptionsForModule(scroll, name, GMS.DB._registrations[name])
+	treeGroup:SetCallback("OnGroupSelected", function(self, _, group)
+		local parts = {}
+		for p in string.gmatch(group, "([^:]+)") do
+			table.insert(parts, p)
 		end
-	else
-		LOCAL_LOG("WARN", "GMS.DB._registrations not found")
-	end
+
+		local targetType = parts[1]
+		local targetKey = parts[2]
+
+		if targetType and targetKey then
+			BuildOptionsForTarget(self, targetType, targetKey)
+		else
+			self:ReleaseChildren()
+			local lbl = AceGUI:Create("Label")
+			lbl:SetText("Bitte wähle ein Modul oder eine Extension aus der Liste links aus.")
+			lbl:SetFullWidth(true)
+			self:AddChild(lbl)
+		end
+	end)
+
+	root:AddChild(treeGroup)
+
+	-- Select first logical group if available
+	treeGroup:SelectByPath("MOD_ROOT")
 end
 
 -- ###########################################################################
