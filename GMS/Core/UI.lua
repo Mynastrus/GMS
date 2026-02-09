@@ -1038,7 +1038,7 @@ do
 			id = GetActivePage()
 		end
 
-		if id ~= "OPTIONS" and (not self._pages or not self._pages[id]) then
+		if not self._pages or not self._pages[id] then
 			id = GetFirstPageId() or "home"
 		end
 
@@ -1053,30 +1053,6 @@ do
 
 		if contentRoot and contentRoot.ReleaseChildren then
 			contentRoot:ReleaseChildren()
-		end
-
-		if id == "OPTIONS" then
-			self:SetWindowTitle(DISPLAY_NAME .. "   |cffCCCCCCOptionen|r")
-
-			if AceGUI then
-				local holder = AceGUI:Create("SimpleGroup")
-				holder:SetLayout("Fill")
-				holder:SetFullWidth(true)
-				holder:SetFullHeight(true)
-				contentRoot:AddChild(holder)
-
-				if GMS.Options and type(GMS.Options.EmbedInto) == "function" then
-					SafeCall(GMS.Options.EmbedInto, GMS.Options, holder.frame)
-				else
-					local lbl = AceGUI:Create("Label")
-					lbl:SetFullWidth(true)
-					lbl:SetText("Options sind nicht verfügbar.")
-					contentRoot:AddChild(lbl)
-				end
-			end
-
-			self:SetRightDockSelected("options", true, true)
-			return
 		end
 
 		local p = self._pages and self._pages[id] or nil

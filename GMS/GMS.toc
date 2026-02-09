@@ -59,6 +59,7 @@ Core\Database.lua
 
 Core\SlashCommands.lua
 Core\ChatLinks.lua
+Core\Settings.lua
 Core\UI.lua
 Core\Logs.lua
 
@@ -70,3 +71,4 @@ Modules/Roster.lua
 Modules/CharInfo.lua
 Modules/Equipment.lua
 Modules/Raids.lua
+Modules/MythicPlus.lua
