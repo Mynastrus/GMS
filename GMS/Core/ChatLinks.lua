@@ -210,6 +210,10 @@ end
 -- #	HOOKS
 -- ###########################################################################
 
+local function Tooltip_Hide()
+	GameTooltip:Hide()
+end
+
 if not ChatLinks._hooked then
 	ChatLinks._hooked = true
 
@@ -217,7 +221,7 @@ if not ChatLinks._hooked then
 		local chat = _G["ChatFrame" .. i]
 		if chat then
 			GMS:HookScript(chat, "OnHyperlinkEnter", Tooltip_Show)
-			GMS:HookScript(chat, "OnHyperlinkLeave", function() GameTooltip:Hide() end)
+			GMS:HookScript(chat, "OnHyperlinkLeave", Tooltip_Hide)
 		end
 	end
 
