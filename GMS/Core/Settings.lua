@@ -130,10 +130,23 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 	table.sort(keys)
 
 	for _, key in ipairs(keys) do
+		local defaultVal = reg.defaults[key]
 		local val = options[key]
 		local valType = type(val)
 
-		if valType == "boolean" then
+		-- Support for "execute" (button) type
+		if type(defaultVal) == "table" and defaultVal.type == "execute" then
+			local btn = AceGUI:Create("Button")
+			btn:SetText(defaultVal.name or key)
+			btn:SetFullWidth(true)
+			btn:SetCallback("OnClick", function()
+				if type(defaultVal.func) == "function" then
+					LOCAL_LOG("INFO", "Executing command", targetKey, key)
+					defaultVal.func()
+				end
+			end)
+			container:AddChild(btn)
+		elseif valType == "boolean" then
 			local cb = AceGUI:Create("CheckBox")
 			cb:SetLabel(key)
 			cb:SetValue(val)

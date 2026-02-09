@@ -255,6 +255,39 @@ function GMS:GetModuleOptions(moduleName)
 	return nil
 end
 
+--- Resets all databases to defaults.
+function GMS:Database_ResetAll()
+	LOCAL_LOG("WARN", "Database RESET requested")
+
+	if self.db then
+		self.db:ResetProfile()
+	end
+
+	if self.logging_db then
+		-- Reset logging db - char logs and profile
+		self.logging_db.char.logs = {}
+		self.logging_db.profile.ingestPos = 0
+	end
+
+	if type(_G.GMS_Guild_DB) == "table" then
+		wipe(_G.GMS_Guild_DB)
+	end
+
+	LOCAL_LOG("INFO", "All databases reset to defaults")
+
+	if type(ReloadUI) == "function" then
+		ReloadUI()
+	end
+end
+
+-- ###########################################################################
+-- #	OPTIONS
+-- ###########################################################################
+
+GMS:RegisterModuleOptions("DB", {
+	reset = { type = "execute", func = function() GMS:Database_ResetAll() end, name = "Datenbank zurücksetzen" }
+}, "PROFILE")
+
 -- ###########################################################################
 -- #	READY
 -- ###########################################################################
