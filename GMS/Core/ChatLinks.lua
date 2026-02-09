@@ -64,6 +64,15 @@ end
 -- #	MODULESTATES REGISTRATION
 -- ###########################################################################
 
+-- Registry Defaults (zentral verwaltet via GMS:RegisterModuleOptions)
+local REG_DEFAULTS = {
+	clickablePrefix = true,
+}
+
+local COLORS = {
+	-- This table was empty in the provided snippet, keeping it empty as per instruction.
+}
+
 if type(GMS.RegisterExtension) == "function" then
 	GMS:RegisterExtension({
 		key = METADATA.INTERN_NAME,
@@ -228,6 +237,15 @@ if not ChatLinks._hooked then
 	GMS:SecureHook("SetItemRef", OnClick)
 end
 
+function ChatLinks:UpdatePrefix()
+	local options = GMS:GetModuleOptions(METADATA.INTERN_NAME)
+	if options and options.clickablePrefix then
+		GMS.CHAT_PREFIX = GMS:ChatLink_Build("GMS")
+	else
+		GMS.CHAT_PREFIX = "|cff03A9F4[GMS]|r"
+	end
+end
+
 -- ###########################################################################
 -- #	DEFAULT DEFINITIONS (Example)
 -- ###########################################################################
@@ -257,14 +275,17 @@ if not ChatLinks._defaultsLoaded then
 		end
 	end)
 
-	local link = GMS:ChatLink_Build("GMS")
-	GMS.CHAT_PREFIX = link
+	GMS:RegisterModuleOptions(METADATA.INTERN_NAME, REG_DEFAULTS, "PROFILE")
+	ChatLinks:UpdatePrefix()
 
-	-- GMS:Print("Klick hier: " .. link)
-
-	-- Beispiel: gleiche Action, aber Tooltip-Titel pro Link überschreiben:
-	-- local link2 = GMS:ChatLink_Build("GMS", "/gms")
-	-- GMS:Print("Hover Title Override: " .. link2)
+	-- Hook options change to update prefix immediately
+	if GMS.DB and GMS.DB._registrations and GMS.DB._registrations[METADATA.INTERN_NAME] then
+		local namespace = GMS.DB._registrations[METADATA.INTERN_NAME].namespace
+		if namespace then
+			namespace.RegisterCallback(ChatLinks, "OnProfileChanged", "UpdatePrefix")
+			namespace.RegisterCallback(ChatLinks, "OnReset", "UpdatePrefix")
+		end
+	end
 end
 
 -- ###########################################################################

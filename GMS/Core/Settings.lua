@@ -153,6 +153,10 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 			cb:SetCallback("OnValueChanged", function(_, _, newValue)
 				options[key] = newValue
 				LOCAL_LOG("INFO", "Option changed", targetKey, key, newValue)
+				-- Trigger callbacks if namespace exists
+				if reg and reg.namespace and reg.namespace.Fire then
+					reg.namespace:Fire("OnProfileChanged")
+				end
 			end)
 			container:AddChild(cb)
 		elseif valType == "string" or valType == "number" then
