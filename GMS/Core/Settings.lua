@@ -29,7 +29,55 @@ local METADATA = {
 	VERSION      = "1.1.0",
 }
 
--- ... (Logging remains unchanged)
+-- ###########################################################################
+-- #	LOGGING (Required by PROJECT RULES Section 4)
+-- ###########################################################################
+
+GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
+
+local function now()
+	return type(GetTime) == "function" and GetTime() or nil
+end
+
+local function LOCAL_LOG(level, msg, ...)
+	local entry = {
+		time   = now(),
+		level  = tostring(level or "INFO"),
+		type   = tostring(METADATA.TYPE or "UNKNOWN"),
+		source = tostring(METADATA.SHORT_NAME or "UNKNOWN"),
+		msg    = tostring(msg or ""),
+	}
+
+	local n = select("#", ...)
+	if n > 0 then
+		entry.data = {}
+		for i = 1, n do
+			entry.data[i] = select(i, ...)
+		end
+	end
+
+	local buf = GMS._LOG_BUFFER
+	local idx = #buf + 1
+	buf[idx] = entry
+
+	if type(GMS._LOG_NOTIFY) == "function" then
+		pcall(GMS._LOG_NOTIFY, entry, idx)
+	end
+end
+
+-- ###########################################################################
+-- #	EXTENSION REGISTRATION
+-- ###########################################################################
+
+if type(GMS.RegisterExtension) == "function" then
+	GMS:RegisterExtension({
+		key = METADATA.INTERN_NAME,
+		name = METADATA.SHORT_NAME,
+		displayName = METADATA.DISPLAY_NAME,
+		version = METADATA.VERSION,
+		desc = "Modular Settings UI & Slash Integration",
+	})
+end
 
 -- ###########################################################################
 -- #	UI: HELPERS
