@@ -967,7 +967,7 @@ function UI:SeedRightDockPlaceholders()
 	})
 
 	self:AddRightDockIconBottom({
-		id = "options",
+		id = "SETTINGS",
 		order = 1,
 		selectable = true,
 		icon = "Interface\\Icons\\Trade_Engineering",
@@ -1326,7 +1326,7 @@ function UI:Init()
 	self:CreateFrame()
 	self:ApplyWindowState()
 
-	if type(self.RegisterPage) == "function" and (not self._pages or not next(self._pages)) then
+	if type(self.RegisterPage) == "function" then
 		self:RegisterPage("home", 1, "Dashboard", function(root)
 			self:RenderFallbackContent(root,
 				"Tabs rechts: Klick öffnet Pages. Pages registrieren: GMS.UI:RegisterPage(id, order, title, buildFn)")
