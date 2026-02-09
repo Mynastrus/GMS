@@ -81,13 +81,17 @@ if not RAIDS then
 	RAIDS = GMS:NewModule(MODULE_NAME, "AceEvent-3.0")
 end
 
--- Raids options (migrated to RegisterModuleOptions API)
-RAIDS._options = RAIDS._options or nil
-
 local OPTIONS_DEFAULTS = {
+	scanLegacy = { type = "toggle", name = "Legacy Raids scannen", default = false },
+	rebuild = { type = "execute", name = "Katalog neu aufbauen", func = function()
+		local R = GMS:GetModule("RAIDS", true)
+		if R then R:RebuildCatalog() end
+	end },
 	raids = {}, -- { [instanceID] = { current = {...}, best = {...} } }
 	lastScan = 0,
 }
+
+RAIDS._catalog = nil
 
 function RAIDS:InitializeOptions()
 	-- Register character-scoped raid options
@@ -146,8 +150,10 @@ local function ensureStore()
 	local charKey = getPlayerKey()
 	if not charKey then return nil, nil end
 
-	-- Ensure catalog is initialized within the options if not part of OPTIONS_DEFAULTS
-	RAIDS._options.catalog = RAIDS._options.catalog or {}
+	-- Catalog is now local to the module session, not persisted in the options
+	if not RAIDS._catalog then
+		RAIDS:_EnsureCatalogReady()
+	end
 
 	return RAIDS._options, charKey
 end
@@ -305,9 +311,15 @@ local function buildExpansionRaidCatalog()
 	end
 
 	local expansionName = getExpansionName()
+	local scanLegacy = false
+	local options = GMS:GetModuleOptions(MODULE_NAME)
+	if options then
+		scanLegacy = (options.scanLegacy == true)
+	end
+
 	local tiersToScan = {}
 
-	if expansionName and expansionName ~= "" then
+	if not scanLegacy and expansionName and expansionName ~= "" then
 		for t = 1, numTiers do
 			local tierName = EJ_GetTierInfo(t)
 			if type(tierName) == "string" and tierName:find(expansionName, 1, true) then
@@ -317,13 +329,18 @@ local function buildExpansionRaidCatalog()
 	end
 
 	if #tiersToScan == 0 then
-		local cur = EJ_GetCurrentTier and EJ_GetCurrentTier() or nil
-		if cur then
-			tiersToScan[1] = cur
-			catalog.source = "EJ_CURRENT_TIER_ONLY"
+		if scanLegacy then
+			for t = 1, numTiers do tiersToScan[#tiersToScan + 1] = t end
+			catalog.source = "EJ_ALL_TIERS"
 		else
-			catalog.source = "EJ_NO_TIER"
-			return catalog
+			local cur = EJ_GetCurrentTier and EJ_GetCurrentTier() or nil
+			if cur then
+				tiersToScan[1] = cur
+				catalog.source = "EJ_CURRENT_TIER_ONLY"
+			else
+				catalog.source = "EJ_NO_TIER"
+				return catalog
+			end
 		end
 	end
 
@@ -460,12 +477,7 @@ function RAIDS:OnEJReady()
 end
 
 function RAIDS:_EnsureCatalogReady()
-	local store = ensureStore()
-	if not store then return false end
-
-	store.catalog = store.catalog or {}
-
-	if catalogIsUsable(store.catalog) then
+	if RAIDS._catalog and catalogIsUsable(RAIDS._catalog) then
 		return true
 	end
 
@@ -482,13 +494,13 @@ function RAIDS:_EnsureCatalogReady()
 		return false
 	end
 
-	store.catalog = buildExpansionRaidCatalog()
-	if catalogIsUsable(store.catalog) then
-		LOCAL_LOG("INFO", "EJ catalog built", store.catalog.source)
+	RAIDS._catalog = buildExpansionRaidCatalog()
+	if catalogIsUsable(RAIDS._catalog) then
+		LOCAL_LOG("INFO", "EJ catalog built", RAIDS._catalog.source)
 		return true
 	end
 
-	LOCAL_LOG("WARN", "EJ catalog build failed", store.catalog.source or "unknown")
+	LOCAL_LOG("WARN", "EJ catalog build failed", RAIDS._catalog.source or "unknown")
 	return false
 end
 
@@ -540,7 +552,20 @@ function RAIDS:OnEnable()
 	-- Try to build EJ catalog early (gated until EJ is ready)
 	self:_EnsureCatalogReady()
 
+	-- Hook into configuration changes
+	if type(GMS.RegisterMessage) == "function" then
+		self:RegisterMessage("GMS_CONFIG_CHANGED", "OnConfigChanged")
+	end
+
 	GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
+end
+
+function RAIDS:OnConfigChanged(message, targetKey, key, newValue)
+	if targetKey == MODULE_NAME then
+		if key == "scanLegacy" then
+			self:RebuildCatalog()
+		end
+	end
 end
 
 function RAIDS:OnDisable()
@@ -589,13 +614,10 @@ function RAIDS:RebuildCatalog()
 		return false
 	end
 
-	local store = ensureStore()
-	if not store then return false end
+	RAIDS._catalog = buildExpansionRaidCatalog()
+	local ok = catalogIsUsable(RAIDS._catalog)
 
-	store.catalog = buildExpansionRaidCatalog()
-	local ok = catalogIsUsable(store.catalog)
-
-	LOCAL_LOG(ok and "INFO" or "WARN", "Catalog rebuild", store.catalog.source or "unknown")
+	LOCAL_LOG(ok and "INFO" or "WARN", "Catalog rebuild", RAIDS._catalog.source or "unknown")
 	return ok
 end
 
@@ -629,10 +651,8 @@ function RAIDS:GetAllRaids()
 end
 
 function RAIDS:GetCatalog()
-	local store = ensureStore()
-	if not store then return {} end
 	self:_EnsureCatalogReady()
-	return store.catalog or {}
+	return RAIDS._catalog or {}
 end
 
 -- ###########################################################################
@@ -685,11 +705,12 @@ function RAIDS:OnUpdateInstanceInfo()
 		numEncounters = GetSavedInstanceInfo(i)
 
 		if isRaid == true and type(name) == "string" and name ~= "" then
-			local instanceID = catalog.nameToInstanceID and catalog.nameToInstanceID[name] or nil
+			local catalog = RAIDS._catalog
+			local instanceID = catalog and catalog.nameToInstanceID and catalog.nameToInstanceID[name] or nil
 			if not instanceID then
 				unresolved = unresolved + 1
 			else
-				local catRaid = catalog.byInstanceID and catalog.byInstanceID[instanceID] or nil
+				local catRaid = catalog and catalog.byInstanceID and catalog.byInstanceID[instanceID] or nil
 				local total = (catRaid and catRaid.total) or (tonumber(numEncounters) or 0)
 				local encCount = tonumber(numEncounters) or total or 0
 

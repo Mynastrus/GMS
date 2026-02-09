@@ -192,16 +192,27 @@ function GMS:RegisterModuleOptions(moduleName, defaults, scope)
 	end
 
 	-- Normalize defaults wrapper based on scope logic
+	-- NEW: Extract actual values if metadata tables are used
+	local aceDefaults = {}
+	if type(defaults) == "table" then
+		for k, v in pairs(defaults) do
+			if type(v) == "table" and v.default ~= nil then
+				aceDefaults[k] = v.default
+			else
+				aceDefaults[k] = v
+			end
+		end
+	end
+
 	local dbDefaults = {}
 	if scope == "PROFILE" then
-		dbDefaults.profile = defaults
+		dbDefaults.profile = aceDefaults
 	elseif scope == "GLOBAL" then
-		dbDefaults.global = defaults
+		dbDefaults.global = aceDefaults
 	elseif scope == "CHAR" then
-		dbDefaults.char = defaults
+		dbDefaults.char = aceDefaults
 	elseif scope == "GUILD" then
 		-- Guild DB is manual, we store defaults for later application
-		-- No AceDB defaults structure needed here, we handle it manually on access
 	end
 
 	-- For AceDB scopes (PROFILE, GLOBAL, CHAR), utilize Namespaces
