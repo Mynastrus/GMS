@@ -229,6 +229,45 @@ if not ChatLinks._hooked then
 end
 
 -- ###########################################################################
+-- #	DEFAULT DEFINITIONS (Example)
+-- ###########################################################################
+
+if not ChatLinks._defaultsLoaded then
+	ChatLinks._defaultsLoaded = true
+
+	-- Beispiel: Prefix-Link, aber im Tooltip nur den Hint anzeigen, sonst nix
+	GMS:ChatLink_Define("GMS", {
+		title = "|cff03A9F4GMS|r",
+		label = "|cff03A9F4[GMS]|r",
+		hint = "/gms",
+		tooltip = {
+			"Öffnet das GMS Menü.",
+		},
+		flags = {
+			showLabel = false, -- label NICHT anzeigen
+			showHint = true, -- hint anzeigen
+			showTooltipLines = false, -- tooltip lines NICHT anzeigen
+			showActionFallback = false, -- fallback NICHT anzeigen
+		},
+	})
+
+	GMS:ChatLink_OnClick("GMS", function()
+		if type(GMS.SlashCommand) == "function" then
+			GMS:SlashCommand("?")
+		end
+	end)
+
+	local link = GMS:ChatLink_Build("GMS")
+	GMS.CHAT_PREFIX = link
+
+	-- GMS:Print("Klick hier: " .. link)
+
+	-- Beispiel: gleiche Action, aber Tooltip-Titel pro Link überschreiben:
+	-- local link2 = GMS:ChatLink_Build("GMS", "/gms")
+	-- GMS:Print("Hover Title Override: " .. link2)
+end
+
+-- ###########################################################################
 -- #	READY
 -- ###########################################################################
 
