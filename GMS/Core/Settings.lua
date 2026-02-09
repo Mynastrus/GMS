@@ -99,24 +99,19 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 	container:ReleaseChildren()
 
 	local reg = nil
-	local options = nil
+	if GMS.DB and GMS.DB._registrations then
+		reg = GMS.DB._registrations[targetKey]
+	end
+
+	local options = GMS:GetModuleOptions(targetKey)
 	local displayName = targetKey
 
-	if targetType == "MOD" then
-		if GMS.DB and GMS.DB._registrations then
-			reg = GMS.DB._registrations[targetKey]
+	if targetType == "EXT" then
+		if GMS.REGISTRY and GMS.REGISTRY.EXT and GMS.REGISTRY.EXT[targetKey] then
+			displayName = GMS.REGISTRY.EXT[targetKey].displayName or GMS.REGISTRY.EXT[targetKey].name or targetKey
 		end
-		options = GMS:GetModuleOptions(targetKey)
-		displayName = (reg and reg.name) or targetKey
-	elseif targetType == "EXT" then
-		-- For extensions, we might look into GMS.REGISTRY if available
-		if GMS.REGISTRY and GMS.REGISTRY.EXT then
-			reg = GMS.REGISTRY.EXT[targetKey]
-		end
-		-- Extension options might not be centrally stored like MOD options yet,
-		-- but we check GMS.DB:GetModuleOptions(key) anyway as it's the standard API
-		options = GMS:GetModuleOptions(targetKey)
-		displayName = (reg and reg.displayName) or targetKey
+	elseif targetType == "MOD" then
+		if reg then displayName = reg.name or targetKey end
 	end
 
 	CreateHeading(container, displayName)
