@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.1",
+	VERSION      = "1.0.3",
 }
 
 local LibStub = LibStub
@@ -496,4 +496,5 @@ end
 function CHARINFO:OnDisable()
 	if self._ticker and self._ticker.Cancel then self._ticker:Cancel() end
 	self._ticker = nil
+	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end

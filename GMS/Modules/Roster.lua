@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME = "ROSTER",
 	SHORT_NAME = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION = "1.0.2",
+	VERSION = "1.0.3",
 }
 
 local LibStub = LibStub
@@ -960,4 +960,8 @@ function Roster:OnEnable()
 			GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
 		end
 	end)
+end
+
+function Roster:OnDisable()
+	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end

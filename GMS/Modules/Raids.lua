@@ -34,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.4",
+	VERSION      = "1.2.5",
 }
 
 -- ###########################################################################
@@ -539,10 +539,13 @@ function RAIDS:OnEnable()
 
 	-- Try to build EJ catalog early (gated until EJ is ready)
 	self:_EnsureCatalogReady()
+
+	GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
 end
 
 function RAIDS:OnDisable()
 	LOCAL_LOG("INFO", "Disabling Raids module")
+	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
 
 -- ###########################################################################
