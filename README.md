@@ -1,56 +1,92 @@
 # 🧩 GMS – Guild Management Suite
 
-**GMS** ist ein modular aufgebautes **World of Warcraft Addon** auf Basis von **Ace3**,  
-entwickelt mit Fokus auf **saubere Architektur**, **Erweiterbarkeit** und **stabile UI-Integration**.
-
-Das Projekt dient als **zentrale Plattform** für Gilden-bezogene Tools wie Roster-Übersichten, Charakter-Infos, interne Utilities und zukünftige Management-Features.
+**GMS** is a modular **World of Warcraft Addon** built on the **Ace3 framework**, designed with a focus on **clean architecture**, **extensibility**, and **seamless UI integration**.
 
 ---
 
-## ✨ Features
+## 🇺🇸 English Documentation
 
-- 🔌 **Modulares Ace3-Addon**
-  - Klare Trennung zwischen Core, UI und Modulen
-  - Saubere Registrierung über AceAddon Registry
+### ✨ Features
 
-- 🖥️ **Eigenes UI-Framework**
-  - Blizzard `ButtonFrameTemplate`
-  - Integrierte AceGUI-Pages
-  - Rechtes Dock mit Icons & Navigation
-  - Persistente Fensterposition & Größe (AceDB)
+- 🔌 **Modular Ace3 Architecture**
+  - Strict separation of Core, UI, and Modules.
+  - Standardized metadata (`CORE`, `EXT`, `MOD`).
+  - Decoupled logic using AceEvent signals.
 
-- 🧱 **Stabile Core-Architektur**
-  - Zentrales Logging-Bootstrap
-  - Einheitliche Print / Printf-APIs
-  - Klare Init- und Lifecycle-Phasen
+- 🖥️ **Custom UI Shell**
+  - Based on Blizzard's `ButtonFrameTemplate`.
+  - Integrated AceGUI pages and navigation dock.
+  - Persistent window states (size/position) via AceDB.
 
-- 🧩 **Erweiterbar**
-  - Module registrieren eigene Pages & UI-Elemente
-  - Lose Kopplung zwischen Modulen
-  - Keine Abhängigkeit von globalem `addonTable`
+- 📊 **Current Modules**
+  - 👥 **Roster**: Advanced guild member overview with customizable columns.
+  - 🏰 **Raids**: Encounter Journal integration with progression tracking (Current/Best).
+  - ⚔️ **Mythic Plus**: Personal score and dungeon best tracking.
+  - 🎒 **Equipment**: Item level analysis and character gear snapshots.
+  - 💬 **ChatLinks**: Clickable chat prefixes and enhanced item tooltips.
+  - 📜 **Logging Console**: Real-time debug UI with buffered logging system.
 
----
+- ⚙️ **Centralized Settings**
+  - One unified UI for all module and extension configurations.
 
-## 📁 Projektstruktur
+### 📁 Project Structure
 
 ```text
 GMS/
-├─ GMS.toc
-│
 ├─ Core/
-│  ├─ Core.lua            # Core Entry (AceAddon Bootstrap)
-│  ├─ ChatLinks.lua       # ChatLinks functions
-│  ├─ UI.lua              # UI Shell & Page Handling
-│  ├─ Database.lua        # Database functions
-│  ├─ Logs.lua            # Logging Bootstrap
-│  └─ SlashCommands.lua   # /gms Command & Subcommands
-│
+│  ├─ Core.lua            # Addon Entry (CORE)
+│  ├─ Database.lua        # Data persistence (EXT)
+│  ├─ UI.lua              # UI Framework (EXT)
+│  └─ Logs.lua            # Debugging system (EXT)
 ├─ Modules/
-│  ├─ Roster.lua          # Gildenroster
-│  └─ CharInfo.lua        # Character Overview
-│
-├─ Libs/
-│  └─ Ace3/               # Eingebettete Ace3 Libraries
-│  └─ LibDeflate/         # LibDeflate
-│
-└─ README.md
+│  ├─ Roster.lua          # Guild management (MOD)
+│  ├─ Raids.lua           # Raid progression (MOD)
+│  └─ Equipment.lua       # Gear analysis (MOD)
+└─ GMS_PROJECT_RULES.md   # Coding standards
+```
+
+### ⌨️ Commands
+
+- `/gms` - Open the main user interface.
+- `/gms config` - Jump directly to the settings.
+- `/gms log` - Open the real-time logging console.
+
+---
+
+## 🇩🇪 Deutsche Dokumentation
+
+### ✨ Features
+
+- 🔌 **Modulare Ace3 Architektur**
+  - Strikte Trennung von Core, UI und Modulen.
+  - Standardisierte Metadaten (`CORE`, `EXT`, `MOD`).
+  - Lose Kopplung durch AceEvent Signale.
+
+- 🖥️ **Eigene UI-Shell**
+  - Basierend auf Blizzards `ButtonFrameTemplate`.
+  - Integrierte AceGUI-Seiten und Navigations-Dock.
+  - Persistente Fensterzustände (Größe/Position) via AceDB.
+
+- 📊 **Aktuelle Module**
+  - 👥 **Roster**: Erweiterte Gildenübersicht mit anpassbaren Spalten.
+  - 🏰 **Raids**: Encounter Journal Integration mit Fortschritts-Tracking.
+  - ⚔️ **Mythic Plus**: Anzeige von Score und besten Dungeon-Runs.
+  - 🎒 **Equipment**: Analyse des Item-Levels und Ausrüstungs-Snapshots.
+  - 💬 **ChatLinks**: Klickbare Chat-Präfixe und verbesserte Item-Tooltips.
+  - 📜 **Logging Console**: Echtzeit-Debug UI mit gepuffertem Log-System.
+
+- ⚙️ **Zentrale Einstellungen**
+  - Ein einheitliches Menü für alle Modul- und Erweiterungskonfigurationen.
+
+### ⌨️ Befehle
+
+- `/gms` - Öffnet die Hauptoberfläche.
+- `/gms config` - Springt direkt in die Einstellungen.
+- `/gms log` - Öffnet die Logging-Konsole.
+
+---
+
+## 📜 Development Standards
+
+This project follows strict coding rules defined in [GMS_PROJECT_RULES.md](GMS_PROJECT_RULES.md).
+Any contribution must adhere to the defined `METADATA` and `LOCAL_LOG` standards.
