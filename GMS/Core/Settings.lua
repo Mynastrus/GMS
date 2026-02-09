@@ -133,11 +133,17 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 		local defaultVal = reg.defaults[key]
 		local val = options[key]
 		local valType = type(val)
+		local optDisplayName = key
+
+		-- Extraction of metadata if defaultVal is a table
+		if type(defaultVal) == "table" then
+			optDisplayName = defaultVal.name or key
+		end
 
 		-- Support for "execute" (button) type
 		if type(defaultVal) == "table" and defaultVal.type == "execute" then
 			local btn = AceGUI:Create("Button")
-			btn:SetText(defaultVal.name or key)
+			btn:SetText(optDisplayName)
 			btn:SetFullWidth(true)
 			btn:SetCallback("OnClick", function()
 				if type(defaultVal.func) == "function" then
@@ -146,16 +152,17 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 				end
 			end)
 			container:AddChild(btn)
-		elseif valType == "boolean" then
+		elseif valType == "boolean" or (type(defaultVal) == "table" and defaultVal.type == "toggle") then
 			local cb = AceGUI:Create("CheckBox")
-			cb:SetLabel(key)
+			cb:SetLabel(optDisplayName)
 			cb:SetValue(val)
 			cb:SetCallback("OnValueChanged", function(_, _, newValue)
 				options[key] = newValue
 				LOCAL_LOG("INFO", "Option changed", targetKey, key, newValue)
-				-- Trigger callbacks if namespace exists
-				if reg and reg.namespace and reg.namespace.Fire then
-					reg.namespace:Fire("OnProfileChanged")
+
+				-- Notify system via AceEvent
+				if type(GMS.SendMessage) == "function" then
+					GMS:SendMessage("GMS_CONFIG_CHANGED", targetKey, key, newValue)
 				end
 			end)
 			container:AddChild(cb)
@@ -170,7 +177,7 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 				else
 					options[key] = newValue
 				end
-				LOCAL_LOG("INFO", "Option changed", targetKey, key, options[key])
+				LOCAL_LOG("INFO", "Option changed", targetKey, key, newValue)
 			end)
 			container:AddChild(eb)
 		end

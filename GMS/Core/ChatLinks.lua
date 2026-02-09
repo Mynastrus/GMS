@@ -66,11 +66,15 @@ end
 
 -- Registry Defaults (zentral verwaltet via GMS:RegisterModuleOptions)
 local REG_DEFAULTS = {
-	clickablePrefix = true,
+	clickablePrefix = { type = "toggle", name = "Klickbares Präfix im Chat", default = true },
 }
 
 local COLORS = {
-	-- This table was empty in the provided snippet, keeping it empty as per instruction.
+	TRACE = "|cff9f9f9f",
+	DEBUG = "|cff00ccff",
+	INFO = "|cff00ff00",
+	WARN = "|cffffff00",
+	ERROR = "|cffff0000",
 }
 
 if type(GMS.RegisterExtension) == "function" then
@@ -79,7 +83,7 @@ if type(GMS.RegisterExtension) == "function" then
 		name = METADATA.SHORT_NAME,
 		displayName = METADATA.DISPLAY_NAME,
 		version = METADATA.VERSION,
-		desc = "Clickable chat links with tooltip and click handling",
+		desc = "Klickbare Chat-Links mit Tooltips und Aktionen.",
 	})
 end
 
@@ -237,9 +241,24 @@ if not ChatLinks._hooked then
 	GMS:SecureHook("SetItemRef", OnClick)
 end
 
+function ChatLinks:OnConfigChanged(message, extKey, configKey, newValue)
+	if extKey == METADATA.INTERN_NAME then
+		ChatLinks:UpdatePrefix()
+	end
+end
+
 function ChatLinks:UpdatePrefix()
 	local options = GMS:GetModuleOptions(METADATA.INTERN_NAME)
-	if options and options.clickablePrefix then
+	local isClickable = true
+	if options then
+		if type(options.clickablePrefix) == "table" then
+			isClickable = options.clickablePrefix.default
+		else
+			isClickable = (options.clickablePrefix ~= false)
+		end
+	end
+
+	if isClickable then
 		GMS.CHAT_PREFIX = GMS:ChatLink_Build("GMS")
 	else
 		GMS.CHAT_PREFIX = "|cff03A9F4[GMS]|r"
@@ -253,19 +272,16 @@ end
 if not ChatLinks._defaultsLoaded then
 	ChatLinks._defaultsLoaded = true
 
-	-- Beispiel: Prefix-Link, aber im Tooltip nur den Hint anzeigen, sonst nix
+	-- Define GMS standard link
 	GMS:ChatLink_Define("GMS", {
-		title = "|cff03A9F4GMS|r",
+		title = "|cff03A9F4GMS [Menü]|r",
 		label = "|cff03A9F4[GMS]|r",
 		hint = "/gms",
-		tooltip = {
-			"Öffnet das GMS Menü.",
-		},
 		flags = {
-			showLabel = false, -- label NICHT anzeigen
-			showHint = true, -- hint anzeigen
-			showTooltipLines = false, -- tooltip lines NICHT anzeigen
-			showActionFallback = false, -- fallback NICHT anzeigen
+			showLabel = false,
+			showHint = true,
+			showTooltipLines = false,
+			showActionFallback = false,
 		},
 	})
 
@@ -275,16 +291,15 @@ if not ChatLinks._defaultsLoaded then
 		end
 	end)
 
+	-- Registration of options and sync
 	GMS:RegisterModuleOptions(METADATA.INTERN_NAME, REG_DEFAULTS, "PROFILE")
 	ChatLinks:UpdatePrefix()
 
-	-- Hook options change to update prefix immediately
-	if GMS.DB and GMS.DB._registrations and GMS.DB._registrations[METADATA.INTERN_NAME] then
-		local namespace = GMS.DB._registrations[METADATA.INTERN_NAME].namespace
-		if namespace then
-			namespace.RegisterCallback(ChatLinks, "OnProfileChanged", "UpdatePrefix")
-			namespace.RegisterCallback(ChatLinks, "OnReset", "UpdatePrefix")
-		end
+	-- Hook into central events via AceEvent
+	if type(GMS.RegisterMessage) == "function" then
+		GMS:RegisterMessage("GMS_CONFIG_CHANGED", function(...)
+			ChatLinks:OnConfigChanged(...)
+		end)
 	end
 end
 
