@@ -13,11 +13,11 @@ local _G = _G
 -- ###########################################################################
 
 local METADATA = {
-	TYPE			= "MODULE",
-	INTERN_NAME		= "CHARINFO",
-	SHORT_NAME		= "CharInfo",
-	DISPLAY_NAME	= "Charakterinformationen",
-	VERSION			= "1.0.1",
+	TYPE         = "MODULE",
+	INTERN_NAME  = "CHARINFO",
+	SHORT_NAME   = "CharInfo",
+	DISPLAY_NAME = "Charakterinformationen",
+	VERSION      = "1.0.1",
 }
 
 local LibStub = LibStub
@@ -40,12 +40,12 @@ GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
 
 local function LOCAL_LOG(level, msg, ...)
 	local entry = {
-		timestamp	= _G.time and _G.time() or 0,
-		level		= tostring(level or "INFO"),
-		type		= METADATA.TYPE,
-		source		= METADATA.SHORT_NAME,
-		message		= tostring(msg or ""),
-		args		= { ... },
+		timestamp = _G.time and _G.time() or 0,
+		level     = tostring(level or "INFO"),
+		type      = METADATA.TYPE,
+		source    = METADATA.SHORT_NAME,
+		message   = tostring(msg or ""),
+		args      = { ... },
 	}
 
 	local buffer = GMS._LOG_BUFFER
@@ -61,8 +61,8 @@ end
 -- #	MODULE
 -- ###########################################################################
 
-local MODULE_NAME	= METADATA.INTERN_NAME
-local DISPLAY_NAME	= METADATA.DISPLAY_NAME
+local MODULE_NAME = METADATA.INTERN_NAME
+local DISPLAY_NAME = METADATA.DISPLAY_NAME
 
 local CHARINFO = GMS:GetModule(MODULE_NAME, true)
 if not CHARINFO then
@@ -71,19 +71,17 @@ end
 
 GMS[MODULE_NAME] = CHARINFO
 
-CHARINFO._pageRegistered	= CHARINFO._pageRegistered or false
-CHARINFO._dockRegistered	= CHARINFO._dockRegistered or false
-CHARINFO._integrated		= CHARINFO._integrated or false
-CHARINFO._ticker			= CHARINFO._ticker or nil
+CHARINFO._pageRegistered = CHARINFO._pageRegistered or false
+CHARINFO._dockRegistered = CHARINFO._dockRegistered or false
+CHARINFO._integrated     = CHARINFO._integrated or false
+CHARINFO._ticker         = CHARINFO._ticker or nil
 
--- DB for account-wide character logging
-CHARINFO._db = CHARINFO._db or nil
+-- DB for character-specific options (migrated to new API)
+CHARINFO._options = CHARINFO._options or nil
 
-local DB_DEFAULTS = {
-	profile = {},
-	global = {
-		characters = {}, -- table: { name_full = { name, realm, guid, timestamp } }
-	}
+local OPTIONS_DEFAULTS = {
+	autoLog = true, -- Auto-log character on login
+	lastUpdate = 0,
 }
 
 -- Icon: nimm einen, der bei dir existiert (du kannst ihn per /run testen)
@@ -171,17 +169,17 @@ local function GetPlayerSnapshot()
 	end
 
 	return {
-		name			= name,
-		realm			= realm,
-		name_full		= FormatNameRealm(name, realm),
-		class			= className or "-",
-		spec			= specName,
-		race			= raceName or "-",
-		level			= level or "-",
-		guild			= guildName or "-",
-		ilvl			= (ilvlEquipped and string.format("%.1f", ilvlEquipped)) or "-",
-		ilvl_overall	= (ilvlOverall and string.format("%.1f", ilvlOverall)) or "-",
-		guid			= (_G.UnitGUID and _G.UnitGUID("player")) or nil,
+		name         = name,
+		realm        = realm,
+		name_full    = FormatNameRealm(name, realm),
+		class        = className or "-",
+		spec         = specName,
+		race         = raceName or "-",
+		level        = level or "-",
+		guild        = guildName or "-",
+		ilvl         = (ilvlEquipped and string.format("%.1f", ilvlEquipped)) or "-",
+		ilvl_overall = (ilvlOverall and string.format("%.1f", ilvlOverall)) or "-",
+		guid         = (_G.UnitGUID and _G.UnitGUID("player")) or nil,
 	}
 end
 
@@ -197,17 +195,17 @@ local function GetTargetSnapshot()
 
 	-- Spec / ilvl für target sind ohne Inspect nicht zuverlässig -> bewusst "-"
 	return {
-		name			= name,
-		realm			= realm,
-		name_full		= FormatNameRealm(name, realm),
-		class			= className or "-",
-		spec			= "-",
-		race			= raceName or "-",
-		level			= level or "-",
-		guild			= "-",
-		ilvl			= "-",
-		ilvl_overall	= "-",
-		guid			= guid,
+		name         = name,
+		realm        = realm,
+		name_full    = FormatNameRealm(name, realm),
+		class        = className or "-",
+		spec         = "-",
+		race         = raceName or "-",
+		level        = level or "-",
+		guild        = "-",
+		ilvl         = "-",
+		ilvl_overall = "-",
+		guid         = guid,
 	}
 end
 
@@ -439,81 +437,47 @@ end
 -- #	ACE LIFECYCLE
 -- ###########################################################################
 
-function CHARINFO:InitializeCharacterLog()
-	-- Register or fetch DB namespace for character logging
-	-- Try centralized helper first
-	if GMS and GMS.DB and type(GMS.DB.RegisterModule) == "function" then
-		local ok, ns = pcall(function()
-			return GMS.DB:RegisterModule("CHARINFO", DB_DEFAULTS, nil)
+function CHARINFO:InitializeOptions()
+	-- Register character-specific options using new API
+	if GMS and type(GMS.RegisterModuleOptions) == "function" then
+		pcall(function()
+			GMS:RegisterModuleOptions("CHARINFO", OPTIONS_DEFAULTS, "CHAR")
 		end)
-		if ok and ns then
-			self._db = ns
+	end
+
+	-- Retrieve options table
+	if GMS and type(GMS.GetModuleOptions) == "function" then
+		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "CHARINFO")
+		if ok and opts then
+			self._options = opts
 		end
 	end
 
-	-- If no DB yet, try to ensure core DBs are initialized and retry
-	if not self._db and GMS and type(GMS.InitializeDatabaseIfAvailable) == "function" then
-		pcall(function() GMS:InitializeDatabaseIfAvailable(false) end)
-		if GMS and GMS.db and type(GMS.db.RegisterNamespace) == "function" then
-			pcall(function()
-				self._db = GMS.db:RegisterNamespace("CHARINFO", DB_DEFAULTS)
-			end)
-		end
-	end
-
-	-- Fallback: if a centralized logging DB exists, use it
-	if not self._db and GMS and GMS.logging_db then
-		self._db = GMS.logging_db
-	end
-
-	-- Last resort: create a dedicated AceDB savedvariable
-	if not self._db then
-		local AceDB = LibStub("AceDB-3.0", true)
-		if AceDB then
-			local sOk, db = pcall(AceDB.New, AceDB, "GMS_Logging_DB", DB_DEFAULTS, true)
-			if sOk and db then
-				self._db = db
-			end
-		end
-	end
-
-	-- Auto-log current player to account-wide character table
-	if self._db then
-		if not self._db.global or type(self._db.global) ~= "table" then
-			self._db.global = self._db.global or {}
-		end
-		self._db.global.characters = self._db.global.characters or {}
-
+	-- Auto-log current player character
+	if self._options and self._options.autoLog then
 		local snap = GetPlayerSnapshot()
 		if snap and snap.name_full then
-			self._db.global.characters[snap.name_full] = {
-				name		= snap.name,
-				realm		= snap.realm,
-				guid		= snap.guid,
-				timestamp	= _G.time and _G.time() or 0,
-				class		= snap.class,
-				level		= snap.level,
-			}
-			LOCAL_LOG("INFO", "Character logged: %s", tostring(snap.name_full))
+			self._options.lastUpdate = _G.time and _G.time() or 0
+			LOCAL_LOG("INFO", "Character auto-logged: %s", tostring(snap.name_full))
 		else
-			LOCAL_LOG("WARN", "Character snapshot missing; not logged")
+			LOCAL_LOG("WARN", "Character snapshot missing; not auto-logged")
 		end
 	else
-		LOCAL_LOG("WARN", "CHARINFO DB namespace not available; character not logged")
+		LOCAL_LOG("DEBUG", "CHARINFO options not available or auto-log disabled")
 	end
 end
 
 function CHARINFO:OnEnable()
-	-- Initialize and log character to account-wide DB
-	SafeCall(CHARINFO.InitializeCharacterLog, CHARINFO)
+	-- Initialize character-specific options
+	SafeCall(CHARINFO.InitializeOptions, CHARINFO)
 
 	-- Ensure we attempt to initialize again when player fully logs in / enters world
 	if type(self.RegisterEvent) == "function" then
 		self:RegisterEvent("PLAYER_LOGIN", function()
-			SafeCall(CHARINFO.InitializeCharacterLog, CHARINFO)
+			SafeCall(CHARINFO.InitializeOptions, CHARINFO)
 		end)
 		self:RegisterEvent("PLAYER_ENTERING_WORLD", function()
-			SafeCall(CHARINFO.InitializeCharacterLog, CHARINFO)
+			SafeCall(CHARINFO.InitializeOptions, CHARINFO)
 		end)
 	end
 
@@ -525,6 +489,8 @@ function CHARINFO:OnEnable()
 			SafeCall(CHARINFO.TryIntegrateWithUIIfAvailable, CHARINFO)
 		end)
 	end
+
+	GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
 end
 
 function CHARINFO:OnDisable()

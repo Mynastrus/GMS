@@ -212,12 +212,47 @@ local function CopyTableSafe(src)
 	return out
 end
 
+-- UI options (migrated to RegisterModuleOptions API)
+UI._options = UI._options or nil
+
+local OPTIONS_DEFAULTS = {
+	window = {
+		w = 900,
+		h = 560,
+		point = "CENTER",
+		relPoint = "CENTER",
+		x = 0,
+		y = 0,
+		activePage = "home",
+	},
+}
+
+function UI:InitializeOptions()
+	-- Register profile-scoped UI options
+	if GMS and type(GMS.RegisterModuleOptions) == "function" then
+		pcall(function()
+			GMS:RegisterModuleOptions("UI", OPTIONS_DEFAULTS, "PROFILE")
+		end)
+	end
+
+	-- Retrieve options table
+	if GMS and type(GMS.GetModuleOptions) == "function" then
+		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "UI")
+		if ok and opts then
+			self._options = opts
+			LOCAL_LOG("INFO", "UI options initialized (PROFILE scope)")
+		else
+			LOCAL_LOG("WARN", "Failed to retrieve UI options")
+		end
+	end
+end
+
 local function GetWindowDB()
-	if not UI.db then
+	if not UI._options then
 		return DEFAULTS.profile.window
 	end
-	UI.db.profile.window = UI.db.profile.window or {}
-	return UI.db.profile.window
+	UI._options.window = UI._options.window or {}
+	return UI._options.window
 end
 
 local function SaveActivePage(pageName)
@@ -1343,6 +1378,11 @@ end
 -- ###########################################################################
 
 function UI:RegisterUiSlashCommandIfAvailable()
+	-- Initialize UI options first
+	if not self._options then
+		self:InitializeOptions()
+	end
+
 	if type(GMS.Slash_RegisterSubCommand) ~= "function" then
 		LOCAL_LOG("WARN", "SlashCommands not available; cannot register /gms ui")
 		return
@@ -1358,6 +1398,7 @@ function UI:RegisterUiSlashCommandIfAvailable()
 	})
 
 	LOCAL_LOG("INFO", "Registered subcommand: /gms ui")
+	GMS:SetReady("EXT:UI")
 end
 
 -- ###########################################################################

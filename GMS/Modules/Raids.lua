@@ -81,6 +81,40 @@ if not RAIDS then
 	RAIDS = GMS:NewModule(MODULE_NAME, "AceEvent-3.0")
 end
 
+-- Raids options (migrated to RegisterModuleOptions API)
+RAIDS._options = RAIDS._options or nil
+
+local OPTIONS_DEFAULTS = {
+	raids = {}, -- { [instanceID] = { current = {...}, best = {...} } }
+	lastScan = 0,
+}
+
+function RAIDS:InitializeOptions()
+	-- Register character-scoped raid options
+	if GMS and type(GMS.RegisterModuleOptions) == "function" then
+		pcall(function()
+			GMS:RegisterModuleOptions("RAIDS", OPTIONS_DEFAULTS, "CHAR")
+		end)
+	end
+
+	-- Retrieve options table
+	if GMS and type(GMS.GetModuleOptions) == "function" then
+		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "RAIDS")
+		if ok and opts then
+			self._options = opts
+			LOCAL_LOG("INFO", "Raids options initialized (CHAR scope)")
+		else
+			LOCAL_LOG("WARN", "Failed to retrieve Raids options")
+		end
+	end
+end
+
+local function getRaidsStore()
+	if not RAIDS._options then return nil end
+	RAIDS._options.raids = RAIDS._options.raids or {}
+	return RAIDS._options.raids
+end
+
 RAIDS.METADATA = METADATA
 
 -- ###########################################################################
@@ -92,32 +126,30 @@ local function getPlayerKey()
 end
 
 local function hasDB()
+	-- This function is largely obsolete with the new options system,
+	-- but kept for potential future checks if GMS_DB is still used elsewhere.
 	return type(GMS_DB) == "table"
 		and type(GMS_DB.global) == "table"
 end
 
 local function ensureStore()
-	if not hasDB() then return nil, nil end
+	-- The new options system handles the persistence and default values.
+	-- We just need to ensure RAIDS._options is set and return it.
+	if not RAIDS._options then
+		RAIDS:InitializeOptions() -- Attempt to initialize if not already
+		if not RAIDS._options then
+			LOCAL_LOG("ERROR", "RAIDS._options could not be initialized.")
+			return nil, nil
+		end
+	end
 
 	local charKey = getPlayerKey()
 	if not charKey then return nil, nil end
 
-	local g = GMS_DB.global
-	g.characters = g.characters or {}
+	-- Ensure catalog is initialized within the options if not part of OPTIONS_DEFAULTS
+	RAIDS._options.catalog = RAIDS._options.catalog or {}
 
-	local c = g.characters[charKey]
-	if not c then
-		c = {}
-		g.characters[charKey] = c
-	end
-
-	c.RAIDS = c.RAIDS or {}
-	local s = c.RAIDS
-
-	s.catalog = s.catalog or {}
-	s.raids = s.raids or {}
-
-	return s, charKey
+	return RAIDS._options, charKey
 end
 
 -- ###########################################################################
@@ -498,29 +530,6 @@ end
 
 function RAIDS:OnEnable()
 	LOCAL_LOG("INFO", "Enabling Raids module")
-
-	-- Ensure Encounter Journal API exists (can be lazy-loaded)
-	if not self:_TryLoadEncounterJournal() then
-		self:RegisterEvent("ADDON_LOADED")
-	else
-		self:RegisterEvent("EJ_DIFFICULTY_UPDATE", "OnEJReady")
-		if C_Timer and C_Timer.After then
-			C_Timer.After(0.2, function()
-				if self:_ProbeEJReady() then
-					self:OnEJReady()
-				end
-			end)
-		end
-	end
-
-	-- Register events
-	self:RegisterEvent("PLAYER_LOGIN", "OnPlayerLogin")
-	self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnEnteringWorld")
-
-	-- Boss kill / encounter end -> schedule a scan
-	self:RegisterEvent("ENCOUNTER_END", "OnEncounterEnd")
-	self:RegisterEvent("BOSS_KILL", "OnBossKill")
-
 	-- SavedInstances update
 	if RequestRaidInfo and GetNumSavedInstances and GetSavedInstanceInfo then
 		self:RegisterEvent("UPDATE_INSTANCE_INFO", "OnUpdateInstanceInfo")

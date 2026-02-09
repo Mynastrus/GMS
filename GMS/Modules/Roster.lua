@@ -124,16 +124,48 @@ local function GetAllGuildMembers(sortSpec)
 		return members
 	end
 
+	-- Request guild roster update (safe-guarded)
 	if C_GuildInfo and C_GuildInfo.GuildRoster then
 		C_GuildInfo.GuildRoster()
+	elseif GuildRoster then
+		GuildRoster()
 	end
 
-	local total = C_GuildInfo.GetNumGuildMembers()
+	-- Get total members count (with fallback)
+	local total = 0
+	if C_GuildInfo and C_GuildInfo.GetNumGuildMembers then
+		total = C_GuildInfo.GetNumGuildMembers()
+	elseif GetNumGuildMembers then
+		total = GetNumGuildMembers()
+	end
+
+	if total == 0 then
+		return members
+	end
+
 	for i = 1, total do
 		local name, rank, rankIndex, level, class, zone, note, officernote,
 		online, status, classFileName, achievementPoints,
 		achievementRank, isMobile, canSoR, repStanding,
-		GUID = C_GuildInfo.GetGuildRosterInfo(i)
+		GUID
+
+		-- Get roster info (with fallback)
+		if C_GuildInfo and C_GuildInfo.GetGuildRosterInfo then
+			GUID = C_GuildInfo.GetGuildRosterInfo(i)
+			-- In Retail, C_GuildInfo.GetGuildRosterInfo returns only GUID, need additional calls
+			-- For simplicity, fallback to legacy for now if available
+			if not GUID and GetGuildRosterInfo then
+				name, rank, rankIndex, level, class, zone, note, officernote,
+					online, status, classFileName, achievementPoints,
+					achievementRank, isMobile, canSoR, repStanding,
+					GUID = GetGuildRosterInfo(i)
+			end
+		elseif GetGuildRosterInfo then
+			name, rank, rankIndex, level, class, zone, note, officernote,
+				online, status, classFileName, achievementPoints,
+				achievementRank, isMobile, canSoR, repStanding,
+				GUID = GetGuildRosterInfo(i)
+		end
 
 		local name_full, name_short, realm = NormalizeCharacterNameWithRealm(name)
 
@@ -867,11 +899,41 @@ end
 -- #	ACE LIFECYCLE
 -- ###########################################################################
 
+-- Roster options (migrated to RegisterModuleOptions API)
+Roster._options = Roster._options or nil
+
+local OPTIONS_DEFAULTS = {
+	showOffline = true,
+	autoRefresh = true,
+	lastRefresh = 0,
+}
+
+function Roster:InitializeOptions()
+	-- Register guild-scoped options using new API
+	if GMS and type(GMS.RegisterModuleOptions) == "function" then
+		pcall(function()
+			GMS:RegisterModuleOptions("ROSTER", OPTIONS_DEFAULTS, "GUILD")
+		end)
+	end
+
+	-- Retrieve options table
+	if GMS and type(GMS.GetModuleOptions) == "function" then
+		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "ROSTER")
+		if ok and opts then
+			self._options = opts
+			LOCAL_LOG("INFO", "Roster options initialized (GUILD scope)")
+		else
+			LOCAL_LOG("WARN", "Failed to retrieve Roster options")
+		end
+	end
+end
+
 -- ---------------------------------------------------------------------------
 --	Ace Lifecycle: OnEnable
 --	@return nil
 -- ---------------------------------------------------------------------------
 function Roster:OnEnable()
+	self:InitializeOptions()
 	self:TryIntegrateWithUIIfAvailable()
 
 	if self._integrateWaitFrame then
@@ -879,6 +941,7 @@ function Roster:OnEnable()
 	end
 
 	if self._pageRegistered and self._dockRegistered then
+		GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
 		return
 	end
 
@@ -894,6 +957,7 @@ function Roster:OnEnable()
 			frame:UnregisterEvent("ADDON_LOADED")
 			frame:SetScript("OnEvent", nil)
 			Roster._integrateWaitFrame = nil
+			GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
 		end
 	end)
 end

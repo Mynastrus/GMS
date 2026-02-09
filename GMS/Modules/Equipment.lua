@@ -146,75 +146,39 @@ local function _getCharKey()
 	return nil
 end
 
-local function _ensureSvTables()
-	if not _svAvailable() then return nil end
+-- Equipment options (migrated to RegisterModuleOptions API)
+EQUIP._options = EQUIP._options or nil
 
-	local key = _getCharKey()
-	if not key then return nil end
+local OPTIONS_DEFAULTS = {
+	autoScan = true,
+	lastScanTs = 0,
+}
 
-	GMS_DB.global = GMS_DB.global or {}
-	GMS_DB.global.characters = GMS_DB.global.characters or {}
+-- Equipment data storage (managed via new API)
+local function _getEquipmentStore()
+	if not EQUIP._options then return nil end
+	EQUIP._options.equipment = EQUIP._options.equipment or {}
+	return EQUIP._options.equipment
+end
 
-	local c = GMS_DB.global.characters[key]
-	if not c then
-		c = { __version = 1 }
-		GMS_DB.global.characters[key] = c
+function EQUIP:InitializeOptions()
+	-- Register equipment options using new API
+	if GMS and type(GMS.RegisterModuleOptions) == "function" then
+		pcall(function()
+			GMS:RegisterModuleOptions("Equipment", OPTIONS_DEFAULTS, "CHAR")
+		end)
 	end
 
-	c.EQUIPMENT = c.EQUIPMENT or {}
-	return c.EQUIPMENT, key
-end
-
-local function _getStore()
-	local eq = _ensureSvTables()
-	if eq then return eq, true end
-	return EQUIP._mem, false
-end
-
-function EQUIP:_MigrateMemToSv()
-	local eq = _ensureSvTables()
-	if not eq then return false end
-
-	if self._mem.snapshot then
-		eq.snapshot = self._mem.snapshot
-		self._mem.snapshot = nil
-		LOCAL_LOG("INFO", "Migrated buffered equipment snapshot to SV.global.characters")
-		return true
-	end
-
-	return false
-end
-
-function EQUIP:_TryEnsureStore(reason)
-	local eq = _ensureSvTables()
-	if eq then
-		self:_MigrateMemToSv()
-		return true
-	end
-	LOCAL_LOG("DEBUG", "SV store not available yet", tostring(reason or "unknown"))
-	return false
-end
-
-function EQUIP:_StartStorePolling()
-	self._pollTries = 0
-
-	local function tick()
-		self._pollTries = (self._pollTries or 0) + 1
-
-		if self:_TryEnsureStore("poll") then
-			LOCAL_LOG("INFO", "SV store available (poll)", self._pollTries)
-			return
+	-- Retrieve options table
+	if GMS and type(GMS.GetModuleOptions) == "function" then
+		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "Equipment")
+		if ok and opts then
+			self._options = opts
+			LOCAL_LOG("INFO", "Equipment options initialized")
+		else
+			LOCAL_LOG("WARN", "Failed to retrieve Equipment options")
 		end
-
-		if self._pollTries >= STORE_POLL_MAX_TRIES then
-			LOCAL_LOG("WARN", "SV store still not available after polling; staying in memory", self._pollTries)
-			return
-		end
-
-		_schedule(STORE_POLL_INTERVAL, tick)
 	end
-
-	_schedule(STORE_POLL_INTERVAL, tick)
 end
 
 -- ###########################################################################
@@ -252,13 +216,8 @@ end
 -- #	PUBLIC API
 -- ###########################################################################
 
-function EQUIP:UsesDatabase()
-	return _svAvailable() == true
-end
-
 function EQUIP:GetStore()
-	local store = _getStore()
-	return store
+	return _getEquipmentStore()
 end
 
 function EQUIP:SaveSnapshot(snapshot)
@@ -280,12 +239,18 @@ function EQUIP:SaveSnapshot(snapshot)
 		snapshot.slots = {}
 	end
 
-	local store, isSv = _getStore()
+	local store = _getEquipmentStore()
+	if not store then
+		LOCAL_LOG("WARN", "SaveSnapshot: Equipment options not available")
+		return false
+	end
+
 	store.snapshot = snapshot
+	if self._options then
+		self._options.lastScanTs = snapshot.ts or 0
+	end
 
-	self:_TryEnsureStore("save")
-
-	LOCAL_LOG("INFO", "Snapshot saved", isSv and "SV.global.characters" or "MEM")
+	LOCAL_LOG("INFO", "Equipment snapshot saved")
 	return true
 end
 
@@ -316,9 +281,7 @@ function EQUIP:_ScheduleScan(delaySec, reason)
 end
 
 function EQUIP:_OnPlayerLogin()
-	self:_StartStorePolling()
-
-	-- bewusst warten
+	-- Delayed scans after login
 	self:_ScheduleScan(LOGIN_DELAY_SEC, "login-delay")
 	self:_ScheduleScan(LOGIN_SECOND_PASS_SEC, "login-second-pass")
 end
@@ -338,14 +301,7 @@ end
 
 function EQUIP:OnInitialize()
 	LOCAL_LOG("INFO", "Module initialized")
-
-	-- Store-ready Hook (DB init bedeutet i.d.R. auch: SV existiert)
-	if type(GMS.OnReady) == "function" then
-		GMS:OnReady("EXT:DB", function()
-			LOCAL_LOG("INFO", "EXT:DB ready -> ensure store + migrate")
-			self:_TryEnsureStore("onready")
-		end)
-	end
+	self:InitializeOptions()
 end
 
 function EQUIP:OnEnable()
@@ -355,9 +311,7 @@ function EQUIP:OnEnable()
 	self:RegisterEvent("PLAYER_EQUIPMENT_CHANGED", "_OnEquipmentChanged")
 	self:RegisterEvent("UNIT_INVENTORY_CHANGED", "_OnUnitInventoryChanged")
 
-	self:_TryEnsureStore("enable")
-
-	self:_TryEnsureStore("enable")
+	self:InitializeOptions()
 
 	GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
 end

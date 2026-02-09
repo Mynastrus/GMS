@@ -100,21 +100,63 @@ local LOGGING_DEFAULTS = {
 -- #	STANDARD DATABASE INIT
 -- ###########################################################################
 
+local GUILD_DB_DEFAULTS = {
+	global = {}, -- Global fallback
+	faction = {}, -- Faction specific
+	realm = {}, -- Realm specific
+	profile = {}, -- Profile specific (rarely used for guilds, but good practice)
+}
+
 function GMS:InitializeStandardDatabases(force)
 	if not AceDB then
 		LOCAL_LOG("WARN", "AceDB-3.0 not available")
 		return false
 	end
 
-	if self.db and self.logging_db and not force then
+	if self.db and self.guild_db and self.logging_db and not force then
 		return true
 	end
 
+	-- Initialize Standard DBs
 	self.db = self.db or AceDB:New("GMS_DB", DB_DEFAULTS, true)
 	self.logging_db = self.logging_db or AceDB:New("GMS_Logging_DB", LOGGING_DEFAULTS, true)
 
-	LOCAL_LOG("INFO", "Standard databases initialized")
+	-- Initialize Manual Guild DB (Raw Table, manual keying by GuildGUID)
+	if type(_G.GMS_Guild_DB) ~= "table" then
+		_G.GMS_Guild_DB = {}
+	end
+	self.guild_db = _G.GMS_Guild_DB
+
+	LOCAL_LOG("INFO", "Standard databases and Guild DB structure initialized")
 	return true
+end
+
+--- Helper: Get current character's guild GUID (safe for all WoW versions)
+-- @return string|nil: Guild GUID or nil if not in a guild
+function GMS:GetGuildGUID()
+	if not IsInGuild or not IsInGuild() then
+		return nil
+	end
+
+	-- Try GetGuildInfo (works in most WoW versions)
+	if GetGuildInfo then
+		local guildName, guildRankName, guildRankIndex, realm, _, _, _, _, isGuildLeader, _, _, _, _, isMobile, _, _, guildGUID = GetGuildInfo("player")
+		if guildGUID then
+			return guildGUID
+		end
+	end
+
+	-- Fallback: Generate a stable key from guild name + realm
+	-- This is not a true GUID but provides guild-scoped persistence
+	if GetGuildInfo then
+		local guildName = GetGuildInfo("player")
+		if guildName and guildName ~= "" then
+			local realm = GetRealmName and GetRealmName() or "Unknown"
+			return string.format("GUILD_%s_%s", guildName, realm)
+		end
+	end
+
+	return nil
 end
 
 -- Early init attempt (harmless if Core runs it again later)
@@ -125,52 +167,84 @@ pcall(function()
 end)
 
 -- ###########################################################################
--- #	GMS.DB HELPER API
+-- #	GMS.DB HELPER API (Scoped Options)
 -- ###########################################################################
 
 GMS.DB = GMS.DB or {}
 GMS.DB._parent = GMS
+GMS.DB._registrations = {}
 
-function GMS.DB:RegisterModule(moduleName, defaults, optionsProvider)
-	if not moduleName or not self._parent or not self._parent.db then
-		return nil
+--- Registers options for a module with a specific scope.
+-- @param moduleName string: The internal name of the module (e.g., "Roster")
+-- @param defaults table: The default values (flat table)
+-- @param scope string: "PROFILE", "GLOBAL", "CHAR", "GUILD"
+function GMS:RegisterModuleOptions(moduleName, defaults, scope)
+	if not moduleName then return nil end
+	scope = string.upper(tostring(scope or "PROFILE"))
+
+	if not self.db then
+		self:InitializeStandardDatabases()
 	end
 
-	local ok, ns = pcall(function()
-		return self._parent.db:RegisterNamespace(moduleName, defaults)
-	end)
-
-	if ok and ns then
-		self._modules = self._modules or {}
-		self._modules[moduleName] = ns
-
-		if type(optionsProvider) == "function" then
-			pcall(optionsProvider)
-		end
-
-		LOCAL_LOG("DEBUG", "Registered module DB", moduleName)
-		return ns
+	-- Normalize defaults wrapper based on scope logic
+	local dbDefaults = {}
+	if scope == "PROFILE" then
+		dbDefaults.profile = defaults
+	elseif scope == "GLOBAL" then
+		dbDefaults.global = defaults
+	elseif scope == "CHAR" then
+		dbDefaults.char = defaults
+	elseif scope == "GUILD" then
+		-- Guild DB is manual, we store defaults for later application
+		-- No AceDB defaults structure needed here, we handle it manually on access
 	end
 
-	return nil
+	-- For AceDB scopes (PROFILE, GLOBAL, CHAR), utilize Namespaces
+	local namespace = nil
+	if scope ~= "GUILD" then
+		namespace = self.db:RegisterNamespace(moduleName, dbDefaults)
+	end
+
+	-- Store registration meta
+	GMS.DB._registrations[moduleName] = {
+		name = moduleName,
+		defaults = defaults,
+		scope = scope,
+		namespace = namespace
+	}
+
+	LOCAL_LOG("DEBUG", "Registered options", moduleName, scope)
+	return namespace -- Returns AceDB namespace or nil (for GUILD scope)
 end
 
-function GMS.DB:GetModuleDB(moduleName)
-	if not moduleName then return nil end
-	self._modules = self._modules or {}
+--- Retrieves the option table for a module, respecting its scope.
+function GMS:GetModuleOptions(moduleName)
+	local reg = GMS.DB._registrations[moduleName]
+	if not reg then return nil end
 
-	if self._modules[moduleName] then
-		return self._modules[moduleName]
-	end
+	if reg.scope == "PROFILE" then
+		return reg.namespace.profile
+	elseif reg.scope == "GLOBAL" then
+		return reg.namespace.global
+	elseif reg.scope == "CHAR" then
+		return reg.namespace.char
+	elseif reg.scope == "GUILD" then
+		local gGUID = self:GetGuildGUID()
+		if not gGUID then return nil end -- No guild, no options
 
-	if self._parent and self._parent.db then
-		local ok, ns = pcall(function()
-			return self._parent.db:GetNamespace(moduleName, true)
-		end)
-		if ok and ns then
-			self._modules[moduleName] = ns
-			return ns
+		-- Manual Guild DB management
+		local gdb = self.guild_db
+		gdb[gGUID] = gdb[gGUID] or {}
+		gdb[gGUID][moduleName] = gdb[gGUID][moduleName] or {}
+
+		-- Apply defaults (shallow copy if missing)
+		local t = gdb[gGUID][moduleName]
+		if reg.defaults then
+			for k, v in pairs(reg.defaults) do
+				if t[k] == nil then t[k] = v end
+			end
 		end
+		return t
 	end
 
 	return nil
