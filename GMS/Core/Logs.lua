@@ -263,9 +263,8 @@ local function dataSuffixFromData(data)
 end
 
 local function trimToMax()
-	local p = profile()
-	local max = clamp(tonumber(p.maxEntries) or 400, 50, 5000)
-	p.maxEntries = max
+	local prof = profile()
+	local max = clamp(tonumber(prof.maxEntries) or 400, 50, 5000)
 
 	local entries = LOGS._entries
 	if not entries then return end
@@ -308,18 +307,17 @@ function LOGS:IngestGlobalBuffer()
 	local buf = GMS._LOG_BUFFER
 	if type(buf) ~= "table" then return 0 end
 
-	local p = profile()
-	p.ingestPos = tonumber(p.ingestPos) or 0
+	local ldb = GMS.logging_db
+	if not ldb then return 0 end
 
-	local start = p.ingestPos + 1
+	local start = (ldb.profile.ingestPos or 0) + 1
 	local last = #buf
 	if start > last then return 0 end
 
 	local entries = LOGS._entries
 	if not entries then
-		LOGS._entries = {}
+		LOGS._entries = ldb.char.logs
 		entries = LOGS._entries
-		if LOGS._db then LOGS._db.profile.entries = entries end
 	end
 
 	local added = 0
@@ -335,7 +333,7 @@ function LOGS:IngestGlobalBuffer()
 		end
 	end
 
-	prof.ingestPos = last
+	ldb.profile.ingestPos = last
 	trimToMax()
 	return added
 end
@@ -393,21 +391,23 @@ end
 -- ###########################################################################
 
 function LOGS:Init()
+	-- Register options in main GMS_DB
 	GMS:RegisterModuleOptions("LOGS", REG_DEFAULTS, "PROFILE")
 
+	-- Use GMS_Logging_DB for character-specific log data
 	if GMS.logging_db then
 		LOGS._db = GMS.logging_db
-		LOGS._entries = GMS.logging_db.char.logs or {}
-		GMS.logging_db.char.logs = LOGS._entries
+		-- Reference directly, DO NOT re-assign the table to the proxy
+		LOGS._entries = GMS.logging_db.char.logs
 
-		local p = profile()
-		p.ingestPos = tonumber(p.ingestPos) or 0
+		-- Ensure ingestPos is valid
+		GMS.logging_db.profile.ingestPos = tonumber(GMS.logging_db.profile.ingestPos) or 0
+
 		trimToMax()
-
 		LOCAL_LOG("INFO", "Logging initialized (GMS_Logging_DB char-scoped)")
 	else
 		LOCAL_LOG("WARN", "GMS.logging_db not available; fallback to in-memory only")
-		LOGS._entries = {}
+		LOGS._entries = LOGS._entries or {}
 	end
 end
 

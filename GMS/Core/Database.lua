@@ -95,7 +95,9 @@ local LOGGING_DEFAULTS = {
 	char = {
 		logs = {},
 	},
-	profile = {},
+	profile = {
+		ingestPos = 0,
+	},
 	global = {},
 }
 
