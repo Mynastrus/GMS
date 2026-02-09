@@ -134,13 +134,17 @@ end
 ```
 <Titel>
 
-[EN] --------------------
+-- [EN] --------------------
 
-English description
+	English description
 
-[DE] --------------------
+-- [DE] --------------------
 
-Deutsche Beschreibung
+	Deutsche Beschreibung
+
+----------------------------
+
+	Liste der bearbeiteten Dateien
 ```
 
 **Pflichtregeln:**
@@ -240,3 +244,13 @@ end
 
 Dieses Regelwerk ist **verbindlich und dauerhaft gültig** für das Projekt GMS.
 Änderungen am Regelwerk erfolgen **nur explizit** und werden versioniert dokumentiert.
+
+---
+
+## 11. Retail-Kompatibilität (Pflicht)
+
+Alle Funktionen und API-Aufrufe **MÜSSEN** der **aktuellsten WoW-Retail-Version** entsprechen.
+
+* Veraltete APIs (z.B. aus Classic/Vanilla) sind **verboten**.
+* Moderne Namespaces (`C_*`) sind **immer zu bevorzugen**.
+* Rückwärtskompatibilität zu Classic wird **nicht** berücksichtigt, wenn sie Retail-Code verkompliziert.
