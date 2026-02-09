@@ -154,6 +154,12 @@ end
 * Trennlinie unter jedem Sprachblock
 * Format gemäß **GMS Commit Style Guide**
 
+* Format gemäß **GMS Commit Style Guide**
+
+### 5.3 Validierung
+
+Commits, die gegen das Schema in 5.2 verstoßen, sind **ungültig** und müssen korrigiert werden, bevor sie in das Repository aufgenommen werden. Ein Commit **MUSS** alle oben genannten Strukturelemente enthalten.
+
 ---
 
 ## 6. WoW Itemlinks & Tooltips
