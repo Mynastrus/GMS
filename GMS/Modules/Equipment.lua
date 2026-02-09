@@ -26,7 +26,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.4",
+	VERSION      = "1.3.5",
 }
 
 -- ###########################################################################
@@ -232,9 +232,13 @@ local function _scanPlayerEquipmentMinimal()
 
 	local slots = {}
 	for _, slotId in ipairs(INV_SLOTS) do
-		local link = (GetInventoryItemLink and GetInventoryItemLink("player", slotId)) or nil
-		-- store only link (or nil if empty)
-		slots[slotId] = link
+		local itemLoc = ItemLocation:CreateFromEquipmentSlot(slotId)
+		if C_Item.DoesItemExist(itemLoc) then
+			local link = C_Item.GetItemLink(itemLoc)
+			slots[slotId] = link
+		else
+			slots[slotId] = nil
+		end
 	end
 
 	return {

@@ -39,7 +39,7 @@ local METADATA = {
 	INTERN_NAME = "UI",
 	SHORT_NAME = "UI",
 	DISPLAY_NAME = "Guild Management System",
-	VERSION = "1.0.2",
+	VERSION = "1.0.3",
 }
 
 -- ###########################################################################
@@ -721,8 +721,14 @@ end
 
 function UI:RightDockApplySlotBackdrop(slot)
 	local cfg = self.RightDockConfig
-	if slot and slot.SetBackdrop and cfg and cfg.slotBackdrop then
-		slot:SetBackdrop(cfg.slotBackdrop)
+	if slot and cfg and cfg.slotBackdrop then
+		-- Retail Backdrop Fix
+		if not slot.SetBackdrop and Mixin and BackdropTemplateMixin then
+			Mixin(slot, BackdropTemplateMixin)
+		end
+		if slot.SetBackdrop then
+			slot:SetBackdrop(cfg.slotBackdrop)
+		end
 	end
 end
 

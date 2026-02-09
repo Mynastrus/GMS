@@ -34,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.3",
+	VERSION      = "1.2.4",
 }
 
 -- ###########################################################################
@@ -232,6 +232,8 @@ end
 -- ###########################################################################
 
 local function ejApiPresent()
+	-- Retail: C_EncounterJournal is standard now, but some functions might still be global or mixed
+	if C_EncounterJournal then return true end
 	return EJ_GetNumTiers and EJ_SelectTier and EJ_GetInstanceByIndex
 		and EJ_SelectInstance and EJ_GetInstanceInfo
 		and EJ_GetNumEncounters and EJ_GetEncounterInfoByIndex
@@ -658,18 +660,17 @@ function RAIDS:OnUpdateInstanceInfo()
 
 	for i = 1, num do
 		local name,
-			_,
-			reset,
-			diffID,
-			locked,
-			extended,
-			_,
-			_,
-			isRaid,
-			_,
-			_,
-			numEncounters
-			= GetSavedInstanceInfo(i)
+		_,
+		reset,
+		diffID,
+		locked,
+		extended,
+		_,
+		_,
+		isRaid,
+		_,
+		_,
+		numEncounters = GetSavedInstanceInfo(i)
 
 		if isRaid == true and type(name) == "string" and name ~= "" then
 			local instanceID = catalog.nameToInstanceID and catalog.nameToInstanceID[name] or nil
@@ -716,14 +717,14 @@ function RAIDS:OnUpdateInstanceInfo()
 							raidEntry.current[dID] = cur
 						end
 
-						cur.diffID = dID
-						cur.diffTag = diffTag(dID)
-						cur.killed = killed
-						cur.total  = total
-						cur.short  = buildShort(dID, killed, total)
-						cur.locked = locked == true
-						cur.extended = extended == true
-						cur.bosses = bosses
+						cur.diffID       = dID
+						cur.diffTag      = diffTag(dID)
+						cur.killed       = killed
+						cur.total        = total
+						cur.short        = buildShort(dID, killed, total)
+						cur.locked       = locked == true
+						cur.extended     = extended == true
+						cur.bosses       = bosses
 						cur.resetSeconds = tonumber(reset) or reset
 
 						if type(tsNow) == "number" and type(reset) == "number" then
