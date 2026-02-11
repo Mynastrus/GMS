@@ -467,6 +467,13 @@ function CHARINFO:InitializeOptions()
 	end
 end
 
+function CHARINFO:OnInitialize()
+	if GMS and type(GMS.RegisterModule) == "function" then
+		GMS:RegisterModule(self, METADATA)
+	end
+	LOCAL_LOG("INFO", "Module initializing")
+end
+
 function CHARINFO:OnEnable()
 	-- Initialize character-specific options
 	SafeCall(CHARINFO.InitializeOptions, CHARINFO)

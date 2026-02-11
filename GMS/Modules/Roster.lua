@@ -928,6 +928,13 @@ function Roster:InitializeOptions()
 	end
 end
 
+function Roster:OnInitialize()
+	if GMS and type(GMS.RegisterModule) == "function" then
+		GMS:RegisterModule(self, METADATA)
+	end
+	LOCAL_LOG("INFO", "Roster initializing")
+end
+
 -- ---------------------------------------------------------------------------
 --	Ace Lifecycle: OnEnable
 --	@return nil

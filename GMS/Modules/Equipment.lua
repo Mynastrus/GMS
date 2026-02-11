@@ -300,6 +300,9 @@ end
 -- ###########################################################################
 
 function EQUIP:OnInitialize()
+	if GMS and type(GMS.RegisterModule) == "function" then
+		GMS:RegisterModule(self, METADATA)
+	end
 	LOCAL_LOG("INFO", "Module initialized")
 	self:InitializeOptions()
 end

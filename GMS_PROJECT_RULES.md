@@ -264,6 +264,10 @@ end
 
 Dieses Regelwerk ist **verbindlich und dauerhaft gültig** für das Projekt GMS.
 Änderungen am Regelwerk erfolgen **nur explizit** und werden versioniert dokumentiert.
+## AI Interaction & Artifacts
+The following rules apply to the AI assistant's interaction with artifacts:
+- **Auto-Approval**: `implementation_plan.md` and `walkthrough.md` should generally be set to `ShouldAutoProceed = true` unless major breaking changes or critical design decisions require explicit user confirmation.
+- **Conciseness**: Documentation should be kept as concise as possible, focusing on technical changes and verification results.
 
 ---
 

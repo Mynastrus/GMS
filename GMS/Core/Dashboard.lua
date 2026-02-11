@@ -139,11 +139,27 @@ local function RenderDashboard(root)
 
 		for _, k in ipairs(keys) do
 			local e = GMS.REGISTRY.EXT[k]
-			local lbl = AceGUI:Create("Label")
-			lbl:SetFullWidth(true)
+			local row = AceGUI:Create("SimpleGroup")
+			row:SetFullWidth(true)
+			row:SetLayout("Flow")
+
+			local lblName = AceGUI:Create("Label")
+			lblName:SetText("- |cff03A9F4" .. (e.displayName or e.key) .. "|r")
+			lblName:SetWidth(200)
+
+			local lblVer = AceGUI:Create("Label")
+			lblVer:SetText("[v" .. (e.version or "1.0.0") .. "]")
+			lblVer:SetWidth(80)
+
 			local status = GetStatusColor(e.state and e.state.READY)
-			lbl:SetText(string.format("- |cff03A9F4%s|r [v%s]: %s", e.displayName or e.key, e.version or "1.0.0", status))
-			extGroup:AddChild(lbl)
+			local lblStatus = AceGUI:Create("Label")
+			lblStatus:SetText(status)
+			lblStatus:SetWidth(100)
+
+			row:AddChild(lblName)
+			row:AddChild(lblVer)
+			row:AddChild(lblStatus)
+			extGroup:AddChild(row)
 		end
 	end
 
@@ -161,11 +177,27 @@ local function RenderDashboard(root)
 
 		for _, k in ipairs(keys) do
 			local m = GMS.REGISTRY.MOD[k]
-			local lbl = AceGUI:Create("Label")
-			lbl:SetFullWidth(true)
+			local row = AceGUI:Create("SimpleGroup")
+			row:SetFullWidth(true)
+			row:SetLayout("Flow")
+
+			local lblName = AceGUI:Create("Label")
+			lblName:SetText("- |cffffcc00" .. (m.displayName or m.key) .. "|r")
+			lblName:SetWidth(200)
+
+			local lblVer = AceGUI:Create("Label")
+			lblVer:SetText("[v" .. (m.version or "1.0.0") .. "]")
+			lblVer:SetWidth(80)
+
 			local status = GetStatusColor(m.state and m.state.READY, m.state and m.state.ENABLED)
-			lbl:SetText(string.format("- |cffffcc00%s|r [v%s]: %s", m.displayName or m.key, m.version or "1.0.0", status))
-			modGroup:AddChild(lbl)
+			local lblStatus = AceGUI:Create("Label")
+			lblStatus:SetText(status)
+			lblStatus:SetWidth(100)
+
+			row:AddChild(lblName)
+			row:AddChild(lblVer)
+			row:AddChild(lblStatus)
+			modGroup:AddChild(row)
 		end
 	end
 

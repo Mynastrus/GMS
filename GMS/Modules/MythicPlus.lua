@@ -142,8 +142,11 @@ end
 -- #	EVENTS
 -- ###########################################################################
 
-function MYTHIC:OnInitialize()
-	LOCAL_LOG("INFO", "Module initialized")
+-- Local logging function
+local function LOCAL_LOG(level, msg, ...)
+	if GMS and type(GMS.RegisterModule) == "function" then
+		GMS:RegisterModule(self, METADATA)
+	end
 end
 
 function MYTHIC:OnEnable()

@@ -533,6 +533,9 @@ end
 -- ###########################################################################
 
 function RAIDS:OnInitialize()
+	if GMS and type(GMS.RegisterModule) == "function" then
+		GMS:RegisterModule(self, METADATA)
+	end
 	LOCAL_LOG("INFO", "Initializing Raids module", METADATA.VERSION)
 	self._pendingScan = false
 	self._scanToken = 0
