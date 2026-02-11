@@ -67,6 +67,16 @@ Bei **jeder Dateiänderung** wird die `METADATA.VERSION` angepasst.
 
 > Wenn nichts angegeben wird, erfolgt die Erhöhung **automatisch und korrekt**.
 
+### 3.2 Synchronisation mit GMS.toc
+
+* Eine Änderung an der Version einer einzelnen Lua-Datei **MUSS** eine entsprechende Erhöhung der Version in der `GMS.toc` zur Folge haben.
+* Die `## Version`-Angabe in der `GMS.toc` ist die **Source of Truth** für die globale Anzeige.
+* Die Versionen der einzelnen Dateien bleiben unabhängig und werden **nicht** zwangsweise angeglichen.
+
+### 3.3 Dashboard Versionsanzeige
+
+* Das Dashboard **MUSS** die globale Addon-Version aus der `GMS.toc` anzeigen (via `GetAddOnMetadata` oder `GMS.VERSION`).
+
 ---
 
 ## 4. Logging-System (globale Regel)

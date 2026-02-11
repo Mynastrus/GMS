@@ -11,11 +11,11 @@ local _G = _G
 -- ###########################################################################
 
 local METADATA = {
-	TYPE			= "CORE",
-	INTERN_NAME		= "GMS_CORE",
-	SHORT_NAME		= "CORE",
-	DISPLAY_NAME	= "GMS Core",
-	VERSION			= "1.0.0",
+	TYPE         = "CORE",
+	INTERN_NAME  = "GMS_CORE",
+	SHORT_NAME   = "CORE",
+	DISPLAY_NAME = "GMS Core",
+	VERSION      = "1.0.0",
 }
 
 -- ---------------------------------------------------------------------------
@@ -32,14 +32,14 @@ if not AceAddon then return end
 --	Ace Mixins (optional)
 -- ---------------------------------------------------------------------------
 
-local AceConsole	= LibStub("AceConsole-3.0", true)
-local AceEvent		= LibStub("AceEvent-3.0", true)
-local AceTimer		= LibStub("AceTimer-3.0", true)
-local AceComm		= LibStub("AceComm-3.0", true)
-local AceSerializer	= LibStub("AceSerializer-3.0", true)
-local AceHook		= LibStub("AceHook-3.0", true)
-local AceBucket		= LibStub("AceBucket-3.0", true)
-local AceDB			= LibStub("AceDB-3.0", true)
+local AceConsole    = LibStub("AceConsole-3.0", true)
+local AceEvent      = LibStub("AceEvent-3.0", true)
+local AceTimer      = LibStub("AceTimer-3.0", true)
+local AceComm       = LibStub("AceComm-3.0", true)
+local AceSerializer = LibStub("AceSerializer-3.0", true)
+local AceHook       = LibStub("AceHook-3.0", true)
+local AceBucket     = LibStub("AceBucket-3.0", true)
+local AceDB         = LibStub("AceDB-3.0", true)
 
 local Unpack = (table and table.unpack) or _G.unpack
 
@@ -51,13 +51,13 @@ local GMS = AceAddon:GetAddon("GMS", true)
 
 if not GMS then
 	local mixins = {}
-	if AceConsole		then mixins[#mixins + 1] = "AceConsole-3.0" end
-	if AceEvent			then mixins[#mixins + 1] = "AceEvent-3.0" end
-	if AceTimer			then mixins[#mixins + 1] = "AceTimer-3.0" end
-	if AceComm			then mixins[#mixins + 1] = "AceComm-3.0" end
-	if AceSerializer	then mixins[#mixins + 1] = "AceSerializer-3.0" end
-	if AceHook			then mixins[#mixins + 1] = "AceHook-3.0" end
-	if AceBucket		then mixins[#mixins + 1] = "AceBucket-3.0" end
+	if AceConsole then mixins[#mixins + 1] = "AceConsole-3.0" end
+	if AceEvent then mixins[#mixins + 1] = "AceEvent-3.0" end
+	if AceTimer then mixins[#mixins + 1] = "AceTimer-3.0" end
+	if AceComm then mixins[#mixins + 1] = "AceComm-3.0" end
+	if AceSerializer then mixins[#mixins + 1] = "AceSerializer-3.0" end
+	if AceHook then mixins[#mixins + 1] = "AceHook-3.0" end
+	if AceBucket then mixins[#mixins + 1] = "AceBucket-3.0" end
 
 	GMS = AceAddon:NewAddon("GMS", Unpack(mixins))
 end
@@ -80,11 +80,11 @@ end
 
 local function LOCAL_LOG(level, msg, ...)
 	local entry = {
-		time	= now(),
-		level	= tostring(level or "INFO"),
-		type	= tostring(METADATA.TYPE or "UNKNOWN"),
-		source	= tostring(METADATA.SHORT_NAME or "UNKNOWN"),
-		msg		= tostring(msg or ""),
+		time   = now(),
+		level  = tostring(level or "INFO"),
+		type   = tostring(METADATA.TYPE or "UNKNOWN"),
+		source = tostring(METADATA.SHORT_NAME or "UNKNOWN"),
+		msg    = tostring(msg or ""),
 	}
 
 	local n = select("#", ...)
@@ -107,9 +107,11 @@ end
 -- #	META / CONSTANTS
 -- ###########################################################################
 
-GMS.ADDON_NAME			= ADDON_NAME
-GMS.INTERNAL_ADDON_NAME	= tostring(ADDON_NAME or "GMS")
-GMS.CHAT_PREFIX			= "|cff03A9F4[GMS]|r"
+GMS.ADDON_NAME          = ADDON_NAME
+GMS.INTERNAL_ADDON_NAME = tostring(ADDON_NAME or "GMS")
+GMS.CHAT_PREFIX         = "|cff03A9F4[GMS]|r"
+GMS.VERSION             = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or
+	GetAddOnMetadata(ADDON_NAME, "Version") or METADATA.VERSION
 
 -- ###########################################################################
 -- #	CHAT OUTPUT
