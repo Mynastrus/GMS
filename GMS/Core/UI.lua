@@ -170,7 +170,7 @@ local DEFAULTS = {
 			relPoint = "CENTER",
 			x = 0,
 			y = 0,
-			activePage = "home",
+			activePage = "DASHBOARD",
 		},
 	},
 }
@@ -258,12 +258,12 @@ end
 local function SaveActivePage(pageName)
 	if not UI.db then return end
 	local wdb = GetWindowDB()
-	wdb.activePage = tostring(pageName or "home")
+	wdb.activePage = tostring(pageName or "DASHBOARD")
 end
 
 local function GetActivePage()
 	local wdb = GetWindowDB()
-	return tostring(wdb.activePage or "home")
+	return tostring(wdb.activePage or "DASHBOARD")
 end
 
 -- ###########################################################################
@@ -954,15 +954,12 @@ function UI:AddRightDockIconBottom(opts) return self:AddRightDockIcon("bottom", 
 
 function UI:SeedRightDockPlaceholders()
 	self:AddRightDockIconTop({
-		id = "home",
-		order = 1,
-		selectable = true,
 		selected = true,
 		icon = "Interface\\Icons\\INV_Misc_Note_05",
 		tooltipTitle = "Dashboard",
 		tooltipText = "Zeigt das Dashboard des Addons an",
 		onClick = function()
-			UI:Navigate("home")
+			UI:Navigate("DASHBOARD")
 		end,
 	})
 
@@ -1039,7 +1036,7 @@ do
 		end
 
 		if not self._pages or not self._pages[id] then
-			id = GetFirstPageId() or "home"
+			id = GetFirstPageId() or "DASHBOARD"
 		end
 
 		self._page = id
@@ -1303,10 +1300,7 @@ function UI:Init()
 	self:ApplyWindowState()
 
 	if type(self.RegisterPage) == "function" then
-		self:RegisterPage("home", 1, "Dashboard", function(root)
-			self:RenderFallbackContent(root,
-				"Tabs rechts: Klick öffnet Pages. Pages registrieren: GMS.UI:RegisterPage(id, order, title, buildFn)")
-		end)
+		-- Home-Page wurde in DASHBOARD ausgelagert
 	end
 
 	LOCAL_LOG("DEBUG", "UI Init complete")

@@ -42,6 +42,7 @@ GMS/
 │  ├─ ChatLinks.lua       # Chat enhancements (EXT)
 │  ├─ ModuleStates.lua    # Lifecycle & Registry (EXT)
 │  ├─ Settings.lua        # Configuration UI (EXT)
+│  ├─ Dashboard.lua       # System Dashboard (EXT)
 │  └─ SlashCommands.lua   # Command handling (EXT)
 ├─ Modules/
 │  ├─ Roster.lua          # Guild management (MOD)
@@ -98,6 +99,7 @@ GMS/
 │  ├─ ChatLinks.lua       # Chat-Erweiterungen (EXT)
 │  ├─ ModuleStates.lua    # Lifecycle & Registrierung (EXT)
 │  ├─ Settings.lua        # Konfigurations-Oberfläche (EXT)
+│  ├─ Dashboard.lua       # System Dashboard (EXT)
 │  └─ SlashCommands.lua   # Befehlsverwaltung (EXT)
 ├─ Modules/
 │  ├─ Roster.lua          # Gildenverwaltung (MOD)

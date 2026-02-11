@@ -61,6 +61,7 @@ Core\SlashCommands.lua
 Core\ChatLinks.lua
 Core\Settings.lua
 Core\UI.lua
+Core\Dashboard.lua
 Core\Logs.lua
 
 # =========================
