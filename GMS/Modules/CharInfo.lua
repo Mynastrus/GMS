@@ -244,7 +244,7 @@ function CHARINFO:TryRegisterPage()
 		if ui2 and type(ui2.Header_BuildIconText) == "function" then
 			ui2:Header_BuildIconText({
 				icon = ICON,
-				text = "|cff03A9F4" .. DISPLAY_NAME .. "|r",
+				text = "|cff03A9F4" .. METADATA.DISPLAY_NAME .. "|r",
 				subtext = ctxName and ("Context: |cffCCCCCC" .. tostring(ctxName) .. "|r") or "Kein Context gesetzt",
 			})
 		end

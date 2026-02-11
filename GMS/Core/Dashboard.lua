@@ -192,7 +192,7 @@ local function Init()
 		return
 	end
 
-	GMS.UI:RegisterPage(METADATA.INTERN_NAME, 0, "Dashboard", RenderDashboard)
+	GMS.UI:RegisterPage(METADATA.INTERN_NAME, 0, METADATA.DISPLAY_NAME, RenderDashboard)
 	LOCAL_LOG("INFO", "DASHBOARD page registered")
 end
 

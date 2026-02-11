@@ -332,13 +332,20 @@ function UI:AddRightDockIconTop(opts) return self:AddRightDockIcon("top", opts) 
 function UI:AddRightDockIconBottom(opts) return self:AddRightDockIcon("bottom", opts) end
 
 function UI:SeedRightDockPlaceholders()
+	local dashName = (
+		GMS.REGISTRY and GMS.REGISTRY.EXT and GMS.REGISTRY.EXT["DASHBOARD"] and GMS.REGISTRY.EXT["DASHBOARD"].displayName) or
+		"Dashboard"
+	local optsName = (
+		GMS.REGISTRY and GMS.REGISTRY.EXT and GMS.REGISTRY.EXT["SETTINGS"] and GMS.REGISTRY.EXT["SETTINGS"].displayName) or
+		"Optionen"
+
 	self:AddRightDockIconTop({
 		id = "DASHBOARD",
 		order = 1,
 		selectable = true,
 		selected = true,
 		icon = "Interface\\Icons\\INV_Misc_Note_05",
-		tooltipTitle = "Dashboard",
+		tooltipTitle = dashName,
 		tooltipText = "Zeigt das Dashboard des Addons an",
 		onClick = function()
 			if type(UI.Navigate) == "function" then
@@ -352,7 +359,7 @@ function UI:SeedRightDockPlaceholders()
 		order = 1,
 		selectable = true,
 		icon = "Interface\\Icons\\Trade_Engineering",
-		tooltipTitle = "Optionen",
+		tooltipTitle = optsName,
 		tooltipText = "Einstellungen",
 		onClick = function()
 			if type(UI.Navigate) == "function" then

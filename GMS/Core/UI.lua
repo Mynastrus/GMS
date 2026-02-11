@@ -102,8 +102,9 @@ local FRAME_NAME   = "GMS_MainFrame"
 GMS.UI = GMS.UI or {}
 local UI = GMS.UI
 
-UI._inited = UI._inited or false
-UI.db      = UI.db or nil
+UI.DISPLAY_NAME = METADATA.DISPLAY_NAME
+UI._inited      = UI._inited or false
+UI.db           = UI.db or nil
 
 UI._frame        = UI._frame or nil
 UI._content      = UI._content or nil

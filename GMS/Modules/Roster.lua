@@ -841,7 +841,7 @@ function Roster:TryRegisterRosterPageInUI()
 		return false
 	end
 
-	GMS.UI:RegisterPage("Roster", 50, "Mitgliederübersicht", function(root)
+	GMS.UI:RegisterPage(METADATA.INTERN_NAME, 50, METADATA.DISPLAY_NAME, function(root)
 		BuildRosterPageUI(root)
 	end)
 
@@ -865,14 +865,14 @@ function Roster:TryRegisterRosterDockIconInUI()
 	end
 
 	GMS.UI:AddRightDockIconTop({
-		id = "Roster",
+		id = METADATA.INTERN_NAME,
 		order = 50,
 		selectable = true,
 		icon = "Interface\\Icons\\Achievement_guildperk_everybodysfriend",
-		tooltipTitle = "Roster",
+		tooltipTitle = METADATA.DISPLAY_NAME,
 		tooltipText = "Öffnet die Roster-Page",
 		onClick = function()
-			GMS.UI:Open("Roster")
+			GMS.UI:Open(METADATA.INTERN_NAME)
 		end,
 	})
 

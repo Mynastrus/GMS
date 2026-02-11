@@ -167,7 +167,9 @@ function UI:Navigate(id)
 
 	local p = self._pages and self._pages[id] or nil
 	if type(self.SetWindowTitle) == "function" then
-		self:SetWindowTitle((self.DISPLAY_NAME or "GMS") .. "   |cffCCCCCC" .. tostring((p and p.title) or id) .. "|r")
+		local mainTitle = self.DISPLAY_NAME or "GMS"
+		local pageTitle = (p and p.title) or id
+		self:SetWindowTitle(mainTitle .. "   |cffCCCCCC" .. tostring(pageTitle) .. "|r")
 	end
 
 	if p and type(p.build) == "function" then
