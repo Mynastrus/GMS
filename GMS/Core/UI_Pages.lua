@@ -141,6 +141,8 @@ function UI:Navigate(id)
 		self:Init()
 	end
 
+	self._navToken = (self._navToken or 0) + 1
+
 	if not self._frame then
 		return
 	end

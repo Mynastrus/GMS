@@ -119,6 +119,7 @@ local UI = GMS.UI
 
 UI.DISPLAY_NAME = METADATA.DISPLAY_NAME
 UI._inited      = UI._inited or false
+UI._navToken    = UI._navToken or 0
 UI.db           = UI.db or nil
 
 UI._frame        = UI._frame or nil

@@ -727,6 +727,7 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame)
 
 	Roster._buildToken = (Roster._buildToken or 0) + 1
 	local myToken = Roster._buildToken
+	local myNavToken = (GMS.UI and GMS.UI._navToken) or 0
 
 	if type(parent.ReleaseChildren) == "function" then
 		parent:ReleaseChildren()
@@ -758,6 +759,9 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame)
 
 	local function Step()
 		if myToken ~= Roster._buildToken then
+			return
+		end
+		if GMS.UI and GMS.UI._navToken ~= myNavToken then
 			return
 		end
 
