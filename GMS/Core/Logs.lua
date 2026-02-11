@@ -585,7 +585,8 @@ local function RegisterLogsUI()
 	local PAGE_ID = "LOGS"
 	local TITLE = "Logs"
 
-	local function BuildPage(root)
+	local function BuildPage(root, id, isCached)
+		if isCached then return end
 		root:SetLayout("List")
 
 		local header = AceGUI:Create("InlineGroup")

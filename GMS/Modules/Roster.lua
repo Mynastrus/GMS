@@ -821,10 +821,12 @@ end
 --	@param root AceGUIWidget
 --	@return nil
 -- ---------------------------------------------------------------------------
-local function BuildRosterPageUI(root)
+local function BuildRosterPageUI(root, id, isCached)
 	if GMS.UI and type(GMS.UI.Header_BuildDefault) == "function" then
 		GMS.UI:Header_BuildDefault()
 	end
+
+	if isCached then return end
 
 	local wrapper = AceGUI:Create("SimpleGroup")
 	wrapper:SetFullWidth(true)

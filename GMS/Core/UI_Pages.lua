@@ -86,8 +86,9 @@ GMS:RegisterExtension({
 -- #	PAGES LOGIC
 -- ###########################################################################
 
-UI._pages = UI._pages or {}
-UI._order = UI._order or {}
+UI._pages          = UI._pages or {}
+UI._order          = UI._order or {}
+UI._pageContainers = UI._pageContainers or {}
 
 local function SortPages()
 	if type(wipe) == "function" then
@@ -141,12 +142,6 @@ function UI:Navigate(id)
 		self:Init()
 	end
 
-	self._navToken = (self._navToken or 0) + 1
-
-	if not self._frame then
-		return
-	end
-
 	id = tostring(id or "")
 	if id == "" then
 		id = GetActivePage()
@@ -156,7 +151,14 @@ function UI:Navigate(id)
 		id = GetFirstPageId() or "DASHBOARD"
 	end
 
+	-- GUARD: If page is already active and UI is shown, do nothing to prevent double-build
+	if self._page == id and self._frame and self._frame:IsShown() then
+		return
+	end
+
 	self._page = id
+	self._navToken = (self._navToken or 0) + 1
+
 	if type(self.SaveActivePage) == "function" then
 		self:SaveActivePage(id)
 	end
@@ -169,11 +171,16 @@ function UI:Navigate(id)
 		contentRoot = self._fallbackRoot
 	end
 
-	if contentRoot and contentRoot.ReleaseChildren then
-		contentRoot:ReleaseChildren()
+	-- 1. HIDE all existing page containers
+	if self._pageContainers then
+		for _, container in pairs(self._pageContainers) do
+			if container and container.frame then
+				container.frame:Hide()
+			end
+		end
 	end
 
-	-- Clear regions for a clean slate
+	-- 2. Clear common regions
 	if type(self.Header_Clear) == "function" then self:Header_Clear() end
 	if type(self.Footer_Clear) == "function" then self:Footer_Clear() end
 
@@ -184,13 +191,31 @@ function UI:Navigate(id)
 		self:SetWindowTitle(mainTitle .. "   |cffCCCCCC" .. tostring(pageTitle) .. "|r")
 	end
 
+	-- 3. Check for cached container or create NEW
+	local pageContainer = self._pageContainers[id]
+	local isCached = false
+
+	if pageContainer then
+		pageContainer.frame:Show()
+		isCached = true
+	else
+		-- Create a dedicated container for this page
+		pageContainer = AceGUI:Create("SimpleGroup")
+		pageContainer:SetLayout("Fill")
+		pageContainer:SetFullWidth(true)
+		pageContainer:SetFullHeight(true)
+		contentRoot:AddChild(pageContainer)
+		self._pageContainers[id] = pageContainer
+	end
+
+	-- 4. Call build function
 	if p and type(p.build) == "function" then
-		local ok, err = pcall(p.build, contentRoot, id)
+		local ok, err = pcall(p.build, pageContainer, id, isCached)
 		if not ok then
 			LOCAL_LOG("ERROR", "Page build error", tostring(err))
 		end
 	elseif type(self.RenderFallbackContent) == "function" then
-		self:RenderFallbackContent(contentRoot, "Page nicht gefunden: " .. tostring(id))
+		self:RenderFallbackContent(pageContainer, "Page nicht gefunden: " .. tostring(id))
 	end
 
 	if type(self.SetRightDockSelected) == "function" then

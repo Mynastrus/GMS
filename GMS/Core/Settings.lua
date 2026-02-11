@@ -257,10 +257,12 @@ end
 -- #	UI: MAIN PAGE BUILDER
 -- ###########################################################################
 
-local function BuildSettingsPage(root)
+local function BuildSettingsPage(root, id, isCached)
 	if GMS.UI and type(GMS.UI.Header_BuildDefault) == "function" then
 		GMS.UI:Header_BuildDefault()
 	end
+
+	if isCached then return end
 
 	root:SetLayout("Fill")
 

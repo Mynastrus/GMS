@@ -255,7 +255,7 @@ function CHARINFO:TryRegisterPage()
 		return false
 	end
 
-	ui:RegisterPage("CHARINFO", 60, DISPLAY_NAME, function(root)
+	ui:RegisterPage("CHARINFO", 60, DISPLAY_NAME, function(root, id, isCached)
 		local ui2 = UIRef()
 		local ctx = GetNavContext(true) or nil
 		local player = GetPlayerSnapshot()
@@ -276,6 +276,8 @@ function CHARINFO:TryRegisterPage()
 		if ui2 and type(ui2.SetStatusText) == "function" then
 			ui2:SetStatusText(ctxName and "CHARINFO: ctx aktiv" or "CHARINFO: nur player")
 		end
+
+		if isCached then return end
 
 		local wrapper = AceGUI:Create("SimpleGroup")
 		wrapper:SetFullWidth(true)

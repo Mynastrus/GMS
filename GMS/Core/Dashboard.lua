@@ -102,12 +102,15 @@ end
 -- #	UI RENDERING
 -- ###########################################################################
 
-local function RenderDashboard(root)
+local function RenderDashboard(root, id, isCached)
 	if not GMS.UI then return end
 
-	-- Header
+	-- Header (Always Rebuild)
 	GMS.UI:Header_BuildDefault()
 	GMS.UI:SetStatusText("DASHBOARD: Systemstatus geladen")
+
+	-- If cached, only update Header/Footer (done above) and return
+	if isCached then return end
 
 	local scroll = AceGUI:Create("ScrollFrame")
 	scroll:SetLayout("Flow")
