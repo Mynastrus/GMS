@@ -9,7 +9,7 @@ local METADATA = {
 	INTERN_NAME  = "DB",
 	SHORT_NAME   = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION      = "1.0.3",
+	VERSION      = "1.0.4",
 }
 
 -- Blizzard Globals
@@ -37,9 +37,6 @@ end
 
 local AceAddon = LibStub("AceAddon-3.0", true)
 local GMS = AceAddon and AceAddon:GetAddon("GMS", true) or nil
-if not GMS then
-	GMS = _G.GMS
-end
 if not GMS then return end
 
 -- ###########################################################################
