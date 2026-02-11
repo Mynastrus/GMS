@@ -17,6 +17,13 @@ if not GMS then return end
 local AceGUI = LibStub("AceGUI-3.0", true)
 if not AceGUI then return end
 
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G      = _G
+local GetTime = GetTime
+local C_Timer = C_Timer
+---@diagnostic enable: undefined-global
+
 -- ###########################################################################
 -- #	METADATA
 -- ###########################################################################
@@ -218,8 +225,8 @@ end
 local function Init()
 	if not GMS.UI or type(GMS.UI.RegisterPage) ~= "function" then
 		-- Retry later if UI is not yet available
-		if _G.C_Timer and _G.C_Timer.After then
-			_G.C_Timer.After(0.5, Init)
+		if C_Timer and C_Timer.After then
+			C_Timer.After(0.5, Init)
 		end
 		return
 	end

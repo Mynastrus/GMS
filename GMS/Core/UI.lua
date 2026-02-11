@@ -30,6 +30,21 @@ if not AceAddon then return end
 local GMS = AceAddon:GetAddon("GMS", true)
 if not GMS then return end
 
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G                         = _G
+local UIParent                   = UIParent
+local CreateFrame                = CreateFrame
+local GetTime                    = GetTime
+local CopyTable                  = CopyTable
+local tinsert                    = tinsert
+local tContains                  = tContains
+local UISpecialFrames            = UISpecialFrames
+local GameFontNormalOutline      = GameFontNormalOutline
+local GameFontNormalLarge        = GameFontNormalLarge
+local GameFontNormalSmallOutline = GameFontNormalSmallOutline
+---@diagnostic enable: undefined-global
+
 -- ###########################################################################
 -- #	METADATA (PROJECT STANDARD)
 -- ###########################################################################
@@ -157,8 +172,8 @@ local function SafeCall(fn, ...)
 end
 
 local function CopyTableSafe(src)
-	if type(_G.CopyTable) == "function" then
-		return _G.CopyTable(src)
+	if type(CopyTable) == "function" then
+		return CopyTable(src)
 	end
 	local out = {}
 	for k, v in pairs(src or {}) do
@@ -287,7 +302,7 @@ function UI:SetStatusText(msg)
 		lbl:SetFullWidth(true)
 
 		if lbl.label then
-			lbl.label:SetFontObject(_G.GameFontNormalSmallOutline)
+			lbl.label:SetFontObject(GameFontNormalSmallOutline)
 			lbl.label:SetJustifyH("LEFT")
 			lbl.label:SetJustifyV("MIDDLE")
 		end
@@ -341,7 +356,7 @@ function UI:Header_BuildIconText(opts)
 	label:SetFullWidth(false)
 	label:SetWidth(380)
 	if label.label then
-		label.label:SetFontObject(_G.GameFontNormalOutline)
+		label.label:SetFontObject(GameFontNormalOutline)
 		label.label:SetJustifyH("LEFT")
 		label.label:SetJustifyV("MIDDLE")
 	end
@@ -353,7 +368,7 @@ function UI:Header_BuildIconText(opts)
 		label2:SetFullWidth(false)
 		label2:SetWidth(520)
 		if label2.label then
-			label2.label:SetFontObject(_G.GameFontNormalSmallOutline)
+			label2.label:SetFontObject(GameFontNormalSmallOutline)
 			label2.label:SetJustifyH("LEFT")
 			label2.label:SetJustifyV("MIDDLE")
 		end
@@ -397,7 +412,7 @@ function UI:Header_BuildSearch(opts)
 	hint:SetFullWidth(false)
 	hint:SetWidth(260)
 	if hint.label then
-		hint.label:SetFontObject(_G.GameFontNormalSmallOutline)
+		hint.label:SetFontObject(GameFontNormalSmallOutline)
 		hint.label:SetJustifyH("LEFT")
 		hint.label:SetJustifyV("MIDDLE")
 	end
@@ -455,7 +470,7 @@ function UI:Header_BuildControls(opts)
 	label:SetFullWidth(false)
 	label:SetWidth(220)
 	if label.label then
-		label.label:SetFontObject(_G.GameFontNormalOutline)
+		label.label:SetFontObject(GameFontNormalOutline)
 		label.label:SetJustifyH("LEFT")
 		label.label:SetJustifyV("MIDDLE")
 	end
@@ -616,7 +631,7 @@ function UI:RenderFallbackContent(root, hintText)
 
 	local title = AceGUI:Create("Label")
 	title:SetText("|cff03A9F4GMS|r – UI ist geladen.")
-	title:SetFontObject(_G.GameFontNormalLarge)
+	title:SetFontObject(GameFontNormalLarge)
 	title:SetFullWidth(true)
 	root:AddChild(title)
 
@@ -659,7 +674,7 @@ function UI:ApplyWindowState()
 	self._frame:ClearAllPoints()
 	self._frame:SetPoint(
 		wdb.point or "CENTER",
-		_G.UIParent,
+		UIParent,
 		wdb.relPoint or "CENTER",
 		wdb.x or 0,
 		wdb.y or 0
@@ -735,7 +750,7 @@ end
 function UI:CreateFrame()
 	if self._frame then return end
 
-	local f = CreateFrame("Frame", FRAME_NAME, _G.UIParent, "ButtonFrameTemplate")
+	local f = CreateFrame("Frame", FRAME_NAME, UIParent, "ButtonFrameTemplate")
 	f:SetFrameStrata("DIALOG")
 	f:SetFrameLevel(200)
 	f:SetMovable(true)
@@ -762,9 +777,9 @@ function UI:CreateFrame()
 		f:SetClampRectInsets(-15, 45, 15, -15)
 	end
 
-	if _G.UISpecialFrames and type(_G.tContains) == "function" and type(_G.tinsert) == "function" then
-		if not _G.tContains(_G.UISpecialFrames, FRAME_NAME) then
-			_G.tinsert(_G.UISpecialFrames, FRAME_NAME)
+	if UISpecialFrames and type(tContains) == "function" and type(tinsert) == "function" then
+		if not tContains(UISpecialFrames, FRAME_NAME) then
+			tinsert(UISpecialFrames, FRAME_NAME)
 		end
 	end
 

@@ -41,7 +41,15 @@ local AceHook       = LibStub("AceHook-3.0", true)
 local AceBucket     = LibStub("AceBucket-3.0", true)
 local AceDB         = LibStub("AceDB-3.0", true)
 
-local Unpack = (table and table.unpack) or _G.unpack
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G               = _G
+local GetTime          = GetTime
+local C_AddOns         = C_AddOns
+local GetAddOnMetadata = GetAddOnMetadata
+---@diagnostic enable: undefined-global
+
+local Unpack = (table and table.unpack) or unpack
 
 -- ---------------------------------------------------------------------------
 --	GMS AceAddon erstellen oder aus Registry holen
@@ -111,7 +119,7 @@ GMS.ADDON_NAME          = ADDON_NAME
 GMS.INTERNAL_ADDON_NAME = tostring(ADDON_NAME or "GMS")
 GMS.CHAT_PREFIX         = "|cff03A9F4[GMS]|r"
 GMS.VERSION             = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version") or
-	GetAddOnMetadata(ADDON_NAME, "Version") or METADATA.VERSION
+	(GetAddOnMetadata and GetAddOnMetadata(ADDON_NAME, "Version")) or METADATA.VERSION
 
 -- ###########################################################################
 -- #	CHAT OUTPUT

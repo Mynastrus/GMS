@@ -29,6 +29,26 @@ if not AceAddon then return end
 local GMS = AceAddon:GetAddon("GMS", true)
 if not GMS then return end
 
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G                         = _G
+local GetTime                    = GetTime
+local time                       = time
+local UnitFullName               = UnitFullName
+local UnitClass                  = UnitClass
+local UnitRace                   = UnitRace
+local UnitLevel                  = UnitLevel
+local GetGuildInfo               = GetGuildInfo
+local GetSpecialization          = GetSpecialization
+local GetSpecializationInfo      = GetSpecializationInfo
+local GetAverageItemLevel        = GetAverageItemLevel
+local UnitGUID                   = UnitGUID
+local UnitExists                 = UnitExists
+local UnitIsPlayer               = UnitIsPlayer
+local C_Timer                    = C_Timer
+local GameFontNormalSmallOutline = GameFontNormalSmallOutline
+---@diagnostic enable: undefined-global
+
 local AceGUI = LibStub("AceGUI-3.0", true)
 if not AceGUI then return end
 
@@ -40,7 +60,7 @@ GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
 
 local function LOCAL_LOG(level, msg, ...)
 	local entry = {
-		timestamp = _G.time and _G.time() or 0,
+		timestamp = time and time() or 0,
 		level     = tostring(level or "INFO"),
 		type      = METADATA.TYPE,
 		source    = METADATA.SHORT_NAME,
@@ -149,26 +169,26 @@ local function FormatNameRealm(name, realm)
 end
 
 local function GetPlayerSnapshot()
-	local name, realm = _G.UnitFullName("player")
-	local className = _G.UnitClass("player") -- localized
-	local raceName = _G.UnitRace("player") -- localized
-	local level = _G.UnitLevel("player")
+	local name, realm = UnitFullName("player")
+	local className = UnitClass("player") -- localized
+	local raceName = UnitRace("player") -- localized
+	local level = UnitLevel("player")
 
-	local guildName = _G.GetGuildInfo and _G.GetGuildInfo("player") or nil
+	local guildName = GetGuildInfo and GetGuildInfo("player") or nil
 
 	local specName = "-"
-	if type(_G.GetSpecialization) == "function" and type(_G.GetSpecializationInfo) == "function" then
-		local specIndex = _G.GetSpecialization()
+	if type(GetSpecialization) == "function" and type(GetSpecializationInfo) == "function" then
+		local specIndex = GetSpecialization()
 		if specIndex then
-			local _, sName = _G.GetSpecializationInfo(specIndex)
+			local _, sName = GetSpecializationInfo(specIndex)
 			if sName and sName ~= "" then specName = sName end
 		end
 	end
 
 	local ilvlEquipped = nil
 	local ilvlOverall = nil
-	if type(_G.GetAverageItemLevel) == "function" then
-		local overall, equipped = _G.GetAverageItemLevel()
+	if type(GetAverageItemLevel) == "function" then
+		local overall, equipped = GetAverageItemLevel()
 		ilvlOverall = overall
 		ilvlEquipped = equipped
 	end
@@ -184,19 +204,19 @@ local function GetPlayerSnapshot()
 		guild        = guildName or "-",
 		ilvl         = (ilvlEquipped and string.format("%.1f", ilvlEquipped)) or "-",
 		ilvl_overall = (ilvlOverall and string.format("%.1f", ilvlOverall)) or "-",
-		guid         = (_G.UnitGUID and _G.UnitGUID("player")) or nil,
+		guid         = (UnitGUID and UnitGUID("player")) or nil,
 	}
 end
 
 local function GetTargetSnapshot()
-	if not (_G.UnitExists and _G.UnitExists("target")) then return nil end
-	if not (_G.UnitIsPlayer and _G.UnitIsPlayer("target")) then return nil end
+	if not (UnitExists and UnitExists("target")) then return nil end
+	if not (UnitIsPlayer and UnitIsPlayer("target")) then return nil end
 
-	local name, realm = _G.UnitFullName("target")
-	local className = _G.UnitClass("target")
-	local raceName = _G.UnitRace("target")
-	local level = _G.UnitLevel("target")
-	local guid = (_G.UnitGUID and _G.UnitGUID("target")) or nil
+	local name, realm = UnitFullName("target")
+	local className = UnitClass("target")
+	local raceName = UnitRace("target")
+	local level = UnitLevel("target")
+	local guid = (UnitGUID and UnitGUID("target")) or nil
 
 	-- Spec / ilvl für target sind ohne Inspect nicht zuverlässig -> bewusst "-"
 	return {
@@ -277,7 +297,7 @@ function CHARINFO:TryRegisterPage()
 			"GUID: " .. tostring(player.guid or "-"),
 		}))
 		if lblPlayer.label then
-			lblPlayer.label:SetFontObject(_G.GameFontNormalSmallOutline)
+			lblPlayer.label:SetFontObject(GameFontNormalSmallOutline)
 		end
 		wrapper:AddChild(lblPlayer)
 
@@ -349,7 +369,7 @@ function CHARINFO:TryRegisterPage()
 			"GUID: " .. tostring(ctxGuid or "-"),
 		}))
 		if lblCtx.label then
-			lblCtx.label:SetFontObject(_G.GameFontNormalSmallOutline)
+			lblCtx.label:SetFontObject(GameFontNormalSmallOutline)
 		end
 		wrapper:AddChild(lblCtx)
 
@@ -424,10 +444,10 @@ end
 function CHARINFO:StartIntegrationTicker()
 	if self._integrated then return end
 	if self._ticker then return end
-	if not _G.C_Timer or type(_G.C_Timer.NewTicker) ~= "function" then return end
+	if not C_Timer or type(C_Timer.NewTicker) ~= "function" then return end
 
 	local tries = 0
-	self._ticker = _G.C_Timer.NewTicker(0.50, function()
+	self._ticker = C_Timer.NewTicker(0.50, function()
 		tries = tries + 1
 		if CHARINFO:TryIntegrateWithUIIfAvailable() then return end
 		if tries >= 30 then
@@ -462,7 +482,7 @@ function CHARINFO:InitializeOptions()
 	if self._options and self._options.autoLog then
 		local snap = GetPlayerSnapshot()
 		if snap and snap.name_full then
-			self._options.lastUpdate = _G.time and _G.time() or 0
+			self._options.lastUpdate = time and time() or 0
 			LOCAL_LOG("INFO", "Character auto-logged: %s", tostring(snap.name_full))
 		else
 			LOCAL_LOG("WARN", "Character snapshot missing; not auto-logged")

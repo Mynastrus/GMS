@@ -111,10 +111,12 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 			displayName = GMS.REGISTRY.EXT[targetKey].displayName or GMS.REGISTRY.EXT[targetKey].name or targetKey
 		end
 	elseif targetType == "MOD" then
-		if reg then displayName = reg.name or targetKey end
+		if GMS.REGISTRY and GMS.REGISTRY.MOD and GMS.REGISTRY.MOD[targetKey] then
+			displayName = GMS.REGISTRY.MOD[targetKey].displayName or GMS.REGISTRY.MOD[targetKey].name or targetKey
+		end
 	elseif targetType == "GEN" then
-		displayName = "Allgemeine Einstellungen"
-		targetKey = "CORE" -- Map General to CORE
+		displayName = "Zentrale Addon-Einstellungen"
+		targetKey = "CORE"
 	end
 
 	CreateHeading(container, displayName)
@@ -216,10 +218,14 @@ local function GetTreeData()
 	if GMS.REGISTRY and GMS.REGISTRY.EXT then
 		local extKeys = {}
 		for k in pairs(GMS.REGISTRY.EXT) do table.insert(extKeys, k) end
-		table.sort(extKeys)
+		table.sort(extKeys, function(a, b)
+			local da = GMS.REGISTRY.EXT[a].displayName or a
+			local db = GMS.REGISTRY.EXT[b].displayName or b
+			return da < db
+		end)
 		for _, k in ipairs(extKeys) do
 			local ext = GMS.REGISTRY.EXT[k]
-			table.insert(tree[1].children, {
+			table.insert(tree[2].children, {
 				value = "EXT:" .. k,
 				text = ext.displayName or ext.name or k,
 			})
@@ -227,15 +233,19 @@ local function GetTreeData()
 	end
 
 	-- Modules
-	if GMS.DB and GMS.DB._registrations then
+	if GMS.REGISTRY and GMS.REGISTRY.MOD then
 		local modKeys = {}
-		for k in pairs(GMS.DB._registrations) do table.insert(modKeys, k) end
-		table.sort(modKeys)
+		for k in pairs(GMS.REGISTRY.MOD) do table.insert(modKeys, k) end
+		table.sort(modKeys, function(a, b)
+			local da = GMS.REGISTRY.MOD[a].displayName or a
+			local db = GMS.REGISTRY.MOD[b].displayName or b
+			return da < db
+		end)
 		for _, k in ipairs(modKeys) do
-			local reg = GMS.DB._registrations[k]
-			table.insert(tree[2].children, {
+			local mod = GMS.REGISTRY.MOD[k]
+			table.insert(tree[3].children, {
 				value = "MOD:" .. k,
-				text = reg.name or k,
+				text = mod.displayName or mod.name or k,
 			})
 		end
 	end
@@ -248,6 +258,10 @@ end
 -- ###########################################################################
 
 local function BuildSettingsPage(root)
+	if GMS.UI and type(GMS.UI.Header_BuildDefault) == "function" then
+		GMS.UI:Header_BuildDefault()
+	end
+
 	root:SetLayout("Fill")
 
 	local treeGroup = AceGUI:Create("TreeGroup")
@@ -319,7 +333,7 @@ RegisterSettingsPage()
 RegisterSlashCommands()
 
 -- Also hook into OnReady for safety
-GMS:OnReady("EXT:UI", RegisterSettingsPage)
+GMS:OnReady("EXT:UI_PAGES", RegisterSettingsPage)
 GMS:OnReady("EXT:SLASH", RegisterSlashCommands)
 
 -- ###########################################################################

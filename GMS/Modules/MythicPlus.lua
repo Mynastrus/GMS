@@ -9,6 +9,18 @@ if not AceAddon then return end
 local GMS = AceAddon:GetAddon("GMS", true)
 if not GMS then return end
 
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G              = _G
+local GetTime         = GetTime
+local UnitGUID        = UnitGUID
+local C_ChallengeMode = C_ChallengeMode
+local C_MythicPlus    = C_MythicPlus
+local time            = time
+local IsLoggedIn      = IsLoggedIn
+local C_Timer         = C_Timer
+---@diagnostic enable: undefined-global
+
 local METADATA = {
 	TYPE         = "MOD",
 	INTERN_NAME  = "MythicPlus",
@@ -142,7 +154,7 @@ function MYTHIC:ScanMythicPlusData()
 	-- Update Store
 	store.score = currentScore
 	store.dungeons = dungeons
-	store.lastScan = time()
+	store.lastScan = time and time() or 0
 
 	LOCAL_LOG("INFO", "Mythic+ data scanned and updated", currentScore, #dungeons)
 end

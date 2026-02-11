@@ -28,6 +28,23 @@ if not AceAddon then return end
 local GMS = AceAddon:GetAddon("GMS", true)
 if not GMS then return end
 
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G                         = _G
+local GetTime                    = GetTime
+local C_Timer                    = C_Timer
+local GetGuildRosterInfo         = GetGuildRosterInfo
+local GetNumGuildMembers         = GetNumGuildMembers
+local GetFullRoster              = GetFullRoster -- Fallback or custom
+local IsInGuild                  = IsInGuild
+local C_GuildInfo                = C_GuildInfo
+local GuildRoster                = GuildRoster
+local GetNormalizedRealmName     = GetNormalizedRealmName
+local CLASS_ICON_TCOORDS         = CLASS_ICON_TCOORDS
+local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
+local GameFontNormalSmallOutline = GameFontNormalSmallOutline
+---@diagnostic enable: undefined-global
+
 local AceGUI = LibStub("AceGUI-3.0", true)
 if not AceGUI then return end
 
@@ -101,7 +118,7 @@ local function NormalizeCharacterNameWithRealm(rawName)
 
 	if not name then
 		name = rawName
-		realm = GetNormalizedRealmName() or ""
+		realm = GetNormalizedRealmName and GetNormalizedRealmName() or ""
 	end
 
 	local name_full = name .. "-" .. realm
@@ -801,6 +818,10 @@ end
 --	@return nil
 -- ---------------------------------------------------------------------------
 local function BuildRosterPageUI(root)
+	if GMS.UI and type(GMS.UI.Header_BuildDefault) == "function" then
+		GMS.UI:Header_BuildDefault()
+	end
+
 	local wrapper = AceGUI:Create("SimpleGroup")
 	wrapper:SetFullWidth(true)
 	wrapper:SetFullHeight(true)

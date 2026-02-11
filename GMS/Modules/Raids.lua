@@ -25,6 +25,40 @@ if not AceAddon then return end
 local GMS = AceAddon:GetAddon("GMS", true)
 if not GMS then return end
 
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G                            = _G
+local GetTime                       = GetTime
+local type                          = type
+local tostring                      = tostring
+local select                        = select
+local pairs                         = pairs
+local ipairs                        = ipairs
+local pcall                         = pcall
+local tonumber                      = tonumber
+local next                          = next
+local C_Timer                       = C_Timer
+local UnitGUID                      = UnitGUID
+local RequestRaidInfo               = RequestRaidInfo
+local GetNumSavedInstances          = GetNumSavedInstances
+local GetSavedInstanceInfo          = GetSavedInstanceInfo
+local GetSavedInstanceEncounterInfo = GetSavedInstanceEncounterInfo
+local LoadAddOn                     = LoadAddOn
+local GetExpansionLevel             = GetExpansionLevel
+local GetExpansionDisplayInfo       = GetExpansionDisplayInfo
+local C_EncounterJournal            = C_EncounterJournal
+local EJ_GetNumTiers                = EJ_GetNumTiers
+local EJ_SelectTier                 = EJ_SelectTier
+local EJ_GetInstanceByIndex         = EJ_GetInstanceByIndex
+local EJ_SelectInstance             = EJ_SelectInstance
+local EJ_GetInstanceInfo            = EJ_GetInstanceInfo
+local EJ_GetNumEncounters           = EJ_GetNumEncounters
+local EJ_GetEncounterInfoByIndex    = EJ_GetEncounterInfoByIndex
+local EJ_GetTierInfo                = EJ_GetTierInfo
+local EJ_GetCurrentTier             = EJ_GetCurrentTier
+local ReloadUI                      = ReloadUI
+---@diagnostic enable: undefined-global
+
 -- ###########################################################################
 -- # METADATA
 -- ###########################################################################

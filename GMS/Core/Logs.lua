@@ -20,6 +20,24 @@ if not AceAddon then return end
 local GMS = AceAddon:GetAddon("GMS", true)
 if not GMS then return end
 
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G                 = _G
+local GetTime            = GetTime
+local date               = date
+local type               = type
+local tostring           = tostring
+local select             = select
+local pairs              = pairs
+local rawget             = rawget
+local pcall              = pcall
+local print              = print
+local C_Timer            = C_Timer
+local table              = table
+local tonumber           = tonumber
+local ChatFrame_OpenChat = ChatFrame_OpenChat
+---@diagnostic enable: undefined-global
+
 -- ###########################################################################
 -- #	METADATA (PROJECT STANDARD - REQUIRED)
 -- ###########################################################################

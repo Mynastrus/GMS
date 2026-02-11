@@ -16,6 +16,16 @@ if not GMS then return end
 local UI = GMS.UI
 if not UI then return end
 
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G                    = _G
+local GetTime               = GetTime
+local CreateFrame           = CreateFrame
+local Mixin                 = Mixin
+local BackdropTemplateMixin = BackdropTemplateMixin
+local GameTooltip           = GameTooltip
+---@diagnostic enable: undefined-global
+
 -- ###########################################################################
 -- #	METADATA
 -- ###########################################################################
@@ -137,8 +147,8 @@ end
 function UI:RightDockApplySlotBackdrop(slot)
 	local cfg = self.RightDockConfig
 	if slot and cfg and cfg.slotBackdrop then
-		if not slot.SetBackdrop and _G.Mixin and _G.BackdropTemplateMixin then
-			_G.Mixin(slot, _G.BackdropTemplateMixin)
+		if not slot.SetBackdrop and Mixin and BackdropTemplateMixin then
+			Mixin(slot, BackdropTemplateMixin)
 		end
 		if slot.SetBackdrop then
 			slot:SetBackdrop(cfg.slotBackdrop)
@@ -289,19 +299,19 @@ function UI:AddRightDockIcon(lane, opts)
 
 	btn:SetScript("OnEnter", function()
 		if opts.tooltipTitle or opts.tooltipText then
-			_G.GameTooltip:SetOwner(slot, "ANCHOR_LEFT")
+			GameTooltip:SetOwner(slot, "ANCHOR_LEFT")
 			if opts.tooltipTitle and opts.tooltipTitle ~= "" then
-				_G.GameTooltip:AddLine(opts.tooltipTitle, 1, 1, 1)
+				GameTooltip:AddLine(opts.tooltipTitle, 1, 1, 1)
 			end
 			if opts.tooltipText and opts.tooltipText ~= "" then
-				_G.GameTooltip:AddLine(opts.tooltipText, 0.9, 0.9, 0.9, true)
+				GameTooltip:AddLine(opts.tooltipText, 0.9, 0.9, 0.9, true)
 			end
-			_G.GameTooltip:Show()
+			GameTooltip:Show()
 		end
 	end)
 
 	btn:SetScript("OnLeave", function()
-		_G.GameTooltip:Hide()
+		GameTooltip:Hide()
 	end)
 
 	btn:SetScript("OnClick", function(_, mouseButton)

@@ -12,7 +12,16 @@ local METADATA = {
 	VERSION      = "1.0.3",
 }
 
-local _G = _G
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G           = _G
+local GetTime      = GetTime
+local IsInGuild    = IsInGuild
+local GetGuildInfo = GetGuildInfo
+local GetRealmName = GetRealmName
+local ReloadUI     = ReloadUI
+local wipe         = wipe
+---@diagnostic enable: undefined-global
 
 -- ---------------------------------------------------------------------------
 --	Guards

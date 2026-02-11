@@ -73,9 +73,10 @@ Bei **jeder Dateiänderung** wird die `METADATA.VERSION` angepasst.
 * Die `## Version`-Angabe in der `GMS.toc` ist die **Source of Truth** für die globale Anzeige.
 * Die Versionen der einzelnen Dateien bleiben unabhängig und werden **nicht** zwangsweise angeglichen.
 
-### 3.3 Dashboard Versionsanzeige
+### 3.4 TOC Versionierung nach Tasks
 
-* Das Dashboard **MUSS** die globale Addon-Version aus der `GMS.toc` anzeigen (via `GetAddOnMetadata` oder `GMS.VERSION`).
+* Nach **jedem vollständig abgeschlossenen Task** (Objective), der Code-Änderungen beinhält, **MUSS** die globale Version in der `GMS.toc` erhöht werden.
+* Dies stellt sicher, dass Nutzer des Addons über Updates informiert werden, auch wenn nur interne Refactorings stattgefunden haben.
 
 ---
 
@@ -271,10 +272,30 @@ The following rules apply to the AI assistant's interaction with artifacts:
 
 ---
 
-## 11. Retail-Kompatibilität (Pflicht)
+## 12. Globals-Lokalisierung (Pflicht)
 
-Alle Funktionen und API-Aufrufe **MÜSSEN** der **aktuellsten WoW-Retail-Version** entsprechen.
+Um "Undefined field"-Warnungen des Linters zu vermeiden und die Performance zu optimieren, **MÜSSEN** alle verwendeten Blizzard-Globals (APIs, Mixins, UI-Frames, Constants) lokalisiert werden.
 
-* Veraltete APIs (z.B. aus Classic/Vanilla) sind **verboten**.
-* Moderne Namespaces (`C_*`) sind **immer zu bevorzugen**.
-* Rückwärtskompatibilität zu Classic wird **nicht** berücksichtigt, wenn sie Retail-Code verkompliziert.
+### 12.1 Lokalisierungs-Block
+
+Die Lokalisierung erfolgt am Anfang der Datei (nach `METADATA` und den ersten Guards). Der Block **MUSS** durch Diagnose-Kommentare für den Linter abgesichert werden.
+
+**Verbindliches Muster:**
+
+```lua
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G               = _G
+local CreateFrame      = CreateFrame
+local GetTime          = GetTime
+local UIParent         = UIParent
+local C_Timer          = C_Timer
+-- ... weitere ...
+---@diagnostic enable: undefined-global
+```
+
+### 12.2 Verwendung
+
+* Innerhalb der Logik **DARF NICHT** direkt auf `_G.XYZ` zugegriffen werden, wenn `XYZ` ein Blizzard-Global ist.
+* Stattdessen wird die lokale Variable `XYZ` verwendet.
+* Die Lokalisierung dient als zentrale Stelle zur Absicherung gegen fehlende APIs in verschiedenen WoW-Umgebungen.

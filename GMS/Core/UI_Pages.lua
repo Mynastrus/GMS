@@ -13,6 +13,12 @@ if not AceAddon then return end
 local GMS = AceAddon:GetAddon("GMS", true)
 if not GMS then return end
 
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G = _G
+local wipe = wipe
+---@diagnostic enable: undefined-global
+
 local UI = GMS.UI
 if not UI then return end
 
@@ -84,8 +90,8 @@ UI._pages = UI._pages or {}
 UI._order = UI._order or {}
 
 local function SortPages()
-	if type(_G.wipe) == "function" then
-		_G.wipe(UI._order)
+	if type(wipe) == "function" then
+		wipe(UI._order)
 	else
 		for k in pairs(UI._order) do UI._order[k] = nil end
 	end
@@ -164,6 +170,10 @@ function UI:Navigate(id)
 	if contentRoot and contentRoot.ReleaseChildren then
 		contentRoot:ReleaseChildren()
 	end
+
+	-- Clear regions for a clean slate
+	if type(self.Header_Clear) == "function" then self:Header_Clear() end
+	if type(self.Footer_Clear) == "function" then self:Footer_Clear() end
 
 	local p = self._pages and self._pages[id] or nil
 	if type(self.SetWindowTitle) == "function" then
