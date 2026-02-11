@@ -149,21 +149,18 @@ function GMS:GetGuildGUID()
 		return nil
 	end
 
-	-- Try GetGuildInfo (works in most WoW versions)
+	-- 1. Try modern API (Retail)
+	local gInfo = (C_GuildInfo and C_GuildInfo.GetGuildTabardInfo) and C_GuildInfo.GetGuildTabardInfo("player")
 	if GetGuildInfo then
 		local guildName, guildRankName, guildRankIndex, realm, _, _, _, _, isGuildLeader, _, _, _, _, isMobile, _, _, guildGUID = GetGuildInfo("player")
-		if guildGUID then
+		if guildGUID and guildGUID ~= "" then
 			return guildGUID
 		end
-	end
 
-	-- Fallback: Generate a stable key from guild name + realm
-	-- This is not a true GUID but provides guild-scoped persistence
-	if GetGuildInfo then
-		local guildName = GetGuildInfo("player")
+		-- 2. Fallback: Generate stable key from Name + Realm
 		if guildName and guildName ~= "" then
-			local realm = GetRealmName and GetRealmName() or "Unknown"
-			return string.format("GUILD_%s_%s", guildName, realm)
+			local realmName = GetRealmName and GetRealmName() or "Unknown"
+			return string.format("GUILD_%s_%s", guildName, realmName)
 		end
 	end
 
@@ -263,7 +260,13 @@ function GMS:GetModuleOptions(moduleName)
 		local t = gdb[gGUID][moduleName]
 		if reg.defaults then
 			for k, v in pairs(reg.defaults) do
-				if t[k] == nil then t[k] = v end
+				if t[k] == nil then
+					if type(v) == "table" and v.default ~= nil then
+						t[k] = v.default
+					else
+						t[k] = v
+					end
+				end
 			end
 		end
 		return t

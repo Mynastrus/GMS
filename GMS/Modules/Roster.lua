@@ -97,6 +97,13 @@ Roster._defaultColumnsSeeded = Roster._defaultColumnsSeeded or false
 Roster._buildToken = Roster._buildToken or 0
 Roster._lastListParent = Roster._lastListParent or nil
 
+-- Optimization: Table Pooling, Caches and GUID mapping
+Roster._tablePool = Roster._tablePool or {}
+Roster._guidToRow = Roster._guidToRow or {}
+Roster._nameCache = Roster._nameCache or {}
+Roster._lastRosterRequest = Roster._lastRosterRequest or 0
+Roster._lastUpdateEvent = Roster._lastUpdateEvent or 0
+
 -- ###########################################################################
 -- #	NAME NORMALIZATION
 -- ###########################################################################
@@ -114,6 +121,12 @@ local function NormalizeCharacterNameWithRealm(rawName)
 		return "", "", ""
 	end
 
+	-- Cache Check
+	if Roster._nameCache[rawName] then
+		local c = Roster._nameCache[rawName]
+		return c[1], c[2], c[3]
+	end
+
 	local name, realm = string.match(rawName, "^([^%-]+)%-(.+)$")
 
 	if not name then
@@ -122,6 +135,10 @@ local function NormalizeCharacterNameWithRealm(rawName)
 	end
 
 	local name_full = name .. "-" .. realm
+
+	-- Store in cache
+	Roster._nameCache[rawName] = { name_full, name, realm }
+
 	return name_full, name, realm
 end
 
@@ -139,21 +156,25 @@ end
 --		}
 --	@return table
 -- ---------------------------------------------------------------------------
-local function GetAllGuildMembers(sortSpec)
+local function GetAllGuildMembers(sortSpec, skipRequest)
 	local members = {}
 
 	if not IsInGuild() then
 		return members
 	end
 
-	-- Request guild roster update (safe-guarded)
-	if C_GuildInfo and C_GuildInfo.GuildRoster then
-		C_GuildInfo.GuildRoster()
-	elseif GuildRoster then
-		GuildRoster()
+	-- Request guild roster update (Throttled: Max once every 30s unless forced)
+	local now = GetTime()
+	if not skipRequest and (now - Roster._lastRosterRequest) > 30 then
+		Roster._lastRosterRequest = now
+		if C_GuildInfo and C_GuildInfo.GuildRoster then
+			C_GuildInfo.GuildRoster()
+		elseif GuildRoster then
+			GuildRoster()
+		end
 	end
 
-	-- Get total members count (with fallback)
+	-- Get total members count
 	local total = 0
 	if C_GuildInfo and C_GuildInfo.GetNumGuildMembers then
 		total = C_GuildInfo.GetNumGuildMembers()
@@ -165,17 +186,18 @@ local function GetAllGuildMembers(sortSpec)
 		return members
 	end
 
+	-- Collect members using pool
+	local pool = Roster._tablePool
+	local poolIdx = 1
+
 	for i = 1, total do
 		local name, rank, rankIndex, level, class, zone, note, officernote,
 		online, status, classFileName, achievementPoints,
 		achievementRank, isMobile, canSoR, repStanding,
 		GUID
 
-		-- Get roster info (with fallback)
 		if C_GuildInfo and C_GuildInfo.GetGuildRosterInfo then
 			GUID = C_GuildInfo.GetGuildRosterInfo(i)
-			-- In Retail, C_GuildInfo.GetGuildRosterInfo returns only GUID, need additional calls
-			-- For simplicity, fallback to legacy for now if available
 			if not GUID and GetGuildRosterInfo then
 				name, rank, rankIndex, level, class, zone, note, officernote,
 					online, status, classFileName, achievementPoints,
@@ -189,23 +211,39 @@ local function GetAllGuildMembers(sortSpec)
 				GUID = GetGuildRosterInfo(i)
 		end
 
-		local name_full, name_short, realm = NormalizeCharacterNameWithRealm(name)
-
 		if name then
-			members[#members + 1] = {
-				index = i,
-				name_full = name_full,
-				name = name_short,
-				realm = realm,
-				rank = rank,
-				rankIndex = rankIndex or 0,
-				level = level or 0,
-				class = class,
-				classFileName = classFileName,
-				zone = zone or "",
-				online = online and true or false,
-				guid = GUID,
-			}
+			local name_full, name_short, realm = NormalizeCharacterNameWithRealm(name)
+
+			-- Get or create table from pool
+			local m = pool[poolIdx]
+			if m then
+				wipe(m)
+			else
+				m = {}
+				pool[poolIdx] = m
+			end
+			poolIdx = poolIdx + 1
+
+			m.index = i
+			m.name_full = name_full
+			m.name = name_short
+			m.realm = realm
+			m.rank = rank
+			m.rankIndex = rankIndex or 0
+			m.level = level or 0
+			m.class = class
+			m.classFileName = classFileName
+			m.zone = zone or ""
+			m.online = online and true or false
+			m.guid = GUID
+			m.note = note or ""
+
+			-- Generate a Data Fingerprint for incremental updates
+			m.fingerprint = string.format("%s:%d:%s:%s:%s",
+				GUID or "no-guid", level or 0, rankIndex or 0,
+				m.online and "1" or "0", note or "")
+
+			members[#members + 1] = m
 		end
 	end
 
@@ -214,27 +252,18 @@ local function GetAllGuildMembers(sortSpec)
 			for _, spec in ipairs(sortSpec) do
 				local key = spec.key
 				local desc = spec.desc == true
-
-				local va = a[key]
-				local vb = b[key]
+				local va, vb = a[key], b[key]
 
 				if va ~= vb then
 					if type(va) == "boolean" then
-						va = va and 1 or 0
-						vb = vb and 1 or 0
+						va, vb = (va and 1 or 0), (vb and 1 or 0)
 					elseif type(va) == "string" then
-						va = va:lower()
-						vb = vb:lower()
+						va, vb = va:lower(), vb:lower()
 					end
 
-					if desc then
-						return va > vb
-					else
-						return va < vb
-					end
+					if desc then return va > vb else return va < vb end
 				end
 			end
-
 			return a.index < b.index
 		end)
 	end
@@ -717,13 +746,14 @@ end
 --	@param perFrame number
 --	@return nil
 -- ---------------------------------------------------------------------------
-local function BuildGuildRosterLabelsAsync(parent, perFrame)
+local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 	if not parent or type(parent.AddChild) ~= "function" then return end
 
 	EnsureDefaultRosterColumnsRegistered()
 	EnsureRosterSortState()
 
 	perFrame = tonumber(perFrame) or 10
+	delay = tonumber(delay) or 0.05
 
 	Roster._buildToken = (Roster._buildToken or 0) + 1
 	local myToken = Roster._buildToken
@@ -733,8 +763,11 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame)
 		parent:ReleaseChildren()
 	end
 
+	-- Clear GUID mapping on full rebuild
+	wipe(Roster._guidToRow)
+
 	local function Rebuild()
-		BuildGuildRosterLabelsAsync(parent, perFrame)
+		BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 		parent:DoLayout()
 	end
 
@@ -776,6 +809,12 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame)
 				row:SetLayout("Flow")
 				parent:AddChild(row)
 
+				-- Map GUID to row container and store fingerprint
+				if m.guid then
+					Roster._guidToRow[m.guid] = row
+					row._dataFingerprint = m.fingerprint
+				end
+
 				for _, colId in ipairs(Roster._columns.order) do
 					local def = Roster._columns.map[colId]
 					if def and type(def.buildCellFn) == "function" then
@@ -791,7 +830,7 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame)
 		parent:DoLayout()
 
 		if index <= total then
-			C_Timer.After(0, Step)
+			C_Timer.After(delay, Step)
 		end
 	end
 
@@ -809,7 +848,66 @@ end
 -- ---------------------------------------------------------------------------
 function Roster:API_RefreshRosterView(perFrame)
 	if not self._lastListParent then return end
-	BuildGuildRosterLabelsAsync(self._lastListParent, tonumber(perFrame) or 20)
+	local asyncBatch = (Roster._options and Roster._options.asyncBatchSize) or 10
+	local asyncWait  = (Roster._options and Roster._options.asyncDelay) or 0.05
+	BuildGuildRosterLabelsAsync(self._lastListParent, perFrame or asyncBatch, asyncWait)
+end
+
+-- ###########################################################################
+-- #	INCREMENTAL LIVE UPDATES
+-- ###########################################################################
+
+function Roster:OnGuildRosterUpdate(canScan)
+	-- Skip if UI is not on Roster page
+	if not GMS.UI or GMS.UI._page ~= "ROSTER" then return end
+	if not self._lastListParent then return end
+
+	-- THROTTLE: Max once every 5 seconds for UI updates
+	local now = GetTime()
+	if (now - Roster._lastUpdateEvent) < 5 then return end
+	Roster._lastUpdateEvent = now
+
+	-- Get current members (Skip new server request to avoid recursion loop)
+	local members = GetAllGuildMembers(BuildRosterSortSpec(), true)
+
+	-- If member count changed, full rebuild is safer
+	local currentCount = #members
+	local displayedCount = 0
+	for _ in pairs(self._guidToRow) do displayedCount = displayedCount + 1 end
+
+	if currentCount ~= displayedCount then
+		self:API_RefreshRosterView()
+		return
+	end
+
+	-- Incremental update for visible rows
+	local ctx = {
+		ui = GMS.UI,
+	}
+
+	local changed = false
+	for _, m in ipairs(members) do
+		local row = self._guidToRow[m.guid]
+
+		-- Only rebuild row if data fingerprint changed
+		if row and row.ReleaseChildren and row._dataFingerprint ~= m.fingerprint then
+			row:ReleaseChildren()
+			ApplyRosterMemberAugmenters(m, ctx)
+			for _, colId in ipairs(Roster._columns.order) do
+				local def = Roster._columns.map[colId]
+				if def and type(def.buildCellFn) == "function" then
+					pcall(def.buildCellFn, row, m, ctx)
+				end
+			end
+			row._dataFingerprint = m.fingerprint
+			row:DoLayout()
+			changed = true
+		end
+	end
+
+	if changed and self._lastListParent.DoLayout then
+		self._lastListParent:DoLayout()
+	end
 end
 
 -- ###########################################################################
@@ -848,7 +946,9 @@ local function BuildRosterPageUI(root, id, isCached)
 
 	Roster._lastListParent = content
 
-	BuildGuildRosterLabelsAsync(content, 20)
+	local asyncBatch = (Roster._options and Roster._options.asyncBatchSize) or 5
+	local asyncWait  = (Roster._options and Roster._options.asyncDelay) or 0.05
+	BuildGuildRosterLabelsAsync(content, asyncBatch, asyncWait)
 
 	C_Timer.After(0.2, function()
 		scroll:DoLayout()
@@ -938,6 +1038,8 @@ local OPTIONS_DEFAULTS = {
 	showOffline = true,
 	autoRefresh = true,
 	lastRefresh = 0,
+	asyncBatchSize = { name = "Einträge pro Schritt (Batch)", type = "range", min = 1, max = 50, step = 1, default = 5 },
+	asyncDelay = { name = "Verzögerung (Schrittpause, Sek)", type = "range", min = 0, max = 1, step = 0.01, default = 0.05 },
 }
 
 function Roster:InitializeOptions()
@@ -955,7 +1057,11 @@ function Roster:InitializeOptions()
 			self._options = opts
 			LOCAL_LOG("INFO", "Roster options initialized (GUILD scope)")
 		else
-			LOCAL_LOG("WARN", "Failed to retrieve Roster options")
+			-- If not in guild or gdb not ready, retry in 5s
+			if IsInGuild and IsInGuild() then
+				C_Timer.After(5, function() Roster:InitializeOptions() end)
+			end
+			LOCAL_LOG("WARN", "Failed to retrieve Roster options (deferred)")
 		end
 	end
 end
@@ -967,6 +1073,19 @@ end
 function Roster:OnEnable()
 	self:InitializeOptions()
 	self:TryIntegrateWithUIIfAvailable()
+
+	-- Register for live updates
+	self:RegisterEvent("GUILD_ROSTER_UPDATE", "OnGuildRosterUpdate")
+
+	-- Listen for config changes to sync _options and update view
+	self:RegisterMessage("GMS_CONFIG_CHANGED", function(_, targetKey, key, value)
+		if targetKey == "ROSTER" then
+			self:InitializeOptions() -- Refresh local ref
+			if self._lastListParent and self._lastListParent.frame:IsShown() then
+				self:API_RefreshRosterView()
+			end
+		end
+	end)
 
 	if self._integrateWaitFrame then
 		return

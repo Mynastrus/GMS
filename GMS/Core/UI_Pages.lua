@@ -10,6 +10,9 @@ if not LibStub then return end
 local AceAddon = LibStub("AceAddon-3.0", true)
 if not AceAddon then return end
 
+local AceGUI = LibStub("AceGUI-3.0", true)
+if not AceGUI then return end
+
 local GMS = AceAddon:GetAddon("GMS", true)
 if not GMS then return end
 
@@ -151,10 +154,12 @@ function UI:Navigate(id)
 		id = GetFirstPageId() or "DASHBOARD"
 	end
 
-	-- GUARD: If page is already active and UI is shown, do nothing to prevent double-build
-	if self._page == id and self._frame and self._frame:IsShown() then
+	-- THROTTLE: Prevent spamming navigation to the same page
+	local now = GetTime()
+	if self._page == id and self._lastNavTime and (now - self._lastNavTime) < 0.5 then
 		return
 	end
+	self._lastNavTime = now
 
 	self._page = id
 	self._navToken = (self._navToken or 0) + 1
@@ -206,6 +211,29 @@ function UI:Navigate(id)
 		pageContainer:SetFullHeight(true)
 		contentRoot:AddChild(pageContainer)
 		self._pageContainers[id] = pageContainer
+	end
+
+	-- ACEGUI FIX: Fill-Layout only layouts children[1].
+	-- Move the active container to the first position so it gets layouted.
+	if contentRoot.children and #contentRoot.children > 0 then
+		local foundIdx = -1
+		for i, child in ipairs(contentRoot.children) do
+			if child == pageContainer then
+				foundIdx = i
+			else
+				-- EXTRA SAFETY: Hide all other children frames
+				if child.frame then child.frame:Hide() end
+			end
+		end
+		if foundIdx > 1 then
+			table.remove(contentRoot.children, foundIdx)
+			table.insert(contentRoot.children, 1, pageContainer)
+		end
+	end
+
+	-- Force layout recalculation BEFORE build to ensure container is visible for progressive builds
+	if contentRoot and contentRoot.DoLayout then
+		contentRoot:DoLayout()
 	end
 
 	-- 4. Call build function

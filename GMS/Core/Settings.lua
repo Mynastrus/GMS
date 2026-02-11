@@ -171,9 +171,27 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 				end
 			end)
 			container:AddChild(cb)
+		elseif (type(defaultVal) == "table" and defaultVal.type == "range") or
+			(valType == "number" and type(defaultVal) == "table" and defaultVal.type == "range") then
+			local slider = AceGUI:Create("Slider")
+			slider:SetLabel(optDisplayName)
+			slider:SetValue(val)
+			if type(defaultVal) == "table" then
+				slider:SetSliderValues(defaultVal.min or 1, defaultVal.max or 100, defaultVal.step or 1)
+			else
+				slider:SetSliderValues(1, 100, 1)
+			end
+			slider:SetCallback("OnValueChanged", function(_, _, newValue)
+				options[key] = newValue
+				LOCAL_LOG("INFO", "Option changed", targetKey, key, newValue)
+				if type(GMS.SendMessage) == "function" then
+					GMS:SendMessage("GMS_CONFIG_CHANGED", targetKey, key, newValue)
+				end
+			end)
+			container:AddChild(slider)
 		elseif valType == "string" or valType == "number" then
 			local eb = AceGUI:Create("EditBox")
-			eb:SetLabel(key)
+			eb:SetLabel(optDisplayName)
 			eb:SetText(tostring(val))
 			eb:SetCallback("OnEnterPressed", function(_, _, newValue)
 				if valType == "number" then
@@ -183,6 +201,9 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 					options[key] = newValue
 				end
 				LOCAL_LOG("INFO", "Option changed", targetKey, key, newValue)
+				if type(GMS.SendMessage) == "function" then
+					GMS:SendMessage("GMS_CONFIG_CHANGED", targetKey, key, newValue)
+				end
 			end)
 			container:AddChild(eb)
 		end
