@@ -81,6 +81,11 @@ if not RAIDS then
 	RAIDS = GMS:NewModule(MODULE_NAME, "AceEvent-3.0")
 end
 
+-- Registration
+if GMS and type(GMS.RegisterModule) == "function" then
+	GMS:RegisterModule(RAIDS, METADATA)
+end
+
 local OPTIONS_DEFAULTS = {
 	scanLegacy = { type = "toggle", name = "Legacy Raids scannen", default = false },
 	rebuild = { type = "execute", name = "Katalog neu aufbauen", func = function()
@@ -533,9 +538,6 @@ end
 -- ###########################################################################
 
 function RAIDS:OnInitialize()
-	if GMS and type(GMS.RegisterModule) == "function" then
-		GMS:RegisterModule(self, METADATA)
-	end
 	LOCAL_LOG("INFO", "Initializing Raids module", METADATA.VERSION)
 	self._pendingScan = false
 	self._scanToken = 0

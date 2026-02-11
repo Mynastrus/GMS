@@ -63,6 +63,11 @@ if not Roster then
 	Roster = GMS:NewModule(MODULE_NAME, "AceEvent-3.0")
 end
 
+-- Registration
+if GMS and type(GMS.RegisterModule) == "function" then
+	GMS:RegisterModule(Roster, METADATA)
+end
+
 GMS[MODULE_NAME] = Roster
 
 Roster._pageRegistered = Roster._pageRegistered or false
@@ -926,13 +931,6 @@ function Roster:InitializeOptions()
 			LOCAL_LOG("WARN", "Failed to retrieve Roster options")
 		end
 	end
-end
-
-function Roster:OnInitialize()
-	if GMS and type(GMS.RegisterModule) == "function" then
-		GMS:RegisterModule(self, METADATA)
-	end
-	LOCAL_LOG("INFO", "Roster initializing")
 end
 
 -- ---------------------------------------------------------------------------

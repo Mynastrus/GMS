@@ -76,6 +76,11 @@ if not EQUIP then
 	EQUIP = GMS:NewModule(MODULE_NAME, "AceEvent-3.0")
 end
 
+-- Registration
+if GMS and type(GMS.RegisterModule) == "function" then
+	GMS:RegisterModule(EQUIP, METADATA)
+end
+
 -- ###########################################################################
 -- #	CONFIG
 -- ###########################################################################
@@ -300,9 +305,6 @@ end
 -- ###########################################################################
 
 function EQUIP:OnInitialize()
-	if GMS and type(GMS.RegisterModule) == "function" then
-		GMS:RegisterModule(self, METADATA)
-	end
 	LOCAL_LOG("INFO", "Module initialized")
 	self:InitializeOptions()
 end

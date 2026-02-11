@@ -69,6 +69,11 @@ if not CHARINFO then
 	CHARINFO = GMS:NewModule(MODULE_NAME, "AceEvent-3.0")
 end
 
+-- Registration
+if GMS and type(GMS.RegisterModule) == "function" then
+	GMS:RegisterModule(CHARINFO, METADATA)
+end
+
 GMS[MODULE_NAME] = CHARINFO
 
 CHARINFO._pageRegistered = CHARINFO._pageRegistered or false
@@ -467,13 +472,6 @@ function CHARINFO:InitializeOptions()
 	end
 end
 
-function CHARINFO:OnInitialize()
-	if GMS and type(GMS.RegisterModule) == "function" then
-		GMS:RegisterModule(self, METADATA)
-	end
-	LOCAL_LOG("INFO", "Module initializing")
-end
-
 function CHARINFO:OnEnable()
 	-- Initialize character-specific options
 	SafeCall(CHARINFO.InitializeOptions, CHARINFO)
@@ -488,7 +486,7 @@ function CHARINFO:OnEnable()
 		end)
 	end
 
-	if self:TryIntegrateWithUIIfAvailable() then return end
+	self:TryIntegrateWithUIIfAvailable()
 	self:StartIntegrationTicker()
 
 	if type(self.RegisterEvent) == "function" then

@@ -28,17 +28,21 @@ end
 local function LOCAL_LOG(level, msg, ...)
 	local entry = {
 		timestamp = now(),
-		level     = level,
+		level     = tostring(level or "INFO"),
 		type      = METADATA.TYPE,
 		source    = METADATA.SHORT_NAME,
-		message   = string.format(msg, ...),
+		message   = tostring(msg or ""),
 	}
 
-	-- Add to buffer
-	local idx = #GMS._LOG_BUFFER + 1
-	GMS._LOG_BUFFER[idx] = entry
+	local n = select("#", ...)
+	if n > 0 then
+		entry.data = { ... }
+	end
 
-	-- Notify if handler exists
+	local buffer = GMS._LOG_BUFFER
+	local idx = #buffer + 1
+	buffer[idx] = entry
+
 	if GMS._LOG_NOTIFY then
 		GMS._LOG_NOTIFY(entry, idx)
 	end
@@ -53,6 +57,11 @@ local MODULE_NAME = "MythicPlus"
 local MYTHIC = GMS:GetModule(MODULE_NAME, true)
 if not MYTHIC then
 	MYTHIC = GMS:NewModule(MODULE_NAME, "AceEvent-3.0")
+end
+
+-- Registration
+if GMS and type(GMS.RegisterModule) == "function" then
+	GMS:RegisterModule(MYTHIC, METADATA)
 end
 
 -- ###########################################################################
@@ -142,12 +151,6 @@ end
 -- #	EVENTS
 -- ###########################################################################
 
--- Local logging function
-local function LOCAL_LOG(level, msg, ...)
-	if GMS and type(GMS.RegisterModule) == "function" then
-		GMS:RegisterModule(self, METADATA)
-	end
-end
 
 function MYTHIC:OnEnable()
 	LOCAL_LOG("INFO", "Module enabled")
