@@ -19,6 +19,12 @@ local C_MythicPlus    = C_MythicPlus
 local time            = time
 local IsLoggedIn      = IsLoggedIn
 local C_Timer         = C_Timer
+local select          = select
+local ipairs          = ipairs
+local tostring        = tostring
+local pcall           = pcall
+local type            = type
+local table           = table
 ---@diagnostic enable: undefined-global
 
 local METADATA = {
@@ -86,23 +92,28 @@ local function _getCharKey()
 	return nil
 end
 
-local function _ensureSvTables()
-	if type(GMS_DB) ~= "table" then return nil end
-
-	local key = _getCharKey()
-	if not key then return nil end
-
-	GMS_DB.global = GMS_DB.global or {}
-	GMS_DB.global.characters = GMS_DB.global.characters or {}
-
-	local c = GMS_DB.global.characters[key]
-	if not c then
-		c = { __version = 1 }
-		GMS_DB.global.characters[key] = c
+function MYTHIC:InitializeOptions()
+	-- Register character-scoped options
+	if GMS and type(GMS.RegisterModuleOptions) == "function" then
+		pcall(function()
+			GMS:RegisterModuleOptions(MODULE_NAME, {
+				score = 0,
+				dungeons = {},
+				lastScan = 0,
+			}, "CHAR")
+		end)
 	end
 
-	c.MYTHIC = c.MYTHIC or {}
-	return c.MYTHIC, key
+	-- Retrieve options table
+	if GMS and type(GMS.GetModuleOptions) == "function" then
+		local ok, opts = pcall(GMS.GetModuleOptions, GMS, MODULE_NAME)
+		if ok and opts then
+			self._options = opts
+			LOCAL_LOG("INFO", "MythicPlus options initialized")
+		else
+			LOCAL_LOG("WARN", "Failed to retrieve MythicPlus options")
+		end
+	end
 end
 
 -- ###########################################################################
@@ -110,11 +121,15 @@ end
 -- ###########################################################################
 
 function MYTHIC:ScanMythicPlusData()
-	local store, charKey = _ensureSvTables()
-	if not store then
-		LOCAL_LOG("WARN", "Could not access SV store for Mythic+ scan")
-		return
+	if not self._options then
+		self:InitializeOptions()
+		if not self._options then
+			LOCAL_LOG("WARN", "ScanMythicPlusData failed: options not initialized")
+			return
+		end
 	end
+
+	local store = self._options
 
 	-- Current Season Score
 	local currentScore = C_ChallengeMode.GetOverallDungeonScore()
@@ -166,6 +181,7 @@ end
 
 function MYTHIC:OnEnable()
 	LOCAL_LOG("INFO", "Module enabled")
+	self:InitializeOptions()
 
 	self:RegisterEvent("PLAYER_LOGIN", "OnPlayerLogin")
 	self:RegisterEvent("CHALLENGE_MODE_COMPLETED", "OnChallengeModeCompleted")

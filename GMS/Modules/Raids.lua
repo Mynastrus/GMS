@@ -57,6 +57,8 @@ local EJ_GetEncounterInfoByIndex    = EJ_GetEncounterInfoByIndex
 local EJ_GetTierInfo                = EJ_GetTierInfo
 local EJ_GetCurrentTier             = EJ_GetCurrentTier
 local ReloadUI                      = ReloadUI
+local table                         = table
+local string                        = string
 ---@diagnostic enable: undefined-global
 
 -- ###########################################################################
@@ -64,7 +66,7 @@ local ReloadUI                      = ReloadUI
 -- ###########################################################################
 
 local METADATA = {
-	TYPE         = "MODULE",
+	TYPE         = "MOD",
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",

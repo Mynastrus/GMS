@@ -36,6 +36,8 @@ local UnitName      = UnitName
 local UnitFullName  = UnitFullName
 local GetServerTime = GetServerTime
 local time          = time
+local table         = table
+local string        = string
 ---@diagnostic enable: undefined-global
 
 -- ###########################################################################
