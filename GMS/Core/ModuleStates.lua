@@ -151,11 +151,11 @@ function GMS:RegisterExtension(meta)
 	local entry = ensureExt(key)
 
 	entry.key = key
-	entry.name = meta.name or key
-	entry.displayName = meta.displayName or entry.name
-	entry.version = meta.version or entry.version or "1.0.0"
-	entry.desc = meta.desc
-	entry.author = meta.author
+	entry.name = (meta and (meta.NAME or meta.name)) or key
+	entry.displayName = (meta and (meta.DISPLAY_NAME or meta.displayName)) or entry.name
+	entry.version = (meta and (meta.VERSION or meta.version)) or entry.version or "1.0.0"
+	entry.desc = meta.DESC or meta.desc
+	entry.author = meta.AUTHOR or meta.author
 	entry.readyKey = meta.readyKey or ("EXT:" .. key)
 	entry.state = entry.state or { READY = false }
 
@@ -171,12 +171,12 @@ function GMS:RegisterModule(mod, meta)
 	local entry = ensureMod(key)
 
 	entry.key = key
-	entry.name = (meta and meta.name) or key
-	entry.displayName = (meta and meta.displayName) or entry.name
-	entry.version = (meta and meta.version) or entry.version or "1.0.0"
-	entry.desc = meta and meta.desc
-	entry.author = meta and meta.author
-	entry.readyKey = (meta and meta.readyKey) or ("MOD:" .. key)
+	entry.name = (meta and (meta.NAME or meta.name)) or key
+	entry.displayName = (meta and (meta.DISPLAY_NAME or meta.displayName)) or entry.name
+	entry.version = (meta and (meta.VERSION or meta.version)) or entry.version or "1.0.0"
+	entry.desc = meta and (meta.DESC or meta.desc)
+	entry.author = meta and (meta.AUTHOR or meta.author)
+	entry.readyKey = (meta and (meta.READY_KEY or meta.readyKey)) or ("MOD:" .. key)
 	entry.state = entry.state or { READY = false, ENABLED = false }
 
 	LOCAL_LOG("DEBUG", "Registered module", key)
