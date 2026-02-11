@@ -167,6 +167,13 @@ end
 function GMS:OnInitialize()
 	self:InitializeDatabaseIfAvailable(false)
 	LOCAL_LOG("INFO", "OnInitialize")
+
+	-- Register Core options
+	if type(self.RegisterModuleOptions) == "function" then
+		self:RegisterModuleOptions("CORE", {
+			debug = { type = "toggle", name = "Debug-Modus", default = false },
+		}, "PROFILE")
+	end
 end
 
 function GMS:OnEnable()

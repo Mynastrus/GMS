@@ -362,8 +362,8 @@ function UI:SeedRightDockPlaceholders()
 		tooltipTitle = optsName,
 		tooltipText = "Einstellungen",
 		onClick = function()
-			if type(UI.Navigate) == "function" then
-				UI:Navigate("SETTINGS")
+			if type(UI.Open) == "function" then
+				UI:Open("SETTINGS")
 			end
 		end,
 	})

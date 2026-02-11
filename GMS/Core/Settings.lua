@@ -112,6 +112,9 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 		end
 	elseif targetType == "MOD" then
 		if reg then displayName = reg.name or targetKey end
+	elseif targetType == "GEN" then
+		displayName = "Allgemeine Einstellungen"
+		targetKey = "CORE" -- Map General to CORE
 	end
 
 	CreateHeading(container, displayName)
@@ -191,6 +194,13 @@ end
 local function GetTreeData()
 	local tree = {
 		{
+			value = "GEN_ROOT",
+			text = "Allgemein",
+			children = {
+				{ value = "GEN:CORE", text = "Zentrale Einstellungen" }
+			},
+		},
+		{
 			value = "EXT_ROOT",
 			text = "Erweiterungen (Extensions)",
 			children = {},
@@ -269,7 +279,7 @@ local function BuildSettingsPage(root)
 	root:AddChild(treeGroup)
 
 	-- Select first logical group if available
-	treeGroup:SelectByPath("MOD_ROOT")
+	treeGroup:SelectByPath("GEN_ROOT", "GEN:CORE")
 end
 
 -- ###########################################################################
