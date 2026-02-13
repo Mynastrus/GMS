@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "PERMISSIONS",
 	SHORT_NAME   = "Permissions",
 	DISPLAY_NAME = "Berechtigungen",
-	VERSION      = "1.1.1",
+	VERSION      = "1.1.2",
 }
 
 -- Blizzard Globals
@@ -29,6 +29,10 @@ local GetGuildRankName        = GetGuildRankName
 local GuildRoster             = GuildRoster
 local GuildControlGetNumRanks = GuildControlGetNumRanks
 local GuildControlGetRankName = GuildControlGetRankName
+local GetNumGuildMembers      = GetNumGuildMembers
+local GetGuildRosterInfo      = GetGuildRosterInfo
+local RAID_CLASS_COLORS       = RAID_CLASS_COLORS
+local HIGHLIGHT_FONT_COLOR    = HIGHLIGHT_FONT_COLOR
 ---@diagnostic enable: undefined-global
 
 local AceGUI = LibStub("AceGUI-3.0", true)
@@ -337,11 +341,84 @@ function Permissions:BuildUI(container)
 			row:AddChild(btnDel)
 		end
 
-		-- Members Tooltip / Info (Placeholder for now)
-		local lbl = AceGUI:Create("Label")
-		lbl:SetText("Mitglieder: (Listenansicht folgt)")
-		lbl:SetFullWidth(true)
-		card:AddChild(lbl)
+		-- Members List
+		local membersHeader = AceGUI:Create("Label")
+		membersHeader:SetText("|cffffff00Mitglieder:|r")
+		membersHeader:SetFullWidth(true)
+		card:AddChild(membersHeader)
+
+		-- Search/Add Member Row
+		local addRow = AceGUI:Create("SimpleGroup")
+		addRow:SetFullWidth(true)
+		addRow:SetLayout("Flow")
+		card:AddChild(addRow)
+
+		local addEdit = AceGUI:Create("EditBox")
+		addEdit:SetLabel("Spieler hinzufügen (Name oder GUID)")
+		addEdit:SetWidth(250)
+		addEdit:SetCallback("OnEnterPressed", function(_, _, val)
+			-- For now we assume the user enters a GUID or we try to find by name in roster
+			local targetGUID = val
+			if not val:find("^Player%-") then
+				-- Try name lookup
+				if GMS.Roster and GMS.Roster.GetMemberByName then
+					local m = GMS.Roster:GetMemberByName(val)
+					targetGUID = m and m.guid or val
+				end
+			end
+			self:AddMemberToGroup(targetGUID, groupID)
+			self:BuildUI(container)
+		end)
+		addRow:AddChild(addEdit)
+
+		-- Iterate Roster to find members
+		local memberCount = 0
+		if IsInGuild() then
+			local num = GetNumGuildMembers()
+			for i = 1, num do
+				local name, rankName, rankIndex, level, class, zone, note, officernote, online, status, classFileName, achievementPoints, isMobile, canSoR, reputation, guid = GetGuildRosterInfo(i)
+				if guid then
+					local pGroups = self:GetPlayerGroups(guid)
+					if pGroups[groupID] then
+						memberCount = memberCount + 1
+
+						local memRow = AceGUI:Create("SimpleGroup")
+						memRow:SetFullWidth(true)
+						memRow:SetLayout("Flow")
+						card:AddChild(memRow)
+
+						local memLabel = AceGUI:Create("Label")
+						local classColor = RAID_CLASS_COLORS[classFileName] or HIGHLIGHT_FONT_COLOR
+						local nameText = string.format("|c%s%s|r (|cffaaaaaa%s|r)", classColor.colorStr, name:gsub("%-.*", ""), rankName)
+						memLabel:SetText(nameText)
+						memLabel:SetWidth(250)
+						memRow:AddChild(memLabel)
+
+						-- Delete button only for manual assignments (not for GM/Rank based)
+						local isManual = self.db.userAssignments[guid] and self.db.userAssignments[guid][groupID]
+						local isGM = (groupID == "ADMIN" and guid == UnitGUID("player") and IsGuildLeader())
+
+						if isManual and not isGM then
+							local delBtn = AceGUI:Create("Button")
+							delBtn:SetText("X")
+							delBtn:SetWidth(40)
+							delBtn:SetCallback("OnClick", function()
+								self:RemoveMemberFromGroup(guid, groupID)
+								self:BuildUI(container)
+							end)
+							memRow:AddChild(delBtn)
+						end
+					end
+				end
+			end
+		end
+
+		if memberCount == 0 then
+			local emptyLocal = AceGUI:Create("Label")
+			emptyLocal:SetText("|cff888888Keine Mitglieder in dieser Gruppe.|r")
+			emptyLocal:SetFullWidth(true)
+			card:AddChild(emptyLocal)
+		end
 	end
 
 	-- Add Group Button
@@ -355,6 +432,50 @@ function Permissions:BuildUI(container)
 		self:BuildUI(container)
 	end)
 	scroll:AddChild(btnAdd)
+
+	-- 2. Gildenrang-Zuweisung (neues Layout)
+	local rankHeader = AceGUI:Create("Heading")
+	rankHeader:SetText("Automatische Zuweisung nach Gildenrang")
+	rankHeader:SetFullWidth(true)
+	scroll:AddChild(rankHeader)
+
+	local numRanks = 0
+	if C_GuildInfo and C_GuildInfo.GetNumRanks then
+		numRanks = C_GuildInfo.GetNumRanks()
+	elseif GuildControlGetNumRanks then
+		numRanks = GuildControlGetNumRanks()
+	end
+
+	for i = 1, numRanks do
+		local rankName
+		if C_GuildInfo and C_GuildInfo.GetRankName then
+			rankName = C_GuildInfo.GetRankName(i)
+		elseif GuildControlGetRankName then
+			rankName = GuildControlGetRankName(i)
+		end
+		rankName = rankName or ("Rang " .. i)
+
+		local rankGroup = AceGUI:Create("InlineGroup")
+		rankGroup:SetTitle(rankName)
+		rankGroup:SetFullWidth(true)
+		rankGroup:SetLayout("Flow")
+		scroll:AddChild(rankGroup)
+
+		-- Checkbox for each group
+		for _, groupID in ipairs(self.db.groupsOrder) do
+			local cb = AceGUI:Create("CheckBox")
+			cb:SetLabel(self.db.groupNames[groupID] or groupID)
+			cb:SetWidth(150)
+			cb:SetValue(self.db.rankAssignments[i] and self.db.rankAssignments[i][groupID])
+			cb:SetCallback("OnValueChanged", function(_, _, val)
+				self.db.rankAssignments[i] = self.db.rankAssignments[i] or {}
+				self.db.rankAssignments[i][groupID] = val or nil
+				self.db.configVersion = (self.db.configVersion or 0) + 1
+				self:BuildUI(container)
+			end)
+			rankGroup:AddChild(cb)
+		end
+	end
 
 	scroll:DoLayout()
 	container:DoLayout()
