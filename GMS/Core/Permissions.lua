@@ -419,7 +419,7 @@ function Permissions:RenderMembersTab(container, groupID)
 	suggestGroup:SetTitle("Vorschläge")
 	suggestGroup:SetFullWidth(true)
 	suggestGroup:SetLayout("Flow")
-	suggestGroup:Hide() -- Start hidden
+	suggestGroup.frame:Hide() -- Start hidden (Accessing the underlying frame)
 	container:AddChild(suggestGroup)
 
 	-- Add Suggestion Logic
@@ -436,7 +436,7 @@ function Permissions:RenderMembersTab(container, groupID)
 	local function UpdateSuggestions(val)
 		suggestGroup:ReleaseChildren()
 		if not val or #val < 2 then
-			suggestGroup:Hide()
+			suggestGroup.frame:Hide()
 			container:DoLayout()
 			return
 		end
@@ -462,9 +462,9 @@ function Permissions:RenderMembersTab(container, groupID)
 		end
 
 		if matches > 0 then
-			suggestGroup:Show()
+			suggestGroup.frame:Show()
 		else
-			suggestGroup:Hide()
+			suggestGroup.frame:Hide()
 		end
 		container:DoLayout()
 	end
@@ -611,7 +611,7 @@ function Permissions:RenderPermissionsTab(container, groupID)
 		local cb = AceGUI:Create("CheckBox")
 		cb:SetLabel(cap.name)
 		cb:SetDescription("|cff888888ID: " .. cap.id .. "|r")
-		cb:SetFullWidth(true)
+		cb:SetWidth(200)
 
 		-- Root Admin always has all permissions and cannot change them
 		if isRootAdmin then
