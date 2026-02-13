@@ -1,7 +1,7 @@
 ## Interface: 120001
 ## Title: Guild Management System (GMS)
 ## Author: Ritschy-Norgannon (EU)
-## Version: 1.1.2
+## Version: 1.1.4
 ## DefaultState: enabled
 ## Category: Guild Management System
 ## IconTexture: Interface\AddOns\GMS\Media\GMS_Logo_Text_Rectangle
