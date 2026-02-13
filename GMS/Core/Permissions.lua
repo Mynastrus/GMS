@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "PERMISSIONS",
 	SHORT_NAME   = "Permissions",
 	DISPLAY_NAME = "Berechtigungen",
-	VERSION      = "1.1.5",
+	VERSION      = "1.1.7",
 }
 
 -- Blizzard Globals
@@ -133,10 +133,10 @@ function Permissions:Initialize()
 		self.db.groupsOrder = { "ADMIN", "OFFICER", "EVERYONE" }
 	end
 
-	-- Migration: JEDER/USER -> EVERYONE
+	-- Migration: Everyone/JEDER/USER -> EVERYONE
 	if not self.db.groupNames.EVERYONE then
 		self.db.groupNames.EVERYONE = self.db.groupNames.Everyone or self.db.groupNames.JEDER or self.db.groupNames.USER or
-			"Everyone"
+			"EVERYONE"
 		self.db.groupNames.Everyone = nil
 		self.db.groupNames.JEDER = nil
 		self.db.groupNames.USER = nil
@@ -370,7 +370,7 @@ function Permissions:RenderMembersTab(container, groupID)
 	if IsInGuild() then
 		for i = 1, GetNumGuildMembers() do
 			local name = GetGuildRosterInfo(i)
-			if name then table.insert(suggestionList, name:gsub("%-.*", "")) end
+			if name then table.insert(suggestionList, (name:gsub("%-.*", ""))) end
 		end
 	end
 
