@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "PERMISSIONS",
 	SHORT_NAME   = "Permissions",
 	DISPLAY_NAME = "Berechtigungen",
-	VERSION      = "1.2.1",
+	VERSION      = "1.3.0",
 }
 
 -- Blizzard Globals
@@ -93,6 +93,15 @@ Permissions.GROUPS = {
 	EVERYONE = "EVERYONE",
 }
 
+Permissions.CAPABILITIES = {
+	{ id = "MODIFY_PERMISSIONS", name = "Berechtigungen verwalten" },
+	{ id = "SEND_DATA", name = "Daten senden" },
+	{ id = "RECEIVE_DATA", name = "Daten empfangen" },
+	{ id = "EDIT_ROSTER", name = "Roster bearbeiten" },
+	{ id = "MANAGE_RAIDS", name = "Raids verwalten" },
+	{ id = "VIEW_LOGS", name = "Logs einsehen" },
+}
+
 local DEFAULTS = {
 	profile = {
 		groupNames = {
@@ -107,6 +116,8 @@ local DEFAULTS = {
 		userAssignments = {},
 		-- Rank-based assignments: [rankIndex] = { [groupID] = true }
 		rankAssignments = {},
+		-- Group permissions: [groupID] = { [capability] = true }
+		groupPermissions = {},
 		-- Version of the permission config (for sync)
 		configVersion = 0,
 		configTimestamp = 0,
@@ -164,6 +175,24 @@ function Permissions:Initialize()
 			self.db.userAssignments[guid] = { [old] = true }
 		end
 	end
+
+	-- Migration: 1-based ranks to 0-based
+	if not self.db._rankMigrationDone then
+		local newRanks = {}
+		for rank, val in pairs(self.db.rankAssignments) do
+			local rIdx = tonumber(rank)
+			if rIdx and rIdx > 0 then
+				-- We assume old was 1-based (Blizzard UI style)
+				newRanks[rIdx - 1] = val
+			else
+				newRanks[rank] = val
+			end
+		end
+		self.db.rankAssignments = newRanks
+		self.db._rankMigrationDone = true
+		LOCAL_LOG("INFO", "Migrated rank assignments to 0-based indexing")
+	end
+
 	for rank, val in pairs(self.db.rankAssignments) do
 		if type(val) == "string" then
 			local old = val
@@ -185,9 +214,13 @@ function Permissions:Initialize()
 			-- Always check GM status on guild events
 			self:AutoAssignGM()
 
-			-- If UI is open on our page, refresh it
+			-- Refresh UI with throttling
 			if GMS.UI and GMS.UI._page == "PERMISSIONS" and self._container then
-				self:BuildUI(self._container)
+				if self._refreshTimer then self._refreshTimer:Cancel() end
+				self._refreshTimer = C_Timer.NewTimer(2, function()
+					self:BuildUI(self._container)
+					self._refreshTimer = nil
+				end)
 			end
 		end)
 	end
@@ -293,7 +326,12 @@ function Permissions:BuildUI(container)
 
 	-- State for selection
 	self._selectedGroup = self._selectedGroup or self.db.groupsOrder[1]
-	if not self.db.groupNames[self._selectedGroup] then
+	-- Validate selection (in case a group was deleted)
+	local validSelection = false
+	for _, id in ipairs(self.db.groupsOrder) do
+		if id == self._selectedGroup then validSelection = true; break end
+	end
+	if not validSelection then
 		self._selectedGroup = self.db.groupsOrder[1]
 	end
 
@@ -321,6 +359,7 @@ function Permissions:RenderGroupContent(parent, groupID)
 	tabGroup:SetTabs({
 		{ value = "MEMBERS", text = "Mitglieder" },
 		{ value = "RANKS", text = "Ränge & Rollen" },
+		{ value = "PERMISSIONS", text = "Berechtigungen" },
 		{ value = "SETTINGS", text = "Einstellungen" },
 	})
 
@@ -349,6 +388,8 @@ function Permissions:RenderTabContent(parent, groupID, tab)
 		self:RenderMembersTab(scroll, groupID)
 	elseif tab == "RANKS" then
 		self:RenderRanksTab(scroll, groupID)
+	elseif tab == "PERMISSIONS" then
+		self:RenderPermissionsTab(scroll, groupID)
 	elseif tab == "SETTINGS" then
 		self:RenderSettingsTab(scroll, groupID)
 	end
@@ -518,7 +559,8 @@ function Permissions:RenderRanksTab(container, groupID)
 		numRanks = GuildControlGetNumRanks()
 	end
 
-	for i = 1, numRanks do
+	-- Blizzard Ranks are 0-based internally (0 = GM, 1 = Officer, etc.)
+	for i = 0, numRanks - 1 do
 		local rankName
 		if C_GuildInfo and C_GuildInfo.GetRankName then
 			rankName = C_GuildInfo.GetRankName(i)
@@ -535,9 +577,41 @@ function Permissions:RenderRanksTab(container, groupID)
 			self.db.rankAssignments[i] = self.db.rankAssignments[i] or {}
 			self.db.rankAssignments[i][groupID] = val or nil
 			self.db.configVersion = (self.db.configVersion or 0) + 1
-			-- We don't need a full rebuild here usually, but for consistency:
+			-- Selective Refresh instead of BuildUI to keep focus if possible,
+			-- but for now BuildUI is safer for rank sync display
 			self:BuildUI(self._container)
 		end)
+		container:AddChild(cb)
+	end
+end
+
+function Permissions:RenderPermissionsTab(container, groupID)
+	local header = AceGUI:Create("Heading")
+	header:SetText("Gruppenberechtigungen")
+	header:SetFullWidth(true)
+	container:AddChild(header)
+
+	local isRootAdmin = (groupID == "ADMIN")
+
+	for _, cap in ipairs(self.CAPABILITIES) do
+		local cb = AceGUI:Create("CheckBox")
+		cb:SetLabel(cap.name)
+		cb:SetDescription("|cff888888ID: " .. cap.id .. "|r")
+		cb:SetFullWidth(true)
+
+		-- Root Admin always has all permissions and cannot change them
+		if isRootAdmin then
+			cb:SetValue(true)
+			cb:SetDisabled(true)
+		else
+			cb:SetValue(self.db.groupPermissions[groupID] and self.db.groupPermissions[groupID][cap.id])
+			cb:SetCallback("OnValueChanged", function(_, _, val)
+				self.db.groupPermissions[groupID] = self.db.groupPermissions[groupID] or {}
+				self.db.groupPermissions[groupID][cap.id] = val or nil
+				self.db.configVersion = (self.db.configVersion or 0) + 1
+				-- No full rebuild needed for checkboxes usually
+			end)
+		end
 		container:AddChild(cb)
 	end
 end
@@ -555,7 +629,7 @@ function Permissions:RenderSettingsTab(container, groupID)
 	edit:SetLabel("Gruppenname")
 	edit:SetText(self.db.groupNames[groupID] or groupID)
 	edit:SetFullWidth(true)
-	if isFixed then edit:SetDisabled(true) end
+	-- Renaming allowed for all now
 	edit:SetCallback("OnEnterPressed", function(_, _, val)
 		self.db.groupNames[groupID] = val
 		self:BuildUI(self._container)
@@ -721,17 +795,22 @@ end
 function Permissions:HasCapability(guid, capability)
 	local pGroups = self:GetPlayerGroups(guid)
 
+	-- 1. Admins have everything
 	if pGroups.ADMIN then return true end
 
-	-- Simple logic for now
-	if pGroups.OFFICER then
-		if capability == "MODIFY_PERMISSIONS" then return false end
-		return true
+	-- 2. Check each group for the capability
+	for groupID, active in pairs(pGroups) do
+		if active and self.db.groupPermissions[groupID] and self.db.groupPermissions[groupID][capability] then
+			return true
+		end
 	end
 
-	-- Default / JEDER
-	if capability == "SEND_DATA" or capability == "MODIFY_PERMISSIONS" then return false end
-	return true
+	-- 3. Hardcoded Fallbacks for basic functionality
+	if capability == "SEND_DATA" or capability == "RECEIVE_DATA" then
+		return true -- Basic communication is usually allowed for everyone
+	end
+
+	return false
 end
 
 -- ###########################################################################
