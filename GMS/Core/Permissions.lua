@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "PERMISSIONS",
 	SHORT_NAME   = "Permissions",
 	DISPLAY_NAME = "Berechtigungen",
-	VERSION      = "1.1.0",
+	VERSION      = "1.1.1",
 }
 
 -- Blizzard Globals
@@ -121,26 +121,40 @@ function Permissions:Initialize()
 	self.db = GMS:GetModuleOptions(METADATA.INTERN_NAME)
 
 	-- Migration / Initialization
+	self.db.groupNames = self.db.groupNames or {}
+	self.db.userAssignments = self.db.userAssignments or {}
+	self.db.rankAssignments = self.db.rankAssignments or {}
+
 	if not self.db.groupsOrder then
-		self.db.groupsOrder = { "ADMIN", "OFFICER", "JEDER" }
+		self.db.groupsOrder = { "ADMIN", "OFFICER", "EVERYONE" }
 	end
-	if not self.db.groupNames.JEDER then
-		self.db.groupNames.JEDER = self.db.groupNames.USER or "Jeder"
+
+	-- Migration: JEDER/USER -> EVERYONE
+	if not self.db.groupNames.EVERYONE then
+		self.db.groupNames.EVERYONE = self.db.groupNames.JEDER or self.db.groupNames.USER or "Everyone"
+		self.db.groupNames.JEDER = nil
 		self.db.groupNames.USER = nil
+	end
+
+	-- Ensure groupOrder points to EVERYONE not JEDER
+	for i, id in ipairs(self.db.groupsOrder) do
+		if id == "JEDER" or id == "USER" then
+			self.db.groupsOrder[i] = "EVERYONE"
+		end
 	end
 
 	-- Ensure assignments are tables (Multi-Group Support)
 	for guid, val in pairs(self.db.userAssignments) do
 		if type(val) == "string" then
 			local old = val
-			if old == "USER" then old = "JEDER" end
+			if old == "USER" or old == "JEDER" then old = "EVERYONE" end
 			self.db.userAssignments[guid] = { [old] = true }
 		end
 	end
 	for rank, val in pairs(self.db.rankAssignments) do
 		if type(val) == "string" then
 			local old = val
-			if old == "USER" then old = "JEDER" end
+			if old == "USER" or old == "JEDER" then old = "EVERYONE" end
 			self.db.rankAssignments[rank] = { [old] = true }
 		end
 	end
@@ -472,15 +486,6 @@ end
 
 function Permissions:BroadcastConfig()
 	-- Stub
-end
-
--- ###########################################################################
--- #	SYNC (Stub - Integrated with Comm later)
--- ###########################################################################
-
-function Permissions:BroadcastConfig()
-	-- Will be implemented once Comm.lua is ready
-	LOCAL_LOG("DEBUG", "BroadcastConfig requested (waiting for Comm)")
 end
 
 -- ###########################################################################
