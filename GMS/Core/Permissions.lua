@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "PERMISSIONS",
 	SHORT_NAME   = "Permissions",
 	DISPLAY_NAME = "Berechtigungen",
-	VERSION      = "1.3.5",
+	VERSION      = "1.3.6",
 }
 
 -- Blizzard Globals
@@ -108,25 +108,23 @@ Permissions.CAPABILITIES = {
 }
 
 local DEFAULTS = {
-	profile = {
-		groupNames = {
-			ADMIN    = "Administrator",
-			EVERYONE = "Everyone",
-		},
-		-- Ordered list of group IDs
-		groupsOrder = { "ADMIN", "OFFICER", "EVERYONE" },
-		-- Custom groups: [id] = { name = string, isFixed = bool }
-		customGroups = {},
-		-- GUID-based assignments: [GUID] = { [groupID] = true }
-		userAssignments = {},
-		-- Rank-based assignments: [rankIndex] = { [groupID] = true }
-		rankAssignments = {},
-		-- Group permissions: [groupID] = { [capability] = true }
-		groupPermissions = {},
-		-- Version of the permission config (for sync)
-		configVersion = 0,
-		configTimestamp = 0,
+	groupNames = {
+		ADMIN    = "Administrator",
+		EVERYONE = "Everyone",
 	},
+	-- Ordered list of group IDs
+	groupsOrder = { "ADMIN", "OFFICER", "EVERYONE" },
+	-- Custom groups: [id] = { name = string, isFixed = bool }
+	customGroups = {},
+	-- GUID-based assignments: [GUID] = { [groupID] = true }
+	userAssignments = {},
+	-- Rank-based assignments: [rankIndex] = { [groupID] = true }
+	rankAssignments = {},
+	-- Group permissions: [groupID] = { [capability] = true }
+	groupPermissions = {},
+	-- Version of the permission config (for sync)
+	configVersion = 0,
+	configTimestamp = 0,
 }
 
 -- ###########################################################################
@@ -139,6 +137,17 @@ function Permissions:Initialize()
 	end
 
 	self.db = GMS:GetModuleOptions(METADATA.INTERN_NAME)
+
+	-- Migration: Fix double-wrapped profile from v1.3.0-1.3.5
+	if self.db.profile and type(self.db.profile) == "table" then
+		for k, v in pairs(self.db.profile) do
+			if self.db[k] == nil then
+				self.db[k] = v
+			end
+		end
+		self.db.profile = nil
+		LOCAL_LOG("INFO", "Migrated double-wrapped profile data to root")
+	end
 
 	-- Migration / Initialization
 	self.db.groupNames = self.db.groupNames or {}
