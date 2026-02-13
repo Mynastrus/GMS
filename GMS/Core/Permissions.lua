@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "PERMISSIONS",
 	SHORT_NAME   = "Permissions",
 	DISPLAY_NAME = "Berechtigungen",
-	VERSION      = "1.1.4",
+	VERSION      = "1.1.5",
 }
 
 -- Blizzard Globals
@@ -135,14 +135,16 @@ function Permissions:Initialize()
 
 	-- Migration: JEDER/USER -> EVERYONE
 	if not self.db.groupNames.EVERYONE then
-		self.db.groupNames.EVERYONE = self.db.groupNames.JEDER or self.db.groupNames.USER or "Everyone"
+		self.db.groupNames.EVERYONE = self.db.groupNames.Everyone or self.db.groupNames.JEDER or self.db.groupNames.USER or
+			"Everyone"
+		self.db.groupNames.Everyone = nil
 		self.db.groupNames.JEDER = nil
 		self.db.groupNames.USER = nil
 	end
 
-	-- Ensure groupOrder points to EVERYONE not JEDER
+	-- Ensure groupOrder points to EVERYONE
 	for i, id in ipairs(self.db.groupsOrder) do
-		if id == "JEDER" or id == "USER" then
+		if id == "Everyone" or id == "JEDER" or id == "USER" then
 			self.db.groupsOrder[i] = "EVERYONE"
 		end
 	end
@@ -151,14 +153,14 @@ function Permissions:Initialize()
 	for guid, val in pairs(self.db.userAssignments) do
 		if type(val) == "string" then
 			local old = val
-			if old == "USER" or old == "JEDER" then old = "EVERYONE" end
+			if old == "USER" or old == "JEDER" or old == "Everyone" then old = "EVERYONE" end
 			self.db.userAssignments[guid] = { [old] = true }
 		end
 	end
 	for rank, val in pairs(self.db.rankAssignments) do
 		if type(val) == "string" then
 			local old = val
-			if old == "USER" or old == "JEDER" then old = "EVERYONE" end
+			if old == "USER" or old == "JEDER" or old == "Everyone" then old = "EVERYONE" end
 			self.db.rankAssignments[rank] = { [old] = true }
 		end
 	end
@@ -362,6 +364,33 @@ function Permissions:RenderMembersTab(container, groupID)
 	local addEdit = AceGUI:Create("EditBox")
 	addEdit:SetLabel("Spieler hinzufügen (Name oder GUID)")
 	addEdit:SetWidth(400)
+
+	-- Add Suggestion Logic
+	local suggestionList = {}
+	if IsInGuild() then
+		for i = 1, GetNumGuildMembers() do
+			local name = GetGuildRosterInfo(i)
+			if name then table.insert(suggestionList, name:gsub("%-.*", "")) end
+		end
+	end
+
+	addEdit:SetCallback("OnTextChanged", function(_, _, val)
+		if #val < 2 then return end
+		local matches = {}
+		for _, name in ipairs(suggestionList) do
+			if name:lower():find(val:lower(), 1, true) then
+				table.insert(matches, name)
+				if #matches >= 5 then break end
+			end
+		end
+		if #matches > 0 then
+			-- We use a simple label to show suggestions for now (AceGUI EditBox has no built-in list)
+			header:SetText("Vorschläge: " .. table.concat(matches, ", "))
+		else
+			header:SetText("Mitglieder in " .. (self.db.groupNames[groupID] or groupID))
+		end
+	end)
+
 	addEdit:SetCallback("OnEnterPressed", function(_, _, val)
 		local targetGUID = val
 		if not val:find("^Player%-") then
@@ -370,8 +399,25 @@ function Permissions:RenderMembersTab(container, groupID)
 				targetGUID = m and m.guid or val
 			end
 		end
-		if self:AddMemberToGroup(targetGUID, groupID) then
-			self:BuildUI(self._container)
+		-- Re-validate in case m.guid was not found
+		if targetGUID and not targetGUID:find("^Player%-") then
+			-- Try one last time with Blizzard Info
+			for i = 1, GetNumGuildMembers() do
+				local name, _, _, _, _, _, _, _, _, _, _, _, _, _, _, guid = GetGuildRosterInfo(i)
+				if name and name:gsub("%-.*", ""):lower() == val:lower() then
+					targetGUID = guid
+					break
+				end
+			end
+		end
+
+		if targetGUID and targetGUID:find("^Player%-") then
+			if self:AddMemberToGroup(targetGUID, groupID) then
+				header:SetText("Mitglieder in " .. (self.db.groupNames[groupID] or groupID))
+				self:BuildUI(self._container)
+			end
+		else
+			LOCAL_LOG("ERROR", "Could not find member GUID for", val)
 		end
 	end)
 	addRow:AddChild(addEdit)
@@ -572,9 +618,16 @@ function Permissions:IsAuthorized()
 
 	if IsGuildLeader() then return true end
 
-	-- Fallback to Core module if available
+	-- Fallback 1: Core module
 	if GMS.Core and GMS.Core.IsLeader then
-		return GMS.Core:IsLeader()
+		if GMS.Core:IsLeader() then return true end
+	end
+
+	-- Fallback 2: Name comparison (Blizzard sometimes fails IsGuildLeader)
+	local leaderName = GetGuildInfo("player")
+	local playerName = UnitName("player")
+	if leaderName and playerName and leaderName == playerName then
+		return true
 	end
 
 	return false
