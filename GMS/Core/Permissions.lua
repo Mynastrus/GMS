@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "PERMISSIONS",
 	SHORT_NAME   = "Permissions",
 	DISPLAY_NAME = "Berechtigungen",
-	VERSION      = "1.2.0",
+	VERSION      = "1.2.1",
 }
 
 -- Blizzard Globals
@@ -639,14 +639,19 @@ end
 function Permissions:IsAuthorized()
 	if not IsInGuild() then return false end
 
+	-- 1. Blizzard API IsGuildLeader
 	if IsGuildLeader() then return true end
 
-	-- Fallback 1: Core module
+	-- 2. Rank-based check (Index 0 is always GM)
+	local _, _, rankIndex = GetGuildInfo("player")
+	if rankIndex == 0 then return true end
+
+	-- 3. Core module fallback
 	if GMS.Core and GMS.Core.IsLeader then
 		if GMS.Core:IsLeader() then return true end
 	end
 
-	-- Fallback 2: Name comparison (Blizzard sometimes fails IsGuildLeader)
+	-- 4. Name comparison (last resort)
 	local leaderName = GetGuildInfo("player")
 	local playerName = UnitName("player")
 	if leaderName and playerName and leaderName == playerName then
@@ -677,7 +682,8 @@ function Permissions:GetPlayerGroups(guid)
 	local groups = { EVERYONE = true } -- Everyone is in "EVERYONE"
 
 	-- 1. Check if GM (Hardcoded ADMIN)
-	if guid == UnitGUID("player") and IsGuildLeader() then
+	local _, _, rankIndex = GetGuildInfo("player")
+	if guid == UnitGUID("player") and (IsGuildLeader() or rankIndex == 0) then
 		groups.ADMIN = true
 	end
 
