@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "PERMISSIONS",
 	SHORT_NAME   = "Permissions",
 	DISPLAY_NAME = "Berechtigungen",
-	VERSION      = "1.1.7",
+	VERSION      = "1.1.9",
 }
 
 -- Blizzard Globals
@@ -134,9 +134,8 @@ function Permissions:Initialize()
 	end
 
 	-- Migration: Everyone/JEDER/USER -> EVERYONE
-	if not self.db.groupNames.EVERYONE then
-		self.db.groupNames.EVERYONE = self.db.groupNames.Everyone or self.db.groupNames.JEDER or self.db.groupNames.USER or
-			"EVERYONE"
+	if self.db.groupNames.EVERYONE or self.db.groupNames.Everyone or self.db.groupNames.JEDER or self.db.groupNames.USER then
+		self.db.groupNames.EVERYONE = "EVERYONE"
 		self.db.groupNames.Everyone = nil
 		self.db.groupNames.JEDER = nil
 		self.db.groupNames.USER = nil
@@ -365,55 +364,71 @@ function Permissions:RenderMembersTab(container, groupID)
 	addEdit:SetLabel("Spieler hinzufügen (Name oder GUID)")
 	addEdit:SetWidth(400)
 
+	-- Suggestion Container
+	local suggestGroup = AceGUI:Create("SimpleGroup")
+	suggestGroup:SetFullWidth(true)
+	suggestGroup:SetLayout("Flow")
+	container:AddChild(suggestGroup)
+
 	-- Add Suggestion Logic
-	local suggestionList = {}
+	local rosterData = {} -- [name] = { guid, class }
 	if IsInGuild() then
 		for i = 1, GetNumGuildMembers() do
-			local name = GetGuildRosterInfo(i)
-			if name then table.insert(suggestionList, (name:gsub("%-.*", ""))) end
+			local name, _, _, _, _, _, _, _, _, _, _, class, _, _, _, guid = GetGuildRosterInfo(i)
+			if name and guid then
+				rosterData[name] = { guid = guid, class = class }
+			end
+		end
+	end
+
+	local function UpdateSuggestions(val)
+		suggestGroup:ReleaseChildren()
+		if not val or #val < 2 then return end
+
+		local matches = 0
+		for fullPlayerName, data in pairs(rosterData) do
+			local shortName = fullPlayerName:gsub("%-.*", "")
+			if fullPlayerName:lower():find(val:lower(), 1, true) or shortName:lower():find(val:lower(), 1, true) then
+				local btn = AceGUI:Create("Button")
+				local color = RAID_CLASS_COLORS[data.class] or HIGHLIGHT_FONT_COLOR
+				local display = string.format("|cff%02x%02x%02x%s|r", color.r * 255, color.g * 255, color.b * 255, fullPlayerName)
+				btn:SetText(display)
+				btn:SetWidth(150)
+				btn:SetCallback("OnClick", function()
+					if self:AddMemberToGroup(data.guid, groupID) then
+						self:BuildUI(self._container)
+					end
+				end)
+				suggestGroup:AddChild(btn)
+				matches = matches + 1
+				if matches >= 10 then break end
+			end
 		end
 	end
 
 	addEdit:SetCallback("OnTextChanged", function(_, _, val)
-		if #val < 2 then return end
-		local matches = {}
-		for _, name in ipairs(suggestionList) do
-			if name:lower():find(val:lower(), 1, true) then
-				table.insert(matches, name)
-				if #matches >= 5 then break end
-			end
-		end
-		if #matches > 0 then
-			-- We use a simple label to show suggestions for now (AceGUI EditBox has no built-in list)
-			header:SetText("Vorschläge: " .. table.concat(matches, ", "))
-		else
-			header:SetText("Mitglieder in " .. (self.db.groupNames[groupID] or groupID))
-		end
+		UpdateSuggestions(val)
 	end)
 
 	addEdit:SetCallback("OnEnterPressed", function(_, _, val)
-		local targetGUID = val
-		if not val:find("^Player%-") then
-			if GMS.Roster and GMS.Roster.GetMemberByName then
-				local m = GMS.Roster:GetMemberByName(val)
-				targetGUID = m and m.guid or val
-			end
-		end
-		-- Re-validate in case m.guid was not found
-		if targetGUID and not targetGUID:find("^Player%-") then
-			-- Try one last time with Blizzard Info
-			for i = 1, GetNumGuildMembers() do
-				local name, _, _, _, _, _, _, _, _, _, _, _, _, _, _, guid = GetGuildRosterInfo(i)
-				if name and name:gsub("%-.*", ""):lower() == val:lower() then
-					targetGUID = guid
-					break
+		local targetGUID = tostring(val)
+		if not targetGUID:find("^Player%-") then
+			-- Exact name match in roster
+			if rosterData[val] then
+				targetGUID = rosterData[val].guid
+			else
+				-- Case-insensitive check
+				for name, data in pairs(rosterData) do
+					if name:lower() == val:lower() or name:gsub("%-.*", ""):lower() == val:lower() then
+						targetGUID = data.guid
+						break
+					end
 				end
 			end
 		end
 
-		if targetGUID and targetGUID:find("^Player%-") then
+		if targetGUID and type(targetGUID) == "string" and targetGUID:find("^Player%-") then
 			if self:AddMemberToGroup(targetGUID, groupID) then
-				header:SetText("Mitglieder in " .. (self.db.groupNames[groupID] or groupID))
 				self:BuildUI(self._container)
 			end
 		else
