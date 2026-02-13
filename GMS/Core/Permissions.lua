@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "PERMISSIONS",
 	SHORT_NAME   = "Permissions",
 	DISPLAY_NAME = "Berechtigungen",
-	VERSION      = "1.3.0",
+	VERSION      = "1.3.5",
 }
 
 -- Blizzard Globals
@@ -94,12 +94,17 @@ Permissions.GROUPS = {
 }
 
 Permissions.CAPABILITIES = {
-	{ id = "MODIFY_PERMISSIONS", name = "Berechtigungen verwalten" },
-	{ id = "SEND_DATA", name = "Daten senden" },
-	{ id = "RECEIVE_DATA", name = "Daten empfangen" },
-	{ id = "EDIT_ROSTER", name = "Roster bearbeiten" },
-	{ id = "MANAGE_RAIDS", name = "Raids verwalten" },
-	{ id = "VIEW_LOGS", name = "Logs einsehen" },
+	{ id = "MODIFY_PERMISSIONS", name = "Berechtigungen verwalten",
+		desc = "Ermöglicht das Erstellen, Umbenennen und Löschen von Gruppen sowie das Ändern von Berechtigungen." },
+	{ id = "SEND_DATA", name = "Daten senden",
+		desc = "Erlaubt das Senden von Addon-Daten (z.B. Roster-Synchronisation, Raids) an andere Gildenmitglieder." },
+	{ id = "RECEIVE_DATA", name = "Daten empfangen",
+		desc = "Erlaubt den Empfang und die Verarbeitung von Addon-Daten anderer Mitglieder." },
+	{ id = "EDIT_ROSTER", name = "Roster bearbeiten",
+		desc = "Ermöglicht das Bearbeiten von Notizen und Rängen innerhalb des GMS Roster-Moduls." },
+	{ id = "MANAGE_RAIDS", name = "Raids verwalten",
+		desc = "Erlaubt das Erstellen, Starten und Verwalten von Raids und Anmeldungen." },
+	{ id = "VIEW_LOGS", name = "Logs einsehen", desc = "Gewährt Zugriff auf detaillierte Addon-Logs und Historien." },
 }
 
 local DEFAULTS = {
@@ -512,7 +517,7 @@ function Permissions:RenderMembersTab(container, groupID)
 		for i = 1, num do
 			local name, rankName, rankIndex, level, class, zone, note, officernote, online, status, classFileName, achievementPoints, achievementRank, isMobile, canSoR, reputation, guid = GetGuildRosterInfo(i)
 			if guid and guid:find("^Player%-") then
-				local pGroups = self:GetPlayerGroups(guid)
+				local pGroups = self:GetPlayerGroups(guid, rankIndex)
 				if pGroups[groupID] then
 					memberCount = memberCount + 1
 
@@ -579,23 +584,23 @@ function Permissions:RenderRanksTab(container, groupID)
 		if C_GuildInfo and C_GuildInfo.GetRankName then
 			rankName = C_GuildInfo.GetRankName(i)
 		elseif GuildControlGetRankName then
-			rankName = GuildControlGetRankName(i)
+			rankName = GuildControlGetRankName(i + 1)
 		end
-		rankName = rankName or ("Rang " .. i)
 
-		local cb = AceGUI:Create("CheckBox")
-		cb:SetLabel(rankName)
-		cb:SetFullWidth(true)
-		cb:SetValue(self.db.rankAssignments[i] and self.db.rankAssignments[i][groupID])
-		cb:SetCallback("OnValueChanged", function(_, _, val)
-			self.db.rankAssignments[i] = self.db.rankAssignments[i] or {}
-			self.db.rankAssignments[i][groupID] = val or nil
-			self.db.configVersion = (self.db.configVersion or 0) + 1
-			-- Selective Refresh instead of BuildUI to keep focus if possible,
-			-- but for now BuildUI is safer for rank sync display
-			self:BuildUI(self._container)
-		end)
-		container:AddChild(cb)
+		-- Only show active/named ranks
+		if rankName and rankName ~= "" then
+			local cb = AceGUI:Create("CheckBox")
+			cb:SetLabel(rankName)
+			cb:SetFullWidth(true)
+			cb:SetValue(self.db.rankAssignments[i] and self.db.rankAssignments[i][groupID])
+			cb:SetCallback("OnValueChanged", function(_, _, val)
+				self.db.rankAssignments[i] = self.db.rankAssignments[i] or {}
+				self.db.rankAssignments[i][groupID] = val or nil
+				self.db.configVersion = (self.db.configVersion or 0) + 1
+				self:BuildUI(self._container)
+			end)
+			container:AddChild(cb)
+		end
 	end
 end
 
@@ -612,6 +617,19 @@ function Permissions:RenderPermissionsTab(container, groupID)
 		cb:SetLabel(cap.name)
 		cb:SetDescription("|cff888888ID: " .. cap.id .. "|r")
 		cb:SetWidth(200)
+
+		-- Add Tooltip
+		cb:SetCallback("OnEnter", function(widget)
+			GameTooltip:SetOwner(widget.frame, "ANCHOR_TOPRIGHT")
+			GameTooltip:SetText(cap.name, 1, 1, 1)
+			GameTooltip:AddLine(cap.desc, nil, nil, nil, true)
+			GameTooltip:AddLine(" ", 1, 1, 1)
+			GameTooltip:AddLine("|cff888888ID: " .. cap.id .. "|r", 1, 1, 1)
+			GameTooltip:Show()
+		end)
+		cb:SetCallback("OnLeave", function()
+			GameTooltip:Hide()
+		end)
 
 		-- Root Admin always has all permissions and cannot change them
 		if isRootAdmin then
@@ -765,37 +783,38 @@ end
 
 --- Returns all groups a player belongs to
 -- @param guid string: Player GUID
+-- @param providedRankIndex number|nil: Optional known rank index (0-based)
 -- @return table: Set of group IDs [id] = true
-function Permissions:GetPlayerGroups(guid)
+function Permissions:GetPlayerGroups(guid, providedRankIndex)
 	local groups = { EVERYONE = true } -- Everyone is in "EVERYONE"
 
-	-- 1. Check if GM (Hardcoded ADMIN)
-	local _, _, rankIndex = GetGuildInfo("player")
-	if guid == UnitGUID("player") and (IsGuildLeader() or rankIndex == 0) then
+	local playerGUID = UnitGUID("player")
+	local isPlayer = (guid == playerGUID)
+
+	-- 1. Identify Rank Index
+	local rankIndex = providedRankIndex
+	if not rankIndex then
+		if isPlayer then
+			_, _, rankIndex = GetGuildInfo("player")
+		elseif GMS.Roster and GMS.Roster.GetMemberByGUID then
+			local m = GMS.Roster:GetMemberByGUID(guid)
+			rankIndex = m and m.rankIndex
+		end
+	end
+
+	-- 2. Check if GM (Hardcoded ADMIN)
+	if isPlayer and (IsGuildLeader() or rankIndex == 0) then
 		groups.ADMIN = true
 	end
 
-	-- 2. Rank Assignments
-	if IsInGuild() then
-		local rankIndex
-		if guid == UnitGUID("player") then
-			_, _, rankIndex = GetGuildInfo("player")
-		else
-			-- Try to get from Roster
-			if GMS.Roster and GMS.Roster.GetMemberByGUID then
-				local m = GMS.Roster:GetMemberByGUID(guid)
-				rankIndex = m and m.rankIndex
-			end
-		end
-
-		if rankIndex and self.db.rankAssignments[rankIndex] then
-			for gid, active in pairs(self.db.rankAssignments[rankIndex]) do
-				if active then groups[gid] = true end
-			end
+	-- 3. Rank Assignments
+	if rankIndex and self.db.rankAssignments[rankIndex] then
+		for gid, active in pairs(self.db.rankAssignments[rankIndex]) do
+			if active then groups[gid] = true end
 		end
 	end
 
-	-- 3. Explicit User Assignments
+	-- 4. Explicit User Assignments
 	if self.db.userAssignments[guid] then
 		for gid, active in pairs(self.db.userAssignments[guid]) do
 			if active then groups[gid] = true end

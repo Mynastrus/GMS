@@ -1116,3 +1116,37 @@ end
 function Roster:OnDisable()
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
+
+-- ---------------------------------------------------------------------------
+--	Liefert Member-Daten per GUID (für andere Module/Berechtigungen)
+--	Nutzt GetGuildRosterInfo direkt (Throttled by Blizzard), falls kein Cache
+--	@param guid string
+--	@return table|nil { guid, name, rankIndex, classFileName, online, ... }
+-- ---------------------------------------------------------------------------
+function Roster:GetMemberByGUID(guid)
+	if not guid or type(guid) ~= "string" or not guid:find("^Player%-") then
+		return nil
+	end
+
+	if not IsInGuild() then return nil end
+
+	local num = GetNumGuildMembers()
+	for i = 1, num do
+		local name, rank, rankIndex, level, class, zone, note, officernote,
+		online, status, classFileName, achievementPoints,
+		achievementRank, isMobile, canSoR, repStanding, GUID = GetGuildRosterInfo(i)
+
+		if GUID == guid then
+			return {
+				guid = GUID,
+				name = name,
+				rankIndex = rankIndex,
+				rankName = rank,
+				level = level,
+				classFileName = classFileName,
+				online = online,
+			}
+		end
+	end
+	return nil
+end
