@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "PERMISSIONS",
 	SHORT_NAME   = "Permissions",
 	DISPLAY_NAME = "Berechtigungen",
-	VERSION      = "1.1.9",
+	VERSION      = "1.2.0",
 }
 
 -- Blizzard Globals
@@ -139,6 +139,14 @@ function Permissions:Initialize()
 		self.db.groupNames.Everyone = nil
 		self.db.groupNames.JEDER = nil
 		self.db.groupNames.USER = nil
+	end
+
+	-- Cleanup invalid guid assignments (legacy bug where reputation was used as GUID)
+	for guid, grps in pairs(self.db.userAssignments) do
+		if guid == "1" or guid == "2" or guid == "3" or guid == "4" or guid == "5" or guid == "6" or guid == "7" or guid == "8"
+			or not guid:find("^Player%-") then
+			self.db.userAssignments[guid] = nil
+		end
 	end
 
 	-- Ensure groupOrder points to EVERYONE
@@ -374,7 +382,7 @@ function Permissions:RenderMembersTab(container, groupID)
 	local rosterData = {} -- [name] = { guid, class }
 	if IsInGuild() then
 		for i = 1, GetNumGuildMembers() do
-			local name, _, _, _, _, _, _, _, _, _, _, class, _, _, _, guid = GetGuildRosterInfo(i)
+			local name, _, _, _, _, _, _, _, _, _, _, class, _, _, _, _, guid = GetGuildRosterInfo(i)
 			if name and guid then
 				rosterData[name] = { guid = guid, class = class }
 			end
@@ -447,8 +455,8 @@ function Permissions:RenderMembersTab(container, groupID)
 	if IsInGuild() then
 		local num = GetNumGuildMembers()
 		for i = 1, num do
-			local name, rankName, rankIndex, level, class, zone, note, officernote, online, status, classFileName, achievementPoints, isMobile, canSoR, reputation, guid = GetGuildRosterInfo(i)
-			if guid then
+			local name, rankName, rankIndex, level, class, zone, note, officernote, online, status, classFileName, achievementPoints, achievementRank, isMobile, canSoR, reputation, guid = GetGuildRosterInfo(i)
+			if guid and guid:find("^Player%-") then
 				local pGroups = self:GetPlayerGroups(guid)
 				if pGroups[groupID] then
 					memberCount = memberCount + 1
