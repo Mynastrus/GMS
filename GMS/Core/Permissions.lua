@@ -139,6 +139,7 @@ function Permissions:Initialize()
 	self.db.groupNames = self.db.groupNames or {}
 	self.db.userAssignments = self.db.userAssignments or {}
 	self.db.rankAssignments = self.db.rankAssignments or {}
+	self.db.groupPermissions = self.db.groupPermissions or {}
 
 	if not self.db.groupsOrder then
 		self.db.groupsOrder = { "ADMIN", "OFFICER", "EVERYONE" }
@@ -414,9 +415,11 @@ function Permissions:RenderMembersTab(container, groupID)
 	addEdit:SetWidth(400)
 
 	-- Suggestion Container
-	local suggestGroup = AceGUI:Create("SimpleGroup")
+	local suggestGroup = AceGUI:Create("InlineGroup")
+	suggestGroup:SetTitle("Vorschläge")
 	suggestGroup:SetFullWidth(true)
 	suggestGroup:SetLayout("Flow")
+	suggestGroup:Hide() -- Start hidden
 	container:AddChild(suggestGroup)
 
 	-- Add Suggestion Logic
@@ -432,7 +435,11 @@ function Permissions:RenderMembersTab(container, groupID)
 
 	local function UpdateSuggestions(val)
 		suggestGroup:ReleaseChildren()
-		if not val or #val < 2 then return end
+		if not val or #val < 2 then
+			suggestGroup:Hide()
+			container:DoLayout()
+			return
+		end
 
 		local matches = 0
 		for fullPlayerName, data in pairs(rosterData) do
@@ -453,6 +460,13 @@ function Permissions:RenderMembersTab(container, groupID)
 				if matches >= 10 then break end
 			end
 		end
+
+		if matches > 0 then
+			suggestGroup:Show()
+		else
+			suggestGroup:Hide()
+		end
+		container:DoLayout()
 	end
 
 	addEdit:SetCallback("OnTextChanged", function(_, _, val)
