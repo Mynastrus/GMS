@@ -54,7 +54,7 @@ local METADATA = {
 	INTERN_NAME  = "UI",
 	SHORT_NAME   = "UI",
 	DISPLAY_NAME = "Guild Management System",
-	VERSION      = "1.0.4",
+	VERSION      = "1.0.5",
 }
 
 -- ###########################################################################
@@ -233,7 +233,6 @@ local function GetWindowDB()
 end
 
 local function SaveActivePage(pageName)
-	if not UI.db then return end
 	local wdb = GetWindowDB()
 	wdb.activePage = tostring(pageName or "DASHBOARD")
 end
@@ -241,6 +240,14 @@ end
 local function GetActivePage()
 	local wdb = GetWindowDB()
 	return tostring(wdb.activePage or "DASHBOARD")
+end
+
+function UI:SaveActivePage(pageName)
+	SaveActivePage(pageName)
+end
+
+function UI:GetActivePage()
+	return GetActivePage()
 end
 
 -- ###########################################################################

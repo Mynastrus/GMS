@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "PERMISSIONS",
 	SHORT_NAME   = "Permissions",
 	DISPLAY_NAME = "Berechtigungen",
-	VERSION      = "1.3.6",
+	VERSION      = "1.3.7",
 }
 
 -- Blizzard Globals
@@ -440,9 +440,9 @@ function Permissions:RenderMembersTab(container, groupID)
 	local rosterData = {} -- [name] = { guid, class }
 	if IsInGuild() then
 		for i = 1, GetNumGuildMembers() do
-			local name, _, _, _, _, _, _, _, _, _, _, class, _, _, _, _, guid = GetGuildRosterInfo(i)
+			local name, _, _, _, _, _, _, _, _, _, classFileName, _, _, _, _, _, guid = GetGuildRosterInfo(i)
 			if name and guid then
-				rosterData[name] = { guid = guid, class = class }
+				rosterData[name] = { guid = guid, class = classFileName }
 			end
 		end
 	end
@@ -764,13 +764,6 @@ function Permissions:IsAuthorized()
 	-- 3. Core module fallback
 	if GMS.Core and GMS.Core.IsLeader then
 		if GMS.Core:IsLeader() then return true end
-	end
-
-	-- 4. Name comparison (last resort)
-	local leaderName = GetGuildInfo("player")
-	local playerName = UnitName("player")
-	if leaderName and playerName and leaderName == playerName then
-		return true
 	end
 
 	return false

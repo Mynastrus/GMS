@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "COMM",
 	SHORT_NAME   = "Comm",
 	DISPLAY_NAME = "Kommunikation",
-	VERSION      = "1.0.0",
+	VERSION      = "1.0.1",
 }
 
 -- Blizzard Globals
@@ -21,6 +21,9 @@ local GetTime   = GetTime
 local UnitGUID  = UnitGUID
 local IsInGuild = IsInGuild
 local C_Timer   = C_Timer
+local GetNumGuildMembers = GetNumGuildMembers
+local GetGuildRosterInfo = GetGuildRosterInfo
+local GetRealmName = GetRealmName
 ---@diagnostic enable: undefined-global
 
 -- ---------------------------------------------------------------------------
@@ -85,6 +88,44 @@ local Comm = GMS.Comm
 
 Comm.PREFIX = "GMS_G" -- Global GMS Prefix for AceComm
 Comm._handlers = {}
+
+local function NormalizeName(name)
+	if type(name) ~= "string" or name == "" then return "" end
+	return string.lower(name:gsub("%s+", ""))
+end
+
+local function ResolveSenderGUIDFromGuildRoster(sender)
+	if type(sender) ~= "string" or sender == "" then
+		return nil
+	end
+	if not IsInGuild or not IsInGuild() then
+		return nil
+	end
+	if type(GetNumGuildMembers) ~= "function" or type(GetGuildRosterInfo) ~= "function" then
+		return nil
+	end
+
+	local senderNorm = NormalizeName(sender)
+	local senderShort = NormalizeName(sender:match("^([^%-]+)") or sender)
+	local realmName = NormalizeName((GetRealmName and GetRealmName()) or "")
+	local senderWithLocalRealm = senderShort
+	if realmName ~= "" then
+		senderWithLocalRealm = senderShort .. "-" .. realmName
+	end
+
+	for i = 1, GetNumGuildMembers() do
+		local name, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, guid = GetGuildRosterInfo(i)
+		if name and guid then
+			local full = NormalizeName(name)
+			local short = NormalizeName(name:match("^([^%-]+)") or name)
+			if full == senderNorm or short == senderShort or full == senderWithLocalRealm then
+				return guid
+			end
+		end
+	end
+
+	return nil
+end
 
 -- ###########################################################################
 -- #	API
@@ -161,8 +202,17 @@ function Comm:OnCommReceive(prefix, msg, channel, sender)
 	if not handler then return end
 
 	-- 3. Security Check (Permissions Integration)
+	local senderGUID = ResolveSenderGUIDFromGuildRoster(sender) or packet.src
+	if packet.src and senderGUID and packet.src ~= senderGUID then
+		LOCAL_LOG("WARN", "Source GUID mismatch", subPrefix, sender, packet.src, senderGUID)
+		return
+	end
+
 	if GMS.Permissions and type(GMS.Permissions.HasCapability) == "function" then
-		local senderGUID = packet.src
+		if handler.cap and not senderGUID then
+			LOCAL_LOG("WARN", "Missing sender GUID for secured prefix", subPrefix, sender)
+			return
+		end
 		if handler.cap and not GMS.Permissions:HasCapability(senderGUID, handler.cap) then
 			LOCAL_LOG("WARN", "Unauthorized data received", subPrefix, sender, senderGUID)
 			return
@@ -170,7 +220,9 @@ function Comm:OnCommReceive(prefix, msg, channel, sender)
 	end
 
 	-- 4. Execute Callback
-	pcall(handler.cb, packet.src, packet.d, packet)
+	packet.src_claimed = packet.src
+	packet.src = senderGUID
+	pcall(handler.cb, senderGUID, packet.d, packet)
 end
 
 -- ###########################################################################

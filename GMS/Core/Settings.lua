@@ -26,8 +26,14 @@ local METADATA = {
 	INTERN_NAME  = "SETTINGS",
 	SHORT_NAME   = "Settings",
 	DISPLAY_NAME = "Einstellungen",
-	VERSION      = "1.1.1",
+	VERSION      = "1.1.2",
 }
+
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G = _G
+local GetTime = GetTime
+---@diagnostic enable: undefined-global
 
 -- ###########################################################################
 -- #	LOGGING (Required by PROJECT RULES Section 4)

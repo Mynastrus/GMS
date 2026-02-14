@@ -19,7 +19,7 @@ local METADATA = {
 	INTERN_NAME  = "MODULESTATES",
 	SHORT_NAME   = "ModuleStates",
 	DISPLAY_NAME = "Module States",
-	VERSION      = "1.1.1",
+	VERSION      = "1.1.2",
 }
 
 local LibStub = LibStub
@@ -30,6 +30,12 @@ if not AceAddon then return end
 
 local GMS = AceAddon:GetAddon("GMS", true)
 if not GMS then return end
+
+-- Blizzard Globals
+---@diagnostic disable: undefined-global
+local _G = _G
+local GetTime = GetTime
+---@diagnostic enable: undefined-global
 
 -- Prevent double-load
 if GMS.ModuleStates then return end
@@ -301,4 +307,5 @@ function GMS:ModuleStates_InstallAceModuleHooks()
 	end
 end
 
-LOCAL_LOG("DEBUG", "Loaded", METADATA.VERSION)
+GMS:SetReady("EXT:" .. METADATA.INTERN_NAME)
+LOCAL_LOG("INFO", "ModuleStates extension loaded", METADATA.VERSION)
