@@ -37,6 +37,7 @@ local C_Timer            = C_Timer
 local table              = table
 local tonumber           = tonumber
 local CreateFrame        = CreateFrame
+local UIParent           = UIParent
 local EasyMenu           = EasyMenu
 local UIDropDownMenu_Initialize = UIDropDownMenu_Initialize
 local UIDropDownMenu_CreateInfo = UIDropDownMenu_CreateInfo
@@ -826,7 +827,7 @@ local function RegisterLogsUI()
 		end
 		local function ShowLevelMenu()
 			if type(CreateFrame) ~= "function" then return end
-			LOGS._levelMenuFrame = LOGS._levelMenuFrame or CreateFrame("Frame", "GMS_LOGS_LEVEL_MENU", _G.UIParent, "UIDropDownMenuTemplate")
+			LOGS._levelMenuFrame = LOGS._levelMenuFrame or CreateFrame("Frame", "GMS_LOGS_LEVEL_MENU", UIParent, "UIDropDownMenuTemplate")
 			if type(UIDropDownMenu_Initialize) == "function" and type(ToggleDropDownMenu) == "function" then
 				UIDropDownMenu_Initialize(LOGS._levelMenuFrame, function(_, level)
 					level = level or 1

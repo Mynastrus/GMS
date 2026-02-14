@@ -33,6 +33,7 @@ if not GMS then return end
 local _G                         = _G
 local GetTime                    = GetTime
 local time                       = time
+local rawget                     = rawget
 local C_Timer                    = C_Timer
 local CreateFrame                = CreateFrame
 local LoadAddOn                  = LoadAddOn
@@ -863,10 +864,10 @@ function Roster:ShowMemberContextMenu(anchorFrame, memberData)
 
 	if type(EasyMenu) ~= "function" and type(LoadAddOn) == "function" then
 		pcall(LoadAddOn, "Blizzard_UIDropDownMenu")
-		EasyMenu = _G and _G.EasyMenu or EasyMenu
-		UIDropDownMenu_Initialize = _G and _G.UIDropDownMenu_Initialize or UIDropDownMenu_Initialize
-		UIDropDownMenu_AddButton = _G and _G.UIDropDownMenu_AddButton or UIDropDownMenu_AddButton
-		ToggleDropDownMenu = _G and _G.ToggleDropDownMenu or ToggleDropDownMenu
+		EasyMenu = (type(_G) == "table" and rawget(_G, "EasyMenu")) or EasyMenu
+		UIDropDownMenu_Initialize = (type(_G) == "table" and rawget(_G, "UIDropDownMenu_Initialize")) or UIDropDownMenu_Initialize
+		UIDropDownMenu_AddButton = (type(_G) == "table" and rawget(_G, "UIDropDownMenu_AddButton")) or UIDropDownMenu_AddButton
+		ToggleDropDownMenu = (type(_G) == "table" and rawget(_G, "ToggleDropDownMenu")) or ToggleDropDownMenu
 	end
 
 	if not self._contextMenuFrame and type(CreateFrame) == "function" then
@@ -1615,8 +1616,7 @@ local function GetAsyncDelay(defaultValue)
 end
 
 local function IsMemberVisibleByOnlineState(member)
-	Roster._options = Roster._options or {}
-	local opts = Roster._options
+	local opts = (type(Roster._options) == "table") and Roster._options or {}
 	local showOnline = (opts.showOnline ~= false)
 	local showOffline = (opts.showOffline ~= false)
 
@@ -1686,8 +1686,7 @@ FilterMembersByVisibility = function(members)
 		return members or {}
 	end
 
-	Roster._options = Roster._options or {}
-	local opts = Roster._options
+	local opts = (type(Roster._options) == "table") and Roster._options or {}
 	local showOnline = (opts.showOnline ~= false)
 	local showOffline = (opts.showOffline ~= false)
 	local searchQuery = NormalizeSearchQuery(opts.searchQuery)
@@ -1789,8 +1788,10 @@ function Roster:OnGuildRosterUpdate(canScan)
 			end
 		end
 
-		if changed and Roster._lastListParent.DoLayout then
-			Roster._lastListParent:DoLayout()
+		local parent = Roster._lastListParent
+		local doLayout = (type(parent) == "table") and rawget(parent, "DoLayout") or nil
+		if changed and parent and type(doLayout) == "function" then
+			doLayout(parent)
 		end
 	end)
 end
@@ -1813,8 +1814,7 @@ local function BuildRosterHeaderUI()
 	EnsureDefaultRosterColumnsRegistered()
 	EnsureRosterSortState()
 
-	Roster._options = Roster._options or {}
-	local opts = Roster._options
+	local opts = (type(Roster._options) == "table") and Roster._options or {}
 
 	local guildName = ""
 	if type(GetGuildInfo) == "function" then
@@ -2103,17 +2103,25 @@ function Roster:InitializeOptions()
 	-- Retrieve options table
 	if GMS and type(GMS.GetModuleOptions) == "function" then
 		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "ROSTER")
-		if ok and opts then
-			self._options = opts
-			self._options.showOnline = true
-			if self._options.showOffline == nil then self._options.showOffline = true end
-			if self._options.searchQuery == nil then self._options.searchQuery = "" end
-			if type(self._options.asyncBatchSize) == "table" then
-				self._options.asyncBatchSize = tonumber(self._options.asyncBatchSize.default) or 8
+		if ok and type(opts) == "table" then
+			local moduleOptions = opts
+			moduleOptions.showOnline = true
+			if moduleOptions.showOffline == nil then moduleOptions.showOffline = true end
+			if moduleOptions.searchQuery == nil then moduleOptions.searchQuery = "" end
+
+			local batchValue = moduleOptions.asyncBatchSize
+			if type(batchValue) == "table" then
+				local raw = batchValue["default"]
+				moduleOptions.asyncBatchSize = tonumber(raw) or 8
 			end
-			if type(self._options.asyncDelay) == "table" then
-				self._options.asyncDelay = tonumber(self._options.asyncDelay.default) or 0.02
+
+			local delayValue = moduleOptions.asyncDelay
+			if type(delayValue) == "table" then
+				local raw = delayValue["default"]
+				moduleOptions.asyncDelay = tonumber(raw) or 0.02
 			end
+
+			self._options = moduleOptions
 			self._optionsRetryScheduled = false
 			LOCAL_LOG("INFO", "Roster options initialized (GUILD scope)")
 		else
@@ -2183,8 +2191,9 @@ function Roster:OnDisable()
 	self._lastListParent = nil
 	self._lastGuidOrderSig = ""
 	wipe(self._guidToRow)
-	if self._commTicker and type(self._commTicker.Cancel) == "function" then
-		pcall(function() Roster._commTicker:Cancel() end)
+	local ticker = self._commTicker
+	if ticker and type(ticker["Cancel"]) == "function" then
+		pcall(ticker["Cancel"], ticker)
 	end
 	self._commTicker = nil
 	self._commInited = false
