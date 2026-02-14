@@ -266,6 +266,7 @@ local function GetAllGuildMembers(sortSpec, skipRequest)
 			poolIdx = poolIdx + 1
 
 			m.index = i
+			m.name_roster = name
 			m.name_full = name_full
 			m.name = name_short
 			m.realm = realm
@@ -851,11 +852,14 @@ function Roster:ShowMemberContextMenu(anchorFrame, memberData)
 	if type(memberData) ~= "table" then return end
 	local nameFull = tostring(memberData.name_full or memberData.name or "")
 	local nameShort = tostring(memberData.name or "")
+	local nameRoster = tostring(memberData.name_roster or "")
+	local targetName = (nameRoster ~= "" and nameRoster) or (nameFull ~= "" and nameFull) or nameShort
+	local isOnline = memberData.online == true
 	local isSelf = false
 	if type(UnitGUID) == "function" and type(memberData.guid) == "string" and memberData.guid ~= "" then
 		isSelf = (memberData.guid == UnitGUID("player"))
 	end
-	if nameFull == "" then return end
+	if targetName == "" then return end
 
 	if type(EasyMenu) ~= "function" and type(LoadAddOn) == "function" then
 		pcall(LoadAddOn, "Blizzard_UIDropDownMenu")
@@ -873,23 +877,19 @@ function Roster:ShowMemberContextMenu(anchorFrame, memberData)
 	end
 
 	local menu = {
-		{ text = nameFull, isTitle = true, notCheckable = true },
+		{ text = targetName, isTitle = true, notCheckable = true },
 		{
 			text = "Anfluestern",
 			notCheckable = true,
 			func = function()
-				if type(ChatFrame_SendTell) == "function" then
-					ChatFrame_SendTell(nameFull)
-				else
-					OpenChatEditWithText("/w " .. nameFull .. " ")
-				end
+				OpenChatEditWithText("/w " .. targetName .. " ")
 			end,
 		},
 		{
 			text = "Name kopieren (inkl. Realm)",
 			notCheckable = true,
 			func = function()
-				OpenChatEditWithText(nameFull)
+				OpenChatEditWithText((nameFull ~= "" and nameFull) or targetName)
 			end,
 		},
 		{
@@ -898,9 +898,10 @@ function Roster:ShowMemberContextMenu(anchorFrame, memberData)
 			disabled = isSelf,
 			func = function()
 				if isSelf then return end
-				if not TryInviteUnitByName(nameFull, nameShort) then
-					OpenChatEditWithText("/invite " .. (nameFull ~= "" and nameFull or nameShort))
+				if isOnline and TryInviteUnitByName(targetName, nameShort) then
+					return
 				end
+				OpenChatEditWithText("/invite " .. targetName)
 			end,
 		},
 	}
@@ -920,7 +921,7 @@ function Roster:ShowMemberContextMenu(anchorFrame, memberData)
 				UIDropDownMenu_AddButton(menu[i], level)
 			end
 		end, "MENU")
-		ToggleDropDownMenu(1, nil, self._contextMenuFrame, anchorFrame or "cursor", 0, 0)
+		ToggleDropDownMenu(1, nil, self._contextMenuFrame, "cursor", 0, 0)
 	end
 end
 
@@ -1434,7 +1435,7 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 				local row = AceGUI:Create("SimpleGroup")
 				row:SetFullWidth(true)
 				row:SetLayout("Flow")
-				row:SetHeight(16)
+				row:SetHeight(24)
 				if type(row.SetAutoAdjustHeight) == "function" then
 					row:SetAutoAdjustHeight(false)
 				end
@@ -1444,6 +1445,7 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 					local rowGuid = m.guid
 					local rowNameFull = m.name_full
 					local rowName = m.name or "-"
+					local rowNameRoster = m.name_roster or rowNameFull or rowName
 					local rowLevel = m.level or "-"
 					local rowClass = m.class or "-"
 					local rowRealm = m.realm or "-"
@@ -1526,7 +1528,9 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 								Roster:ShowMemberContextMenu(row.frame, {
 									name = rowName,
 									name_full = rowNameFull,
+									name_roster = rowNameRoster,
 									guid = rowGuid,
+									online = m.online == true,
 								})
 							end
 							return
