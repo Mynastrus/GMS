@@ -58,14 +58,15 @@ GMS:RegisterLocale("deDE", {
 	ROSTER_CTX_COPY_NAME = "Name kopieren (inkl. Realm)",
 	ROSTER_CTX_INVITE = "In Gruppe einladen",
 
-	GA_PAGE_TITLE = "Gildenaktivität",
-	GA_HEADER_TITLE = "Gildenaktivitäts-Log",
+	GA_PAGE_TITLE = "Gildenlog",
+	GA_HEADER_TITLE = "Gildenlog",
 	GA_HEADER_SUB = "Protokolliert Gilden-Roster-Änderungen im eigenen Modul-Log.",
 	GA_CHAT_ECHO = "Neue Einträge im Chat ausgeben",
 	GA_REFRESH = "Aktualisieren",
 	GA_CLEAR = "Leeren",
 	GA_EMPTY = "Noch keine Gildenaktivitäts-Einträge.",
-	GA_STATUS_FMT = "Gildenaktivität: %d Einträge",
+	GA_STATUS_FMT = "Gildenlog: %d Einträge",
+	GA_BASELINE = "Initialer Gilden-Snapshot erfasst (%d Mitglieder).",
 	GA_DOCK_TOOLTIP = "Gildenaktivitäts-Log öffnen",
 	GA_SLASH_HELP = "/gms guildlog - öffnet das Gildenaktivitäts-Log",
 

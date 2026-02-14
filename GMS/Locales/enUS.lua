@@ -58,14 +58,15 @@ GMS:RegisterLocale("enUS", {
 	ROSTER_CTX_COPY_NAME = "Copy name (with realm)",
 	ROSTER_CTX_INVITE = "Invite to group",
 
-	GA_PAGE_TITLE = "Guild Activity",
-	GA_HEADER_TITLE = "Guild Activity Log",
+	GA_PAGE_TITLE = "Guild Log",
+	GA_HEADER_TITLE = "Guild Log",
 	GA_HEADER_SUB = "Tracks guild roster changes in a dedicated module log.",
 	GA_CHAT_ECHO = "Post new entries in chat",
 	GA_REFRESH = "Refresh",
 	GA_CLEAR = "Clear",
 	GA_EMPTY = "No guild activity entries yet.",
-	GA_STATUS_FMT = "Guild Activity: %d entries",
+	GA_STATUS_FMT = "Guild Log: %d entries",
+	GA_BASELINE = "Initial guild snapshot captured (%d members).",
 	GA_DOCK_TOOLTIP = "Open guild activity log",
 	GA_SLASH_HELP = "/gms guildlog - opens guild activity log",
 

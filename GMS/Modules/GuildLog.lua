@@ -74,6 +74,7 @@ GuildLog._dockRegistered = GuildLog._dockRegistered or false
 GuildLog._scanScheduled = GuildLog._scanScheduled or false
 GuildLog._ui = GuildLog._ui or nil
 GuildLog._uiRefreshToken = GuildLog._uiRefreshToken or 0
+GuildLog._baselineLogged = GuildLog._baselineLogged or false
 
 local OPTIONS_DEFAULTS = {
 	chatEcho = false,
@@ -102,7 +103,7 @@ end
 local function EnsureOptions()
 	if type(GMS.RegisterModuleOptions) == "function" then
 		pcall(function()
-			GMS:RegisterModuleOptions(MODULE_NAME, OPTIONS_DEFAULTS, "GUILD")
+			GMS:RegisterModuleOptions(MODULE_NAME, OPTIONS_DEFAULTS, "PROFILE")
 		end)
 	end
 	if type(GMS.GetModuleOptions) ~= "function" then return nil end
@@ -274,10 +275,18 @@ local function BuildCurrentRosterSnapshot()
 	local total = tonumber(GetNumGuildMembers()) or 0
 	for i = 1, total do
 		local name, rank, rankIndex, level, class, zone, note, officerNote, online, status, classFileName, _, _, _, _, _, guid = GetGuildRosterInfo(i)
+		local normalizedName = NormalizeName(name)
+		local memberKey = nil
 		if type(guid) == "string" and guid ~= "" then
-			out[guid] = {
-				guid = guid,
-				name = NormalizeName(name),
+			memberKey = guid
+		elseif normalizedName ~= "" then
+			memberKey = "NAME:" .. normalizedName
+		end
+		if memberKey then
+			out[memberKey] = {
+				memberKey = memberKey,
+				guid = (type(guid) == "string" and guid) or "",
+				name = normalizedName,
 				rank = tostring(rank or ""),
 				rankIndex = tonumber(rankIndex) or 0,
 				level = tonumber(level) or 0,
@@ -366,6 +375,10 @@ function GuildLog:ScanGuildChanges()
 	if not self._snapshot then
 		self._snapshot = curr
 		SeedHistoryFromSnapshot(curr)
+		if not self._baselineLogged then
+			self._baselineLogged = true
+			PushEntry("BASELINE", T("GA_BASELINE", "Initial guild snapshot captured (%d members).", tonumber(GetNumGuildMembers and GetNumGuildMembers() or 0)))
+		end
 		LOCAL_LOG("DEBUG", "GuildLog baseline snapshot initialized", tostring(#(Entries() or {})))
 		return
 	end
@@ -565,7 +578,7 @@ local function RegisterSlash()
 		end
 	end, {
 		help = T("GA_SLASH_HELP", "/gms guildlog - opens guild activity log"),
-		alias = { "glog", "activity" },
+		alias = { "glog" },
 		owner = MODULE_NAME,
 	})
 	return true

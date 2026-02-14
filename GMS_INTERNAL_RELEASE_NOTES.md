@@ -15,16 +15,21 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 ## Unreleased
 
 ### Added
-- [ ] (aktuell keine neuen Features seit letztem Release)
+- [x] `683f870` Comm-Sync erweitert: Record-basierter Gildenabgleich mit Prioritätslogik (`seq` > `updatedAt`), Persistenz und Whisper-Fallback für große Datensätze.
+- [x] `367bf31` Neues Modul `GuildLog` hinzugefügt: separates Gildenaktivitäts-Log mit eigener UI-Seite, Dock-Icon und Slash-Befehl (`/gms guildlog`).
+- [x] `119e31d` Mitgliederhistorie im `GuildLog` ergänzt (Join/Leave/Rejoin-Erkennung, Historienfelder pro Mitglied).
 
 ### Changed
-- [ ] (aktuell keine Änderungen seit letztem Release)
+- [x] `367bf31` Lokalisierung für GuildLog-Texte in `enUS`/`deDE` erweitert.
+- [x] `119e31d` Notiz-/Offiziersnotiz-Änderungen im GuildLog auf Detailausgabe (`alt -> neu`) umgestellt.
+- [x] (uncommitted) `GuildLog` auf robustere Erkennung/Anzeige angepasst: Profilscope für Optionen, Fallback-Key bei fehlender GUID, Baseline-Eintrag beim Erstscan, Alias-Bereinigung (`glog`).
+- [x] (uncommitted) `deDE`-Locale auf Umlaute/ß in relevanten Strings umgestellt.
 
 ### Fixed
-- [ ] (aktuell keine separaten Bugfix-Only Einträge seit letztem Release)
+- [x] (uncommitted) Fehlerbild „GuildLog zeigt nichts / speichert nichts“ adressiert durch persistente Optionsinitialisierung und stabileres Snapshot-Matching.
 
 ### Rules/Infra
-- [ ] (aktuell keine Rules/Infra-Änderungen seit letztem Release)
+- [x] Commit-Abdeckung gemäß `GMS_PROJECT_RULES` Abschnitt 11.5 nachgezogen (alle Änderungen seit `v1.3.28` im Unreleased-Block erfasst).
 
 ## Last Release Snapshot
 
