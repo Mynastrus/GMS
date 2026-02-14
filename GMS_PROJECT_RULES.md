@@ -294,6 +294,18 @@ Dieses Regelwerk ist **verbindlich und dauerhaft gültig** für das Projekt GMS.
 * Inhalt der Release Notes ist immer **zweisprachig (EN + DE)**.
 * Changelog-Einträge müssen den tatsächlich ausgelieferten Änderungen entsprechen.
 
+### 11.4 Unreleased-Staging (Pflicht)
+
+* Laufende Änderungen werden **nicht direkt** in `Core/Changelog.lua` gesammelt.
+* Stattdessen werden sie in `GMS_INTERNAL_RELEASE_NOTES.md` unter `## Unreleased` gepflegt.
+* Struktur unter `Unreleased` ist verbindlich:
+  * `Added`
+  * `Changed`
+  * `Fixed`
+  * `Rules/Infra`
+* Erst bei einem **echten Release** werden die kuratierten Punkte aus `GMS_INTERNAL_RELEASE_NOTES.md` in `RELEASES` (EN + DE) übernommen.
+* Nach erfolgreichem Release wird `Unreleased` zurückgesetzt (leeren/neu starten), damit die nächste Iteration sauber beginnt.
+
 ## AI Interaction & Artifacts
 The following rules apply to the AI assistant's interaction with artifacts:
 - **Auto-Approval**: `implementation_plan.md` and `walkthrough.md` should generally be set to `ShouldAutoProceed = true` unless major breaking changes or critical design decisions require explicit user confirmation.

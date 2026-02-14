@@ -34,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.2.0",
+	VERSION      = "1.3.2",
 }
 
 -- ###########################################################################
@@ -95,6 +95,52 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 -- ###########################################################################
 
 local RELEASES = {
+	{
+		version = "1.3.13",
+		date = "2026-02-14",
+		title_en = "Auto-open trigger hardening",
+		title_de = "Auto-Open Trigger gehaertet",
+		notes_en = {
+			"Auto-open now triggers from PLAYER_LOGIN and PLAYER_ENTERING_WORLD.",
+			"Auto-open no longer depends on a matching release entry for the current version.",
+			"Option handling is now tolerant: only explicit false disables auto-open.",
+		},
+		notes_de = {
+			"Auto-Open wird jetzt von PLAYER_LOGIN und PLAYER_ENTERING_WORLD ausgeloest.",
+			"Auto-Open haengt nicht mehr von einem exakt passenden Release-Eintrag ab.",
+			"Options-Handling ist toleranter: nur explizites false deaktiviert Auto-Open.",
+		},
+	},
+	{
+		version = "1.3.12",
+		date = "2026-02-14",
+		title_en = "Reliable auto-open after reload/login",
+		title_de = "Zuverlaessiges Auto-Open nach Reload/Login",
+		notes_en = {
+			"Auto-open now only marks release notes as seen when the CHANGELOG page is actually active.",
+			"Added retries if UI/pages are not fully registered yet during login.",
+		},
+		notes_de = {
+			"Auto-Open markiert Release Notes jetzt erst als gesehen, wenn die CHANGELOG-Seite wirklich aktiv ist.",
+			"Retry-Logik hinzugefuegt, falls UI/Pages beim Login noch nicht vollstaendig registriert sind.",
+		},
+	},
+	{
+		version = "1.3.11",
+		date = "2026-02-14",
+		title_en = "Locale-bound language and reliable auto-open",
+		title_de = "Clientgebundene Sprache und zuverlaessiges Auto-Open",
+		notes_en = {
+			"Release note language is now bound to client locale.",
+			"Date format is now locale-aware (DE: DD.MM.YYYY, EN: MM/DD/YYYY).",
+			"Auto-open for new releases now retries until options/UI are available.",
+		},
+		notes_de = {
+			"Die Sprache der Release Notes ist jetzt an die Client-Locale gebunden.",
+			"Datumsformat ist jetzt locale-abhaengig (DE: DD.MM.YYYY, EN: MM/DD/YYYY).",
+			"Auto-Open fuer neue Releases versucht es jetzt erneut, bis Optionen/UI verfuegbar sind.",
+		},
+	},
 	{
 		version = "1.3.10",
 		date = "2026-02-14",
@@ -191,15 +237,12 @@ local CHANGELOG_OPTIONS_DEFAULTS = {
 		name = "Neue Release Notes beim Login automatisch anzeigen",
 		default = true,
 	},
-	languageMode = {
-		type = "string",
-		name = "Sprache (AUTO/DE/EN)",
-		default = "AUTO",
-	},
 }
 
 local function GetCurrentAddonVersion()
-	return tostring((GMS and GMS.VERSION) or "")
+	local v = tostring((GMS and GMS.VERSION) or "")
+	v = v:gsub("^%s+", ""):gsub("%s+$", "")
+	return v
 end
 
 local function HasReleaseEntry(version)
@@ -211,6 +254,12 @@ local function HasReleaseEntry(version)
 		end
 	end
 	return false
+end
+
+local function IsAutoOpenEnabled(opts)
+	if type(opts) ~= "table" then return true end
+	-- Only an explicit boolean false disables the feature.
+	return opts.showOnNewVersion ~= false
 end
 
 local function EnsureOptions()
@@ -234,10 +283,6 @@ local function EnsureOptions()
 	if opts.showOnNewVersion == nil then
 		opts.showOnNewVersion = true
 	end
-	opts.languageMode = tostring(opts.languageMode or "AUTO"):upper()
-	if opts.languageMode ~= "AUTO" and opts.languageMode ~= "DE" and opts.languageMode ~= "EN" then
-		opts.languageMode = "AUTO"
-	end
 	if type(opts.lastSeenVersion) ~= "string" then
 		opts.lastSeenVersion = ""
 	end
@@ -250,15 +295,23 @@ local function EnsureOptions()
 end
 
 local function ResolveLanguageMode()
-	local opts = Changelog._options or EnsureOptions()
-	local mode = (type(opts) == "table" and tostring(opts.languageMode or "AUTO") or "AUTO"):upper()
-	if mode == "DE" then return "DE" end
-	if mode == "EN" then return "EN" end
 	local locale = tostring((GetLocale and GetLocale()) or "")
 	if locale == "deDE" then
 		return "DE"
 	end
 	return "EN"
+end
+
+local function FormatDateByLanguage(isoDate, languageMode)
+	local y, m, d = tostring(isoDate or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+	if not y or not m or not d then
+		return tostring(isoDate or "?")
+	end
+
+	if languageMode == "DE" then
+		return d .. "." .. m .. "." .. y
+	end
+	return m .. "/" .. d .. "/" .. y
 end
 
 local function MarkCurrentVersionSeen(reason)
@@ -273,18 +326,25 @@ local function MarkCurrentVersionSeen(reason)
 	LOCAL_LOG("INFO", "Marked changelog as seen", current, reason or "unknown")
 end
 
-local function TryAutoOpenOnLogin()
+local function TryAutoOpenOnLogin(attempt)
+	attempt = tonumber(attempt) or 1
 	if Changelog._autoShowDone then
 		return
 	end
 
 	local opts = Changelog._options or EnsureOptions()
 	if type(opts) ~= "table" then
-		LOCAL_LOG("WARN", "Changelog options unavailable for auto-open")
+		if attempt < 20 and C_Timer and C_Timer.After then
+			C_Timer.After(0.5, function()
+				TryAutoOpenOnLogin(attempt + 1)
+			end)
+		else
+			LOCAL_LOG("WARN", "Changelog options unavailable for auto-open")
+		end
 		return
 	end
 
-	if opts.showOnNewVersion ~= true then
+	if not IsAutoOpenEnabled(opts) then
 		Changelog._autoShowDone = true
 		LOCAL_LOG("DEBUG", "Auto-open disabled by profile option")
 		return
@@ -303,26 +363,33 @@ local function TryAutoOpenOnLogin()
 	end
 
 	if not HasReleaseEntry(current) then
-		LOCAL_LOG("WARN", "No release entry for current version", current)
-		Changelog._autoShowDone = true
-		return
+		LOCAL_LOG("WARN", "No release entry for current version (still trying auto-open)", current)
 	end
 
 	local tries = 0
 	local function attemptOpen()
 		tries = tries + 1
 		if GMS.UI and type(GMS.UI.Open) == "function" then
-			GMS.UI:Open(METADATA.INTERN_NAME)
-			MarkCurrentVersionSeen("auto-login-open")
-			Changelog._autoShowDone = true
-			LOCAL_LOG("INFO", "Auto-opened changelog for new version", current)
-			return
+			-- Ensure page exists before opening; UI may be up before page registration finished.
+			if not (GMS.UI._pages and GMS.UI._pages[METADATA.INTERN_NAME]) then
+				RegisterInUI()
+			end
+
+			if GMS.UI._pages and GMS.UI._pages[METADATA.INTERN_NAME] then
+				GMS.UI:Open(METADATA.INTERN_NAME)
+				if GMS.UI._page == METADATA.INTERN_NAME then
+					MarkCurrentVersionSeen("auto-login-open")
+					Changelog._autoShowDone = true
+					LOCAL_LOG("INFO", "Auto-opened changelog for new version", current)
+					return
+				end
+			end
 		end
 
-		if tries < 20 and C_Timer and C_Timer.After then
+		if tries < 40 and C_Timer and C_Timer.After then
 			C_Timer.After(0.5, attemptOpen)
 		else
-			LOCAL_LOG("WARN", "Failed to auto-open changelog (UI unavailable)")
+			LOCAL_LOG("WARN", "Failed to auto-open changelog (page not available/active)")
 		end
 	end
 
@@ -342,19 +409,21 @@ local function RenderNotes(lines)
 end
 
 local function BuildReleaseBlock(parent, release)
+	local mode = ResolveLanguageMode()
+	local formattedDate = FormatDateByLanguage(release.date, mode)
+
 	local box = AceGUI:Create("InlineGroup")
-	box:SetTitle(string.format("v%s (%s)", tostring(release.version or "?"), tostring(release.date or "?")))
+	box:SetTitle(string.format("v%s (%s)", tostring(release.version or "?"), formattedDate))
 	box:SetFullWidth(true)
 	box:SetLayout("Flow")
 	parent:AddChild(box)
 
-	local mode = ResolveLanguageMode()
 	local titleText = (mode == "DE") and tostring(release.title_de or "-") or tostring(release.title_en or "-")
 	local notesText = (mode == "DE") and RenderNotes(release.notes_de) or RenderNotes(release.notes_en)
 
 	local title = AceGUI:Create("Label")
 	title:SetFullWidth(true)
-	title:SetText("|cff03A9F4" .. mode .. "|r: " .. titleText)
+	title:SetText("|cff03A9F4" .. titleText)
 	box:AddChild(title)
 
 	local notes = AceGUI:Create("Label")
@@ -365,10 +434,11 @@ end
 
 local function BuildChangelogPage(root, id, isCached)
 	if GMS.UI and type(GMS.UI.Header_BuildIconText) == "function" then
+		local mode = ResolveLanguageMode()
 		GMS.UI:Header_BuildIconText({
 			icon = "Interface\\Icons\\INV_Scroll_03",
 			text = "|cff03A9F4" .. METADATA.DISPLAY_NAME .. "|r",
-			subtext = "All releases shown (EN + DE)",
+			subtext = (mode == "DE") and "Alle Releases werden angezeigt" or "All releases are shown",
 		})
 	end
 
@@ -387,44 +457,6 @@ local function BuildChangelogPage(root, id, isCached)
 	scroll:SetFullWidth(true)
 	scroll:SetFullHeight(true)
 	root:AddChild(scroll)
-
-	local languageRow = AceGUI:Create("InlineGroup")
-	languageRow:SetTitle("Language / Sprache")
-	languageRow:SetFullWidth(true)
-	languageRow:SetLayout("Flow")
-	scroll:AddChild(languageRow)
-
-	local function SetLanguageMode(mode)
-		local opts = Changelog._options or EnsureOptions()
-		if type(opts) ~= "table" then return end
-		opts.languageMode = tostring(mode or "AUTO"):upper()
-		if GMS.UI and type(GMS.UI.Navigate) == "function" then
-			GMS.UI:Navigate(METADATA.INTERN_NAME)
-		end
-	end
-
-	local btnAuto = AceGUI:Create("Button")
-	btnAuto:SetText("AUTO")
-	btnAuto:SetWidth(120)
-	btnAuto:SetCallback("OnClick", function() SetLanguageMode("AUTO") end)
-	languageRow:AddChild(btnAuto)
-
-	local btnDe = AceGUI:Create("Button")
-	btnDe:SetText("Deutsch")
-	btnDe:SetWidth(120)
-	btnDe:SetCallback("OnClick", function() SetLanguageMode("DE") end)
-	languageRow:AddChild(btnDe)
-
-	local btnEn = AceGUI:Create("Button")
-	btnEn:SetText("English")
-	btnEn:SetWidth(120)
-	btnEn:SetCallback("OnClick", function() SetLanguageMode("EN") end)
-	languageRow:AddChild(btnEn)
-
-	local active = AceGUI:Create("Label")
-	active:SetFullWidth(true)
-	active:SetText("Active language: " .. ResolveLanguageMode())
-	languageRow:AddChild(active)
 
 	for i = 1, #RELEASES do
 		BuildReleaseBlock(scroll, RELEASES[i])
@@ -498,9 +530,16 @@ Init()
 if not Changelog._loginFrame and CreateFrame then
 	Changelog._loginFrame = CreateFrame("Frame")
 	Changelog._loginFrame:RegisterEvent("PLAYER_LOGIN")
+	Changelog._loginFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 	Changelog._loginFrame:SetScript("OnEvent", function(_, event)
-		if event ~= "PLAYER_LOGIN" then return end
-		TryAutoOpenOnLogin()
+		if event ~= "PLAYER_LOGIN" and event ~= "PLAYER_ENTERING_WORLD" then return end
+		if C_Timer and C_Timer.After then
+			C_Timer.After(1.0, function()
+				TryAutoOpenOnLogin()
+			end)
+		else
+			TryAutoOpenOnLogin()
+		end
 	end)
 end
 
