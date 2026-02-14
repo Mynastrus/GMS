@@ -57,5 +57,24 @@ GMS:RegisterLocale("enUS", {
 	ROSTER_CTX_WHISPER = "Whisper",
 	ROSTER_CTX_COPY_NAME = "Copy name (with realm)",
 	ROSTER_CTX_INVITE = "Invite to group",
-})
 
+	GA_PAGE_TITLE = "Guild Activity",
+	GA_HEADER_TITLE = "Guild Activity Log",
+	GA_HEADER_SUB = "Tracks guild roster changes in a dedicated module log.",
+	GA_CHAT_ECHO = "Post new entries in chat",
+	GA_REFRESH = "Refresh",
+	GA_CLEAR = "Clear",
+	GA_EMPTY = "No guild activity entries yet.",
+	GA_STATUS_FMT = "Guild Activity: %d entries",
+	GA_DOCK_TOOLTIP = "Open guild activity log",
+	GA_SLASH_HELP = "/gms guildlog - opens guild activity log",
+
+	GA_JOIN = "%s joined the guild.",
+	GA_LEAVE = "%s left the guild.",
+	GA_PROMOTE = "%s promoted (%s -> %s).",
+	GA_DEMOTE = "%s demoted (%s -> %s).",
+	GA_ONLINE = "%s is now online.",
+	GA_OFFLINE = "%s went offline.",
+	GA_NOTE_CHANGED = "%s updated public note.",
+	GA_OFFICER_NOTE_CHANGED = "%s updated officer note.",
+})
