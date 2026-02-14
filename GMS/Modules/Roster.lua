@@ -751,6 +751,18 @@ function Roster:BroadcastMetaHeartbeat()
 	if type(payload) ~= "table" then return end
 
 	self:SetMemberMeta(guid, payload, GetTime and GetTime() or 0)
+
+	if type(comm.PublishCharacterRecord) == "function" then
+		comm:PublishCharacterRecord("roster_meta", {
+			version = payload.version,
+			ilvl = payload.ilvl,
+			mplus = payload.mplus,
+			raid = payload.raid,
+		}, {
+			updatedAt = (GetTime and GetTime()) or 0,
+		})
+	end
+
 	comm:SendData("ROSTER_META", {
 		guid = guid,
 		version = payload.version,
@@ -784,6 +796,24 @@ function Roster:InitCommMetaSync()
 			end
 		end
 	end)
+
+	if type(comm.RegisterRecordListener) == "function" then
+		comm:RegisterRecordListener("roster_meta", function(record)
+			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
+			local payload = record.payload
+			if type(payload) ~= "table" then return end
+			if Roster:SetMemberMeta(record.originGUID, {
+				version = payload.version,
+				ilvl = payload.ilvl,
+				mplus = payload.mplus,
+				raid = payload.raid,
+			}, record.updatedAt or ((GetTime and GetTime()) or 0)) then
+				if GMS.UI and GMS.UI._page == METADATA.INTERN_NAME and Roster._lastListParent then
+					Roster:API_RefreshRosterView()
+				end
+			end
+		end)
+	end
 
 	self._commInited = true
 
