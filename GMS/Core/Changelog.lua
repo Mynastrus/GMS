@@ -96,6 +96,22 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.3.26",
+		date = "2026-02-14",
+		title_en = "Packaging workflow alignment for CurseForge",
+		title_de = "Packaging-Workflow fuer CurseForge angeglichen",
+		notes_en = {
+			"Added project-local .pkgmeta packaging configuration for CurseForge builds.",
+			"Updated repository ignore rules so .pkgmeta is tracked in git.",
+			"Release process remains script-based via tools/release.ps1 with strict TOC/changelog version checks.",
+		},
+		notes_de = {
+			"Projektlokale .pkgmeta-Paketkonfiguration fuer CurseForge-Builds hinzugefuegt.",
+			"Ignore-Regeln des Repositories angepasst, damit .pkgmeta in git versioniert wird.",
+			"Der Release-Prozess bleibt skriptbasiert ueber tools/release.ps1 mit strikten TOC-/Changelog-Versionspruefungen.",
+		},
+	},
+	{
 		version = "1.3.25",
 		date = "2026-02-14",
 		title_en = "CharInfo redesign and packaging metadata update",
