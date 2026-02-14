@@ -34,6 +34,8 @@ local _G                         = _G
 local GetTime                    = GetTime
 local time                       = time
 local C_Timer                    = C_Timer
+local CreateFrame                = CreateFrame
+local LoadAddOn                  = LoadAddOn
 local GetGuildRosterInfo         = GetGuildRosterInfo
 local GetGuildRosterLastOnline   = GetGuildRosterLastOnline
 local GetNumGuildMembers         = GetNumGuildMembers
@@ -48,6 +50,15 @@ local UnitFactionGroup           = UnitFactionGroup
 local UnitGUID                   = UnitGUID
 local GetAverageItemLevel        = GetAverageItemLevel
 local GameTooltip                = GameTooltip
+local UIParent                   = UIParent
+local EasyMenu                   = EasyMenu
+local UIDropDownMenu_Initialize  = UIDropDownMenu_Initialize
+local UIDropDownMenu_AddButton   = UIDropDownMenu_AddButton
+local ToggleDropDownMenu         = ToggleDropDownMenu
+local ChatFrame_SendTell         = ChatFrame_SendTell
+local ChatEdit_ChooseBoxForSend  = ChatEdit_ChooseBoxForSend
+local ChatEdit_ActivateChat      = ChatEdit_ActivateChat
+local InviteUnit                 = InviteUnit
 local CLASS_ICON_TCOORDS         = CLASS_ICON_TCOORDS
 local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
 local GameFontNormalSmall        = GameFontNormalSmall
@@ -268,6 +279,7 @@ local function GetAllGuildMembers(sortSpec, skipRequest)
 			m.status = status
 			m.guid = GUID
 			m.note = note or ""
+			m.officernote = officernote or ""
 
 			local lastOnlineTs, lastOnlineText, lastOnlineHours = GetLastOnlineByRosterIndex(i, m.online)
 			m.lastOnlineAt = lastOnlineTs
@@ -782,6 +794,97 @@ function Roster:InitCommMetaSync()
 	return true
 end
 
+Roster._contextMenuFrame = Roster._contextMenuFrame or nil
+
+local function OpenChatEditWithText(text)
+	local t = tostring(text or "")
+	if t == "" then return end
+
+	local editBox = nil
+	if type(ChatEdit_ChooseBoxForSend) == "function" then
+		editBox = ChatEdit_ChooseBoxForSend()
+	end
+	if editBox and type(ChatEdit_ActivateChat) == "function" then
+		ChatEdit_ActivateChat(editBox)
+	end
+	if editBox and type(editBox.SetText) == "function" then
+		editBox:SetText(t)
+		if type(editBox.HighlightText) == "function" then
+			editBox:HighlightText()
+		end
+	end
+end
+
+function Roster:ShowMemberContextMenu(anchorFrame, memberData)
+	if type(memberData) ~= "table" then return end
+	local nameFull = tostring(memberData.name_full or memberData.name or "")
+	if nameFull == "" then return end
+
+	if type(EasyMenu) ~= "function" and type(LoadAddOn) == "function" then
+		pcall(LoadAddOn, "Blizzard_UIDropDownMenu")
+		EasyMenu = _G and _G.EasyMenu or EasyMenu
+		UIDropDownMenu_Initialize = _G and _G.UIDropDownMenu_Initialize or UIDropDownMenu_Initialize
+		UIDropDownMenu_AddButton = _G and _G.UIDropDownMenu_AddButton or UIDropDownMenu_AddButton
+		ToggleDropDownMenu = _G and _G.ToggleDropDownMenu or ToggleDropDownMenu
+	end
+
+	if not self._contextMenuFrame and type(CreateFrame) == "function" then
+		self._contextMenuFrame = CreateFrame("Frame", "GMSRosterMemberContextMenu", UIParent, "UIDropDownMenuTemplate")
+	end
+	if not self._contextMenuFrame then
+		return
+	end
+
+	local menu = {
+		{ text = nameFull, isTitle = true, notCheckable = true },
+		{
+			text = "Anfluestern",
+			notCheckable = true,
+			func = function()
+				if type(ChatFrame_SendTell) == "function" then
+					ChatFrame_SendTell(nameFull)
+				else
+					OpenChatEditWithText("/w " .. nameFull .. " ")
+				end
+			end,
+		},
+		{
+			text = "Name kopieren (inkl. Realm)",
+			notCheckable = true,
+			func = function()
+				OpenChatEditWithText(nameFull)
+			end,
+		},
+		{
+			text = "In Gruppe einladen",
+			notCheckable = true,
+			func = function()
+				if type(InviteUnit) == "function" then
+					InviteUnit(nameFull)
+				end
+			end,
+		},
+	}
+
+	if type(EasyMenu) == "function" then
+		EasyMenu(menu, self._contextMenuFrame, "cursor", 0, 0, "MENU")
+		return
+	end
+
+	-- Fallback path if EasyMenu is still unavailable.
+	if type(UIDropDownMenu_Initialize) == "function"
+		and type(UIDropDownMenu_AddButton) == "function"
+		and type(ToggleDropDownMenu) == "function" then
+		UIDropDownMenu_Initialize(self._contextMenuFrame, function(_, level)
+			if level ~= 1 then return end
+			for i = 1, #menu do
+				UIDropDownMenu_AddButton(menu[i], level)
+			end
+		end, "MENU")
+		ToggleDropDownMenu(1, nil, self._contextMenuFrame, anchorFrame or "cursor", 0, 0)
+	end
+end
+
 -- Forward declaration (used by async builder before actual definition below)
 local FilterMembersByVisibility
 local UpdateRosterStatus
@@ -894,7 +997,7 @@ local function BuildCell_Level(row, member, ctx)
 	LEVEL:SetText(tostring(member.level or ""))
 	LEVEL.label:SetFontObject(GameFontNormalSmallOutline)
 	LEVEL.label:SetJustifyH("CENTER")
-	LEVEL:SetWidth(25)
+	LEVEL:SetWidth(24)
 	row:AddChild(LEVEL)
 end
 
@@ -911,7 +1014,7 @@ local function BuildCell_Name(row, member, ctx)
 	local MEMBER_NAME = AceGUI:Create("Label")
 	MEMBER_NAME:SetText("|c" .. hex .. tostring(member.name or "") .. "|r")
 	MEMBER_NAME.label:SetFontObject(GameFontNormalSmallOutline)
-	MEMBER_NAME:SetWidth(150)
+	MEMBER_NAME:SetWidth(125)
 	row:AddChild(MEMBER_NAME)
 end
 
@@ -926,7 +1029,7 @@ local function BuildCell_Realm(row, member, ctx)
 	local REALM = AceGUI:Create("Label")
 	REALM:SetText(tostring(member.realm or ""))
 	REALM.label:SetFontObject(GameFontNormalSmallOutline)
-	REALM:SetWidth(120)
+	REALM:SetWidth(90)
 	row:AddChild(REALM)
 end
 
@@ -1139,6 +1242,7 @@ local function BuildRosterHeaderRow(parent, rebuildFn)
 	local header = AceGUI:Create("SimpleGroup")
 	header:SetFullWidth(true)
 	header:SetLayout("Flow")
+	header:SetHeight(18)
 	parent:AddChild(header)
 
 	for _, colId in ipairs(Roster._columns.order) do
@@ -1223,6 +1327,13 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 	-- Clear GUID mapping on full rebuild
 	wipe(Roster._guidToRow)
 
+	local function Rebuild()
+		BuildGuildRosterLabelsAsync(parent, perFrame, delay)
+		parent:DoLayout()
+	end
+
+	BuildRosterHeaderRow(parent, Rebuild)
+
 	local allMembers = GetAllGuildMembers(BuildRosterSortSpec())
 	local totalMembers = #allMembers
 	local members = FilterMembersByVisibility(allMembers)
@@ -1284,12 +1395,14 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 					local rowLevel = m.level or "-"
 					local rowClass = m.class or "-"
 					local rowRealm = m.realm or "-"
+					local rowClassFile = m.classFileName
 					local rowLastOnline = m.lastOnlineText or "-"
 					local rowILvl = m.ilvl and string.format("%.1f", m.ilvl) or "-"
 					local rowMPlus = m.mplusScore and tostring(math.floor((m.mplusScore or 0) + 0.5)) or "-"
 					local rowRaid = m.raidStatus or "-"
 					local rowGms = m.gmsVersion or "-"
-					local rowOnline = m.online and "Online" or "Offline"
+					local rowPublicNote = tostring(m.note or "")
+					local rowOfficerNote = tostring(m.officernote or "")
 					local rowStatus = GetPresenceState(m)
 					row.frame:EnableMouse(true)
 
@@ -1303,14 +1416,54 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 					row.frame:SetScript("OnEnter", function(self)
 						hover:Show()
 						if GameTooltip then
+							local _, _, _, classHex = GetClassColor(rowClassFile)
+							local statusText = "Offline"
+							if rowStatus == "ONLINE" then
+								statusText = "Online"
+							elseif rowStatus == "AFK" then
+								statusText = "Away"
+							elseif rowStatus == "DND" then
+								statusText = "Busy"
+							end
+
+							local displayRealm = tostring(rowRealm or "-")
+							local localNormRealm = (type(GetNormalizedRealmName) == "function" and tostring(GetNormalizedRealmName() or "")) or ""
+							if displayRealm == localNormRealm and type(GetRealmName) == "function" then
+								displayRealm = tostring(GetRealmName() or displayRealm)
+							end
+							displayRealm = displayRealm:gsub("%-", " ")
+
+							local classColor = tostring(classHex or "FFFFFFFF")
+							if #classColor == 8 then
+								classColor = classColor:sub(3) -- drop alpha when using |cffRRGGBB
+							end
+							local function TT_Row(labelText, valueText)
+								local label = tostring(labelText or "")
+								local value = tostring(valueText or "-")
+								if GameTooltip.AddDoubleLine then
+									GameTooltip:AddDoubleLine(label, value, 0.62, 0.62, 0.62, 1.0, 1.0, 1.0)
+								else
+									GameTooltip:AddLine(string.format("|cff9d9d9d%s|r |cffffffff%s|r", label, value))
+								end
+							end
+
 							GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
-							GameTooltip:SetText(string.format("%s (Lvl %s %s)", tostring(rowName), tostring(rowLevel), tostring(rowClass)), 1, 1, 1)
-							GameTooltip:AddLine(string.format("Realm: %s", tostring(rowRealm)), 0.8, 0.8, 0.8)
-							GameTooltip:AddLine(string.format("Status: %s (%s)", tostring(rowOnline), tostring(rowStatus)), 0.8, 0.8, 0.8)
-							GameTooltip:AddLine(string.format("Zuletzt online: %s", tostring(rowLastOnline)), 0.8, 0.8, 0.8)
-							GameTooltip:AddLine(string.format("iLvl: %s   M+: %s   Raid: %s", tostring(rowILvl), tostring(rowMPlus), tostring(rowRaid)), 0.8, 0.8, 0.8)
-							GameTooltip:AddLine(string.format("GMS: %s", tostring(rowGms)), 0.8, 0.8, 0.8)
+							GameTooltip:SetText(string.format("|cff%s%s|r", classColor, tostring(rowName)))
+							GameTooltip:AddLine(" ")
+							TT_Row("Status", statusText)
+							TT_Row("Level/Class", string.format("%s %s", tostring(rowLevel), tostring(rowClass)))
+							TT_Row("Realm", displayRealm)
+							TT_Row("Last Online", rowLastOnline)
+							TT_Row("iLvl", rowILvl)
+							TT_Row("M+", rowMPlus)
+							TT_Row("Raid", rowRaid)
+							TT_Row("GMS", rowGms)
+							TT_Row("Öffentliche Notiz", (rowPublicNote ~= "" and rowPublicNote) or "-")
+							if rowOfficerNote ~= "" then
+								TT_Row("Offiziersnotiz", rowOfficerNote)
+							end
 							if rowGuid and rowGuid ~= "" then
+								GameTooltip:AddLine(" ")
 								GameTooltip:AddLine(string.format("|cff888888GUID: %s|r", tostring(rowGuid)), 1, 1, 1)
 							end
 							GameTooltip:Show()
@@ -1321,6 +1474,16 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 						if GameTooltip then GameTooltip:Hide() end
 					end)
 					row.frame:SetScript("OnMouseUp", function(_, mouseButton)
+						if mouseButton == "RightButton" then
+							if Roster and type(Roster.ShowMemberContextMenu) == "function" then
+								Roster:ShowMemberContextMenu(row.frame, {
+									name = rowName,
+									name_full = rowNameFull,
+									guid = rowGuid,
+								})
+							end
+							return
+						end
 						if mouseButton ~= "LeftButton" then return end
 						local ui = (GMS and (GMS.UI or GMS:GetModule("UI", true))) or nil
 						if not ui or type(ui.Open) ~= "function" then
@@ -1746,28 +1909,6 @@ local function BuildRosterHeaderUI()
 		C_Timer.After(0.15, RefreshHeaderLayout)
 	end
 
-	local tableHeaderHost = AceGUI:Create("SimpleGroup")
-	tableHeaderHost:SetFullWidth(true)
-	tableHeaderHost:SetLayout("List")
-	header:AddChild(tableHeaderHost)
-
-	local function RebuildStickyTableHeader()
-		if type(tableHeaderHost.ReleaseChildren) == "function" then
-			tableHeaderHost:ReleaseChildren()
-		end
-		BuildRosterHeaderRow(tableHeaderHost, function()
-			RebuildStickyTableHeader()
-			if Roster and type(Roster.API_RefreshRosterView) == "function" then
-				Roster:API_RefreshRosterView()
-			end
-		end)
-		if type(tableHeaderHost.DoLayout) == "function" then
-			tableHeaderHost:DoLayout()
-		end
-	end
-
-	Roster._rebuildStickyTableHeader = RebuildStickyTableHeader
-	RebuildStickyTableHeader()
 end
 
 local function BuildRosterPageUI(root, id, isCached)
