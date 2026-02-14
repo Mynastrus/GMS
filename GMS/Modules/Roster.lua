@@ -2,13 +2,13 @@
 --	GMS/Modules/Roster.lua
 --	ROSTER-Module (Ace-only)
 --	- KEIN _G, KEIN addonTable
---	- Zugriff auf GMS ausschlieÃŸlich Ã¼ber AceAddon Registry
+--	- Zugriff auf GMS ausschliesslich ueber AceAddon Registry
 --	- UI: Registriert Page + RightDock Icon
 --	- Roster-View:
 --		- Modular: Spalten per Column-Registry (jede Spalte eigene Build-Fn)
---		- Header: klickbar, Ã¤ndert Sortierung (ASC/DESC Toggle)
---		- Erweiterbar: externe Spalten Ã¼ber Augmenter (GUID -> Zusatzdaten)
---		- Async Build: X EintrÃ¤ge pro Frame (Token-Guard gegen alte Builds)
+--		- Header: klickbar, aendert Sortierung (ASC/DESC Toggle)
+--		- Erweiterbar: externe Spalten ueber Augmenter (GUID -> Zusatzdaten)
+--		- Async Build: X Eintraege pro Frame (Token-Guard gegen alte Builds)
 -- ============================================================================
 
 local METADATA = {
@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.0.11",
+	VERSION      = "1.0.22",
 }
 
 local LibStub = LibStub
@@ -32,8 +32,10 @@ if not GMS then return end
 ---@diagnostic disable: undefined-global
 local _G                         = _G
 local GetTime                    = GetTime
+local time                       = time
 local C_Timer                    = C_Timer
 local GetGuildRosterInfo         = GetGuildRosterInfo
+local GetGuildRosterLastOnline   = GetGuildRosterLastOnline
 local GetNumGuildMembers         = GetNumGuildMembers
 local GetFullRoster              = GetFullRoster -- Fallback or custom
 local IsInGuild                  = IsInGuild
@@ -43,10 +45,14 @@ local GuildRoster                = GuildRoster
 local GetRealmName               = GetRealmName
 local GetNormalizedRealmName     = GetNormalizedRealmName
 local UnitFactionGroup           = UnitFactionGroup
+local UnitGUID                   = UnitGUID
+local GetAverageItemLevel        = GetAverageItemLevel
+local GameTooltip                = GameTooltip
 local CLASS_ICON_TCOORDS         = CLASS_ICON_TCOORDS
 local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
 local GameFontNormalSmallOutline = GameFontNormalSmallOutline
 local GameFontNormalLarge        = GameFontNormalLarge
+local GameFontNormal             = GameFontNormal
 ---@diagnostic enable: undefined-global
 
 local AceGUI = LibStub("AceGUI-3.0", true)
@@ -111,13 +117,16 @@ Roster._lastGuidOrderSig = Roster._lastGuidOrderSig or ""
 Roster._updateScheduled = Roster._updateScheduled or false
 Roster._optionsRetryScheduled = Roster._optionsRetryScheduled or false
 Roster._nameCacheCount = Roster._nameCacheCount or 0
+Roster._memberMetaCache = Roster._memberMetaCache or {}
+Roster._commInited = Roster._commInited or false
+Roster._commTicker = Roster._commTicker or nil
 
 -- ###########################################################################
 -- #	NAME NORMALIZATION
 -- ###########################################################################
 
 -- ---------------------------------------------------------------------------
---	Stellt sicher, dass ein Charname IMMER den Realm enthÃ¤lt
+--	Stellt sicher, dass ein Charname IMMER den Realm enthaelt
 --	- "Name"        -> "Name-Realm"
 --	- "Name-Realm"  -> "Name-Realm"
 --
@@ -161,6 +170,8 @@ end
 -- #	GUILD DATA + MULTI SORT
 -- ###########################################################################
 
+local GetLastOnlineByRosterIndex
+
 -- ---------------------------------------------------------------------------
 --	Liest alle Gildenmitglieder und sortiert sie mehrstufig
 --
@@ -200,6 +211,8 @@ local function GetAllGuildMembers(sortSpec, skipRequest)
 	if total == 0 then
 		return members
 	end
+
+	local playerFaction = (type(UnitFactionGroup) == "function" and UnitFactionGroup("player")) or nil
 
 	-- Collect members using pool
 	local pool = Roster._tablePool
@@ -248,16 +261,34 @@ local function GetAllGuildMembers(sortSpec, skipRequest)
 			m.level = level or 0
 			m.class = class
 			m.classFileName = classFileName
+			m.faction = playerFaction
 			m.zone = zone or ""
 			m.online = online and true or false
 			m.status = status
 			m.guid = GUID
 			m.note = note or ""
 
+			local lastOnlineTs, lastOnlineText, lastOnlineHours = GetLastOnlineByRosterIndex(i, m.online)
+			m.lastOnlineAt = lastOnlineTs
+			m.lastOnlineText = lastOnlineText
+			m.lastOnlineHours = lastOnlineHours or 0
+			local meta = (GUID and Roster:GetMemberMeta(GUID)) or nil
+			m.ilvl = (meta and tonumber(meta.ilvl)) or nil
+			m.mplusScore = (meta and tonumber(meta.mplus)) or nil
+			m.raidStatus = (meta and tostring(meta.raid or "")) or "-"
+			if m.raidStatus == "" then m.raidStatus = "-" end
+			m.gmsVersion = (meta and tostring(meta.version or "")) or "-"
+			if m.gmsVersion == "" then m.gmsVersion = "-" end
+			if m.guid and UnitGUID and m.guid == UnitGUID("player") and (m.gmsVersion == "-") then
+				m.gmsVersion = tostring((GMS and GMS.VERSION) or "-")
+			end
+
 			-- Generate a Data Fingerprint for incremental updates
-			m.fingerprint = string.format("%s:%d:%s:%s:%s:%s",
+			m.fingerprint = string.format("%s:%d:%s:%s:%s:%s:%s:%s:%s:%s:%s",
 				GUID or "no-guid", level or 0, rankIndex or 0,
-				m.online and "1" or "0", tostring(status or ""), note or "")
+				m.online and "1" or "0", tostring(status or ""), note or "",
+				tostring(m.lastOnlineHours or 0), tostring(m.ilvl or "-"),
+				tostring(m.mplusScore or "-"), tostring(m.raidStatus or "-"), tostring(m.gmsVersion or "-"))
 
 			members[#members + 1] = m
 		end
@@ -292,7 +323,7 @@ end
 -- ###########################################################################
 
 -- ---------------------------------------------------------------------------
---	Gibt Icon Pfad fÃ¼r classFileName zurÃ¼ck (fallback QuestionMark)
+--	Gibt Icon Pfad fuer classFileName zurueck (fallback QuestionMark)
 --	@param classFileName string
 --	@return string
 -- ---------------------------------------------------------------------------
@@ -322,7 +353,7 @@ local function GetClassIconPathFromClassFileName(classFileName)
 end
 
 -- ---------------------------------------------------------------------------
---	Erstellt ein AceGUI Icon fÃ¼r eine Klasse
+--	Erstellt ein AceGUI Icon fuer eine Klasse
 --
 --	@param classFileName string
 --	@return AceGUIWidget|nil
@@ -345,7 +376,7 @@ local function CreateClassIconWidget(classFileName)
 end
 
 -- ---------------------------------------------------------------------------
---	Gibt die Klassenfarbe fÃ¼r ein classFileName zurÃ¼ck
+--	Gibt die Klassenfarbe fuer ein classFileName zurueck
 --
 --	@param classFileName string
 --	@return number r, number g, number b, string hex
@@ -368,7 +399,7 @@ end
 -- ###########################################################################
 
 -- ---------------------------------------------------------------------------
---	Registriert eine neue Spalte fÃ¼r den Roster (erweiterbar)
+--	Registriert eine neue Spalte fuer den Roster (erweiterbar)
 --
 --	@param def table
 --		- id string (unique)
@@ -528,8 +559,225 @@ local function BuildGuidOrderSignature(members)
 	return table.concat(parts, "|")
 end
 
+local function BuildLastOnlineText(years, months, days, hours)
+	local y = tonumber(years) or 0
+	local mo = tonumber(months) or 0
+	local d = tonumber(days) or 0
+	local h = tonumber(hours) or 0
+
+	if y <= 0 and mo <= 0 and d <= 0 and h <= 0 then
+		return "-"
+	end
+	if y > 0 then return string.format("%dy %dmo", y, mo) end
+	if mo > 0 then return string.format("%dmo %dd", mo, d) end
+	if d > 0 then return string.format("%dd %dh", d, h) end
+	return string.format("%dh", h)
+end
+
+GetLastOnlineByRosterIndex = function(index, isOnline)
+	if isOnline then
+		return 0, "Online", 0
+	end
+
+	local y, mo, d, h
+	if C_GuildInfo and type(C_GuildInfo.GetGuildRosterLastOnline) == "function" then
+		y, mo, d, h = C_GuildInfo.GetGuildRosterLastOnline(index)
+	elseif type(GetGuildRosterLastOnline) == "function" then
+		y, mo, d, h = GetGuildRosterLastOnline(index)
+	end
+
+	local years = tonumber(y) or 0
+	local months = tonumber(mo) or 0
+	local days = tonumber(d) or 0
+	local hours = tonumber(h) or 0
+	local totalHours = (years * 365 * 24) + (months * 30 * 24) + (days * 24) + hours
+
+	if totalHours <= 0 then
+		return nil, "-", 0
+	end
+
+	local text = BuildLastOnlineText(years, months, days, hours)
+	local ts = (type(time) == "function") and (time() - (totalHours * 3600)) or nil
+	return ts, text, totalHours
+end
+
+function Roster:GetMemberMetaStore()
+	local opts = self._options
+	if type(opts) == "table" then
+		opts.memberMeta = opts.memberMeta or {}
+		return opts.memberMeta
+	end
+	self._memberMetaCache = self._memberMetaCache or {}
+	return self._memberMetaCache
+end
+
+function Roster:GetMemberMeta(guid)
+	if type(guid) ~= "string" or guid == "" then return nil end
+	local store = self:GetMemberMetaStore()
+	local e = store and store[guid]
+	if type(e) ~= "table" then return nil end
+	return e
+end
+
+function Roster:GetMemberGmsVersion(guid)
+	local e = self:GetMemberMeta(guid)
+	if type(e) ~= "table" then return nil end
+	local v = tostring(e.version or "")
+	if v == "" then return nil end
+	return v
+end
+
+function Roster:SetMemberMeta(guid, meta, seenAt)
+	if type(guid) ~= "string" or guid == "" then return false end
+	if type(meta) ~= "table" then return false end
+
+	local store = self:GetMemberMetaStore()
+	local t = tonumber(seenAt) or (GetTime and GetTime()) or 0
+	store[guid] = store[guid] or {}
+	local row = store[guid]
+
+	local v = tostring(meta.version or "")
+	if v ~= "" then row.version = v end
+
+	local ilvl = tonumber(meta.ilvl)
+	if ilvl and ilvl > 0 then row.ilvl = ilvl end
+
+	local mplus = tonumber(meta.mplus)
+	if mplus and mplus >= 0 then row.mplus = mplus end
+
+	local raid = tostring(meta.raid or "")
+	if raid ~= "" then row.raid = raid end
+
+	row.seenAt = t
+	return true
+end
+
+function Roster:SetMemberGmsVersion(guid, version, seenAt)
+	if type(guid) ~= "string" or guid == "" then return false end
+	local v = tostring(version or "")
+	if v == "" then return false end
+
+	return self:SetMemberMeta(guid, { version = v }, seenAt)
+end
+
+local function BuildRaidStatusFromRaidsModule()
+	local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true))
+	if not raids or type(raids.GetAllRaids) ~= "function" then
+		return "-"
+	end
+
+	local all = raids:GetAllRaids()
+	if type(all) ~= "table" then return "-" end
+
+	local bestDiff = -1
+	local bestKilled = -1
+	local bestShort = "-"
+	for _, raidEntry in pairs(all) do
+		if type(raidEntry) == "table" and type(raidEntry.best) == "table" then
+			local b = raidEntry.best
+			local diff = tonumber(b.diffID) or 0
+			local killed = tonumber(b.killed) or 0
+			local short = tostring(b.short or "")
+			if short ~= "" then
+				if diff > bestDiff or (diff == bestDiff and killed > bestKilled) then
+					bestDiff = diff
+					bestKilled = killed
+					bestShort = short
+				end
+			end
+		end
+	end
+	return bestShort
+end
+
+local function CollectLocalMetaPayload()
+	local version = tostring((GMS and GMS.VERSION) or "")
+	local ilvl = nil
+	if type(GetAverageItemLevel) == "function" then
+		local _, equipped = GetAverageItemLevel()
+		ilvl = tonumber(equipped)
+	end
+
+	local mplus = nil
+	local mythic = GMS and GMS:GetModule("MythicPlus", true)
+	if mythic and type(mythic._options) == "table" then
+		mplus = tonumber(mythic._options.score)
+	end
+	if not mplus and GMS and type(GMS.GetModuleOptions) == "function" then
+		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "MythicPlus")
+		if ok and type(opts) == "table" then
+			mplus = tonumber(opts.score)
+		end
+	end
+
+	return {
+		version = (version ~= "" and version) or nil,
+		ilvl = ilvl,
+		mplus = mplus,
+		raid = BuildRaidStatusFromRaidsModule(),
+	}
+end
+
+function Roster:BroadcastMetaHeartbeat()
+	local comm = GMS and GMS.Comm
+	if not comm or type(comm.SendData) ~= "function" then return end
+
+	local guid = (type(UnitGUID) == "function") and UnitGUID("player") or nil
+	if not guid then return end
+
+	local payload = CollectLocalMetaPayload()
+	if type(payload) ~= "table" then return end
+
+	self:SetMemberMeta(guid, payload, GetTime and GetTime() or 0)
+	comm:SendData("ROSTER_META", {
+		guid = guid,
+		version = payload.version,
+		ilvl = payload.ilvl,
+		mplus = payload.mplus,
+		raid = payload.raid,
+		ts = (GetTime and GetTime()) or 0,
+	}, "BULK", "GUILD")
+end
+
+function Roster:InitCommMetaSync()
+	if self._commInited then return true end
+	local comm = GMS and GMS.Comm
+	if not comm or type(comm.RegisterPrefix) ~= "function" then
+		return false
+	end
+
+	comm:RegisterPrefix("ROSTER_META", function(senderGUID, data, raw)
+		if type(data) ~= "table" then return end
+		local guid = senderGUID or data.guid
+		local payload = {
+			version = data.version or data.v,
+			ilvl = data.ilvl,
+			mplus = data.mplus,
+			raid = data.raid,
+		}
+		local seenAt = data.ts or (GetTime and GetTime()) or 0
+		if Roster:SetMemberMeta(guid, payload, seenAt) then
+			if GMS.UI and GMS.UI._page == METADATA.INTERN_NAME and Roster._lastListParent then
+				Roster:API_RefreshRosterView()
+			end
+		end
+	end)
+
+	self._commInited = true
+
+	if not self._commTicker and C_Timer and type(C_Timer.NewTicker) == "function" then
+		self._commTicker = C_Timer.NewTicker(120, function()
+			Roster:BroadcastMetaHeartbeat()
+		end)
+	end
+
+	self:BroadcastMetaHeartbeat()
+	return true
+end
+
 -- Forward declaration (used by async builder before actual definition below)
 local FilterMembersByVisibility
+local UpdateRosterStatus
 
 -- ###########################################################################
 -- #	CELL BUILDERS (EINE FUNKTION PRO SPALTE)
@@ -551,23 +799,68 @@ end
 
 local function BuildCell_PresenceDot(row, member, ctx)
 	local state = GetPresenceState(member)
-	local color = "|cff9d9d9d" -- OFFLINE gray
+	local iconPath = "Interface\\FriendsFrame\\StatusIcon-Offline"
+	local tooltip = "Offline"
 	if state == "ONLINE" then
-		color = "|cff4dff88" -- green
+		iconPath = "Interface\\FriendsFrame\\StatusIcon-Online"
+		tooltip = "Online"
 	elseif state == "AFK" then
-		color = "|cffffd24d" -- yellow
+		iconPath = "Interface\\FriendsFrame\\StatusIcon-Away"
+		tooltip = "Away"
 	elseif state == "DND" then
-		color = "|cffff4d4d" -- red
+		iconPath = "Interface\\FriendsFrame\\StatusIcon-DnD"
+		tooltip = "Busy"
 	end
 
-	local dot = AceGUI:Create("Label")
-	dot:SetText(color .. "●|r")
-	dot:SetWidth(14)
-	if dot.label then
-		dot.label:SetFontObject(GameFontNormalSmallOutline)
-		dot.label:SetJustifyH("CENTER")
+	local icon = AceGUI:Create("Icon")
+	icon:SetImage(iconPath)
+	icon:SetImageSize(12, 12)
+	icon:SetWidth(14)
+	icon:SetHeight(12)
+	if icon.frame then
+		icon.frame:EnableMouse(true)
+		icon.frame:SetScript("OnEnter", function(self)
+			if not GameTooltip then return end
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip:SetText(tooltip, 1, 1, 1)
+			GameTooltip:Show()
+		end)
+		icon.frame:SetScript("OnLeave", function()
+			if GameTooltip then GameTooltip:Hide() end
+		end)
 	end
-	row:AddChild(dot)
+	row:AddChild(icon)
+end
+
+local function BuildCell_FactionIcon(row, member, ctx)
+	local faction = tostring(member and member.faction or "")
+	local iconPath = "Interface\\Icons\\INV_Misc_QuestionMark"
+	local tooltip = (faction ~= "" and faction) or "Unknown"
+	if faction == "Alliance" then
+		iconPath = "Interface\\TargetingFrame\\UI-PVP-Alliance"
+	elseif faction == "Horde" then
+		iconPath = "Interface\\TargetingFrame\\UI-PVP-Horde"
+	end
+
+	local icon = AceGUI:Create("Icon")
+	icon:SetImage(iconPath)
+	icon:SetImageSize(12, 12)
+	icon:SetWidth(14)
+	icon:SetHeight(12)
+	if icon.frame then
+		icon.frame:EnableMouse(true)
+		icon.frame:SetScript("OnEnter", function(self)
+			if not GameTooltip then return end
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip:SetText("Faction", 1, 1, 1)
+			GameTooltip:AddLine(tooltip, 0.8, 0.8, 0.8)
+			GameTooltip:Show()
+		end)
+		icon.frame:SetScript("OnLeave", function()
+			if GameTooltip then GameTooltip:Hide() end
+		end)
+	end
+	row:AddChild(icon)
 end
 
 -- ---------------------------------------------------------------------------
@@ -675,6 +968,58 @@ local function BuildCell_Zone(row, member, ctx)
 	row:AddChild(ZONE)
 end
 
+local function BuildCell_LastOnline(row, member, ctx)
+	local txt = tostring((member and member.lastOnlineText) or "-")
+	local lbl = AceGUI:Create("Label")
+	lbl:SetText(txt)
+	lbl.label:SetFontObject(GameFontNormalSmallOutline)
+	lbl:SetWidth(80)
+	row:AddChild(lbl)
+end
+
+local function BuildCell_iLvl(row, member, ctx)
+	local n = tonumber(member and member.ilvl)
+	local txt = (n and string.format("%.1f", n)) or "-"
+	local lbl = AceGUI:Create("Label")
+	lbl:SetText(txt)
+	lbl.label:SetFontObject(GameFontNormalSmallOutline)
+	lbl:SetWidth(45)
+	row:AddChild(lbl)
+end
+
+local function BuildCell_MPlus(row, member, ctx)
+	local n = tonumber(member and member.mplusScore)
+	local txt = (n and tostring(math.floor(n + 0.5))) or "-"
+	local lbl = AceGUI:Create("Label")
+	lbl:SetText(txt)
+	lbl.label:SetFontObject(GameFontNormalSmallOutline)
+	lbl:SetWidth(45)
+	row:AddChild(lbl)
+end
+
+local function BuildCell_RaidStatus(row, member, ctx)
+	local txt = tostring((member and member.raidStatus) or "-")
+	local lbl = AceGUI:Create("Label")
+	lbl:SetText(txt)
+	lbl.label:SetFontObject(GameFontNormalSmallOutline)
+	lbl:SetWidth(70)
+	row:AddChild(lbl)
+end
+
+local function BuildCell_GmsVersion(row, member, ctx)
+	local v = tostring((member and member.gmsVersion) or "-")
+	if v == "" then v = "-" end
+	local lbl = AceGUI:Create("Label")
+	if v ~= "-" then
+		lbl:SetText("|cff7CFC00" .. v .. "|r")
+	else
+		lbl:SetText("|cff8a8a8a-|r")
+	end
+	lbl.label:SetFontObject(GameFontNormalSmallOutline)
+	lbl:SetWidth(60)
+	row:AddChild(lbl)
+end
+
 -- ###########################################################################
 -- #	DEFAULT COLUMNS SEED
 -- ###########################################################################
@@ -706,9 +1051,18 @@ local function EnsureDefaultRosterColumnsRegistered()
 	})
 
 	Roster:API_RegisterRosterColumnDefinition({
+		id = "faction",
+		title = "",
+		width = 14,
+		order = 15,
+		sortable = false,
+		buildCellFn = BuildCell_FactionIcon,
+	})
+
+	Roster:API_RegisterRosterColumnDefinition({
 		id = "level",
 		title = "Lvl",
-		width = 25,
+		width = 24,
 		order = 20,
 		sortable = true,
 		sortKey = "level",
@@ -718,7 +1072,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 	Roster:API_RegisterRosterColumnDefinition({
 		id = "name",
 		title = "Name",
-		width = 150,
+		width = 125,
 		order = 30,
 		sortable = true,
 		sortKey = "name",
@@ -728,7 +1082,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 	Roster:API_RegisterRosterColumnDefinition({
 		id = "realm",
 		title = "Realm",
-		width = 120,
+		width = 90,
 		order = 40,
 		sortable = true,
 		sortKey = "realm",
@@ -738,11 +1092,61 @@ local function EnsureDefaultRosterColumnsRegistered()
 	Roster:API_RegisterRosterColumnDefinition({
 		id = "zone",
 		title = "Zone",
-		width = 220,
+		width = 100,
 		order = 50,
 		sortable = true,
 		sortKey = "zone",
 		buildCellFn = BuildCell_Zone,
+	})
+
+	Roster:API_RegisterRosterColumnDefinition({
+		id = "lastOnline",
+		title = "Zuletzt online",
+		width = 80,
+		order = 60,
+		sortable = true,
+		sortKey = "lastOnlineHours",
+		buildCellFn = BuildCell_LastOnline,
+	})
+
+	Roster:API_RegisterRosterColumnDefinition({
+		id = "ilvl",
+		title = "iLvl",
+		width = 45,
+		order = 70,
+		sortable = true,
+		sortKey = "ilvl",
+		buildCellFn = BuildCell_iLvl,
+	})
+
+	Roster:API_RegisterRosterColumnDefinition({
+		id = "mplus",
+		title = "M+",
+		width = 45,
+		order = 80,
+		sortable = true,
+		sortKey = "mplusScore",
+		buildCellFn = BuildCell_MPlus,
+	})
+
+	Roster:API_RegisterRosterColumnDefinition({
+		id = "raidStatus",
+		title = "Raid",
+		width = 70,
+		order = 90,
+		sortable = true,
+		sortKey = "raidStatus",
+		buildCellFn = BuildCell_RaidStatus,
+	})
+
+	Roster:API_RegisterRosterColumnDefinition({
+		id = "gmsVersion",
+		title = "GMS",
+		width = 60,
+		order = 100,
+		sortable = true,
+		sortKey = "gmsVersion",
+		buildCellFn = BuildCell_GmsVersion,
 	})
 end
 
@@ -818,9 +1222,9 @@ end
 -- ###########################################################################
 
 -- ---------------------------------------------------------------------------
---	Baut Guild-Roster-Labels asynchron (X EintrÃ¤ge pro Frame)
+--	Baut Guild-Roster-Labels asynchron (X Eintraege pro Frame)
 --	- Nutzt Column-Registry + Header + SortState
---	- Ruft externe Augmenter fÃ¼r Zusatzspalten auf (GUID -> member.someField)
+--	- Ruft externe Augmenter fuer Zusatzspalten auf (GUID -> member.someField)
 --
 --	@param parent AceGUIWidget
 --	@param perFrame number
@@ -855,8 +1259,10 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 
 	BuildRosterHeaderRow(parent, Rebuild)
 
-	local members = GetAllGuildMembers(BuildRosterSortSpec())
-	members = FilterMembersByVisibility(members)
+	local allMembers = GetAllGuildMembers(BuildRosterSortSpec())
+	local totalMembers = #allMembers
+	local members = FilterMembersByVisibility(allMembers)
+	UpdateRosterStatus(#members, totalMembers)
 	Roster._lastGuidOrderSig = BuildGuidOrderSignature(members)
 	if not members or #members == 0 then
 		local empty = AceGUI:Create("Label")
@@ -954,6 +1360,61 @@ local function IsMemberVisibleByOnlineState(member)
 	return showOffline
 end
 
+local function NormalizeSearchQuery(raw)
+	local q = tostring(raw or "")
+	q = q:gsub("^%s+", ""):gsub("%s+$", "")
+	return q:lower()
+end
+
+local function MemberMatchesSearch(member, queryLower)
+	if queryLower == "" then return true end
+	if type(member) ~= "table" then return false end
+
+	for k, v in pairs(member) do
+		local tv = type(v)
+		if tv == "string" or tv == "number" or tv == "boolean" then
+			local s = tostring(v):lower()
+			if s:find(queryLower, 1, true) then
+				return true
+			end
+		elseif tv == "table" then
+			for kk, vv in pairs(v) do
+				local tvv = type(vv)
+				if tvv == "string" or tvv == "number" or tvv == "boolean" then
+					local s = tostring(vv):lower()
+					if s:find(queryLower, 1, true) then
+						return true
+					end
+				end
+			end
+		end
+	end
+	return false
+end
+
+UpdateRosterStatus = function(displayedCount, totalCount)
+	if not (GMS.UI and type(GMS.UI.SetStatusText) == "function") then return end
+
+	local shown = tonumber(displayedCount) or 0
+	local total = tonumber(totalCount) or 0
+	if total < 0 then total = 0 end
+	if shown < 0 then shown = 0 end
+
+	local opts = Roster._options or {}
+	local q = NormalizeSearchQuery(opts.searchQuery)
+	local msg = ""
+
+	if q ~= "" then
+		msg = string.format("|cffb8b8b8Roster:|r angezeigt %d von %d (Suche: %s)", shown, total, q)
+	elseif shown ~= total then
+		msg = string.format("|cffb8b8b8Roster:|r angezeigt %d von %d", shown, total)
+	else
+		msg = string.format("|cffb8b8b8Roster:|r %d Mitglieder", total)
+	end
+
+	GMS.UI:SetStatusText(msg)
+end
+
 FilterMembersByVisibility = function(members)
 	if type(members) ~= "table" or #members == 0 then
 		return members or {}
@@ -963,8 +1424,9 @@ FilterMembersByVisibility = function(members)
 	local opts = Roster._options
 	local showOnline = (opts.showOnline ~= false)
 	local showOffline = (opts.showOffline ~= false)
+	local searchQuery = NormalizeSearchQuery(opts.searchQuery)
 
-	if showOnline and showOffline then
+	if showOnline and showOffline and searchQuery == "" then
 		return members
 	end
 	if (not showOnline) and (not showOffline) then
@@ -974,7 +1436,7 @@ FilterMembersByVisibility = function(members)
 	local out = {}
 	for i = 1, #members do
 		local m = members[i]
-		if IsMemberVisibleByOnlineState(m) then
+		if IsMemberVisibleByOnlineState(m) and MemberMatchesSearch(m, searchQuery) then
 			out[#out + 1] = m
 		end
 	end
@@ -1025,8 +1487,10 @@ function Roster:OnGuildRosterUpdate(canScan)
 		if not Roster._lastListParent then return end
 
 		-- Get current members (skip new server request to avoid recursion loop)
-		local members = GetAllGuildMembers(BuildRosterSortSpec(), true)
-		members = FilterMembersByVisibility(members)
+		local allMembers = GetAllGuildMembers(BuildRosterSortSpec(), true)
+		local totalMembers = #allMembers
+		local members = FilterMembersByVisibility(allMembers)
+		UpdateRosterStatus(#members, totalMembers)
 
 		-- If count or order changed, full rebuild is safer and cheaper than patching order.
 		local currentCount = #members
@@ -1081,6 +1545,9 @@ local function BuildRosterHeaderUI()
 	if header.SetLayout then header:SetLayout("List") end
 	if header.ReleaseChildren then header:ReleaseChildren() end
 
+	Roster._options = Roster._options or {}
+	local opts = Roster._options
+
 	local guildName = ""
 	if type(GetGuildInfo) == "function" then
 		guildName = tostring((GetGuildInfo("player")) or "")
@@ -1093,39 +1560,68 @@ local function BuildRosterHeaderUI()
 	local faction = (type(UnitFactionGroup) == "function" and tostring((UnitFactionGroup("player")) or "")) or "-"
 	if faction == "" then faction = "-" end
 
-	local line1 = AceGUI:Create("SimpleGroup")
-	line1:SetFullWidth(true)
-	line1:SetLayout("Flow")
-	header:AddChild(line1)
+	opts.showOnline = true
+
+	local row = AceGUI:Create("SimpleGroup")
+	row:SetFullWidth(true)
+	row:SetLayout("Flow")
+	row:SetHeight(36)
+	header:AddChild(row)
+
+	local leftCol = AceGUI:Create("SimpleGroup")
+	leftCol:SetLayout("List")
+	row:AddChild(leftCol)
 
 	local title = AceGUI:Create("Label")
 	title:SetText("|cff03A9F4" .. guildName .. "|r")
-	title:SetWidth(420)
-	if title.label then title.label:SetFontObject(GameFontNormalLarge) end
-	line1:AddChild(title)
+	title:SetHeight(16)
+	if title.label then
+		title.label:SetFontObject(GameFontNormal)
+		title.label:SetJustifyV("TOP")
+		title.label:ClearAllPoints()
+		title.label:SetPoint("TOPLEFT", title.frame, "TOPLEFT", 0, 11)
+		title.label:SetPoint("RIGHT", title.frame, "RIGHT", 0, 0)
+	end
+	leftCol:AddChild(title)
 
-	local spacer = AceGUI:Create("Label")
-	spacer:SetText("")
-	spacer:SetWidth(40)
-	line1:AddChild(spacer)
+	local meta = AceGUI:Create("Label")
+	meta:SetFullWidth(true)
+	meta:SetHeight(14)
+	meta:SetText(string.upper(tostring(realm)) .. " - " .. string.upper(tostring(faction)))
+	if meta.label then
+		meta.label:SetFontObject(GameFontNormalSmallOutline)
+		meta.label:SetJustifyV("TOP")
+	end
+	leftCol:AddChild(meta)
 
-	Roster._options = Roster._options or {}
-	local opts = Roster._options
-	local cbOnline = AceGUI:Create("CheckBox")
-	cbOnline:SetLabel("Online")
-	cbOnline:SetWidth(90)
-	cbOnline:SetValue(opts.showOnline ~= false)
-	cbOnline:SetCallback("OnValueChanged", function(_, _, v)
-		opts.showOnline = v and true or false
-		if Roster and type(Roster.API_RefreshRosterView) == "function" then
-			Roster:API_RefreshRosterView()
-		end
-	end)
-	line1:AddChild(cbOnline)
+	local searchCol = AceGUI:Create("SimpleGroup")
+	searchCol:SetLayout("Flow")
+	row:AddChild(searchCol)
+
+	local searchLabel = AceGUI:Create("Label")
+	searchLabel:SetText("Suche:")
+	searchLabel:SetWidth(45)
+	searchCol:AddChild(searchLabel)
+
+	local searchBox = AceGUI:Create("EditBox")
+	searchBox:SetLabel("")
+	searchBox:SetWidth(280)
+	searchBox:DisableButton(true)
+	searchBox:SetText(tostring(opts.searchQuery or ""))
+	searchCol:AddChild(searchBox)
+
+	local clearBtn = AceGUI:Create("Button")
+	clearBtn:SetText("X")
+	clearBtn:SetWidth(28)
+	searchCol:AddChild(clearBtn)
+
+	local filterCol = AceGUI:Create("SimpleGroup")
+	filterCol:SetLayout("Flow")
+	row:AddChild(filterCol)
 
 	local cbOffline = AceGUI:Create("CheckBox")
-	cbOffline:SetLabel("Offline")
-	cbOffline:SetWidth(90)
+	cbOffline:SetLabel("Offlinemitglieder anzeigen")
+	cbOffline:SetWidth(210)
 	cbOffline:SetValue(opts.showOffline ~= false)
 	cbOffline:SetCallback("OnValueChanged", function(_, _, v)
 		opts.showOffline = v and true or false
@@ -1133,29 +1629,61 @@ local function BuildRosterHeaderUI()
 			Roster:API_RefreshRosterView()
 		end
 	end)
-	line1:AddChild(cbOffline)
+	filterCol:AddChild(cbOffline)
 
-	local line2 = AceGUI:Create("Label")
-	line2:SetFullWidth(true)
-	line2:SetText(string.format("|cffb8b8b8Server:|r %s   |cffb8b8b8Fraktion:|r %s", realm, faction))
-	if line2.label then line2.label:SetFontObject(GameFontNormalSmallOutline) end
-	header:AddChild(line2)
+	local searchToken = 0
+	local function ApplySearch(text)
+		opts.searchQuery = tostring(text or "")
+		if Roster and type(Roster.API_RefreshRosterView) == "function" then
+			Roster:API_RefreshRosterView()
+		end
+	end
+	local function ScheduleSearchApply(text)
+		searchToken = searchToken + 1
+		local token = searchToken
+		if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+			C_Timer.After(0.15, function()
+				if token ~= searchToken then return end
+				ApplySearch(text)
+			end)
+		else
+			ApplySearch(text)
+		end
+	end
+
+	searchBox:SetCallback("OnTextChanged", function(_, _, val)
+		ScheduleSearchApply(val)
+	end)
+	searchBox:SetCallback("OnEnterPressed", function(_, _, val)
+		ApplySearch(val)
+	end)
+	clearBtn:SetCallback("OnClick", function()
+		searchBox:SetText("")
+		ApplySearch("")
+	end)
 
 	local function UpdateHeaderWidths()
-		local totalW = (line1.frame and line1.frame.GetWidth and line1.frame:GetWidth()) or 760
-		local rightW = 190
-		local minLeft = 260
-		local leftW = totalW - rightW - 16
-		if leftW < minLeft then leftW = minLeft end
-		title:SetWidth(leftW)
-		local s = totalW - leftW - rightW
-		if s < 10 then s = 10 end
-		spacer:SetWidth(s)
+		local totalW = (row.frame and row.frame.GetWidth and row.frame:GetWidth()) or 760
+		local rightW = 220
+		local leftW = 250
+		local middleW = totalW - leftW - rightW - 20
+		if middleW < 220 then
+			middleW = 220
+			leftW = totalW - middleW - rightW - 20
+			if leftW < 180 then leftW = 180 end
+		end
+		leftCol:SetWidth(leftW)
+		searchCol:SetWidth(middleW)
+		filterCol:SetWidth(rightW)
+
+		local searchW = middleW - 45 - 28 - 14
+		if searchW < 120 then searchW = 120 end
+		searchBox:SetWidth(searchW)
 	end
 
 	UpdateHeaderWidths()
-	if line1.frame and type(line1.frame.HookScript) == "function" then
-		line1.frame:HookScript("OnSizeChanged", function()
+	if row.frame and type(row.frame.HookScript) == "function" then
+		row.frame:HookScript("OnSizeChanged", function()
 			UpdateHeaderWidths()
 		end)
 	end
@@ -1204,7 +1732,7 @@ end
 -- ###########################################################################
 
 -- ---------------------------------------------------------------------------
---	Registriert Page + Dock Icon (wenn UI verfÃ¼gbar ist)
+--	Registriert Page + Dock Icon (wenn UI verfuegbar ist)
 --	@return boolean
 -- ---------------------------------------------------------------------------
 function Roster:TryRegisterRosterPageInUI()
@@ -1227,7 +1755,7 @@ function Roster:TryRegisterRosterPageInUI()
 end
 
 -- ---------------------------------------------------------------------------
---	Registriert RightDock Icon fÃ¼r die Roster-Page
+--	Registriert RightDock Icon fuer die Roster-Page
 --	@return boolean
 -- ---------------------------------------------------------------------------
 function Roster:TryRegisterRosterDockIconInUI()
@@ -1245,7 +1773,7 @@ function Roster:TryRegisterRosterDockIconInUI()
 		selectable = true,
 		icon = "Interface\\Icons\\Achievement_guildperk_everybodysfriend",
 		tooltipTitle = METADATA.DISPLAY_NAME,
-		tooltipText = "Ã–ffnet die Roster-Page",
+		tooltipText = "Oeffnet die Roster-Page",
 		onClick = function()
 			GMS.UI:Open(METADATA.INTERN_NAME)
 		end,
@@ -1280,6 +1808,7 @@ Roster._options = Roster._options or nil
 local OPTIONS_DEFAULTS = {
 	showOnline = true,
 	showOffline = true,
+	searchQuery = "",
 	autoRefresh = true,
 	lastRefresh = 0,
 	asyncBatchSize = 8,
@@ -1299,8 +1828,9 @@ function Roster:InitializeOptions()
 		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "ROSTER")
 		if ok and opts then
 			self._options = opts
-			if self._options.showOnline == nil then self._options.showOnline = true end
+			self._options.showOnline = true
 			if self._options.showOffline == nil then self._options.showOffline = true end
+			if self._options.searchQuery == nil then self._options.searchQuery = "" end
 			if type(self._options.asyncBatchSize) == "table" then
 				self._options.asyncBatchSize = tonumber(self._options.asyncBatchSize.default) or 8
 			end
@@ -1327,6 +1857,7 @@ end
 function Roster:OnEnable()
 	self:InitializeOptions()
 	self:TryIntegrateWithUIIfAvailable()
+	self:InitCommMetaSync()
 
 	-- Register for live updates
 	self:RegisterEvent("GUILD_ROSTER_UPDATE", "OnGuildRosterUpdate")
@@ -1359,6 +1890,7 @@ function Roster:OnEnable()
 		if addonName ~= "GMS" then return end
 
 		Roster:TryIntegrateWithUIIfAvailable()
+		Roster:InitCommMetaSync()
 
 		if Roster._pageRegistered and Roster._dockRegistered then
 			frame:UnregisterEvent("ADDON_LOADED")
@@ -1374,11 +1906,16 @@ function Roster:OnDisable()
 	self._lastListParent = nil
 	self._lastGuidOrderSig = ""
 	wipe(self._guidToRow)
+	if self._commTicker and type(self._commTicker.Cancel) == "function" then
+		pcall(function() Roster._commTicker:Cancel() end)
+	end
+	self._commTicker = nil
+	self._commInited = false
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
 
 -- ---------------------------------------------------------------------------
---	Liefert Member-Daten per GUID (fÃ¼r andere Module/Berechtigungen)
+--	Liefert Member-Daten per GUID (fuer andere Module/Berechtigungen)
 --	Nutzt GetGuildRosterInfo direkt (Throttled by Blizzard), falls kein Cache
 --	@param guid string
 --	@return table|nil { guid, name, rankIndex, classFileName, online, ... }
@@ -1410,4 +1947,5 @@ function Roster:GetMemberByGUID(guid)
 	end
 	return nil
 end
+
 

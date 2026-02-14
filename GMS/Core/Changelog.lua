@@ -430,14 +430,15 @@ local function IsReleaseNewForSeenVersion(releaseVersion, seenVersion)
 	local seen = tostring(seenVersion or "")
 	if target == "" then return false end
 	if seen == "" then return true end
+	if target == seen then return false end
 
 	for i = 1, #RELEASES do
 		local v = tostring(RELEASES[i].version or "")
-		if v == target then
-			return true
-		end
 		if v == seen then
 			return false
+		end
+		if v == target then
+			return true
 		end
 	end
 	return false
