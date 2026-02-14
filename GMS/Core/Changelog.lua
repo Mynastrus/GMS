@@ -96,6 +96,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.4.0",
+		date = "2026-02-14",
+		title_en = "Guild data sync foundation and GuildLog module release",
+		title_de = "Grundlage fuer Guild-Datensync und GuildLog-Modul-Release",
+		notes_en = {
+			"Introduced structured guild sync records in Comm with freshness priority (seq > updatedAt), persistence, and whisper fallback for large datasets.",
+			"Added the new GuildLog module with dedicated page, dock icon, slash command, and optional chat echo for tracked events.",
+			"GuildLog now tracks join/rejoin/leave, promotions/demotions, online state, notes/officer notes, name change, realm change, faction change, race change, and level change.",
+			"Improved GuildLog diff stability via GUID-first key matching, history-key migration, queued event emission, and short duplicate suppression.",
+			"Fixed GuildLog persistence by hardening guild key resolution and binding storage to guild-scoped options with migration from legacy/in-memory state.",
+		},
+		notes_de = {
+			"Strukturierte Guild-Sync-Records in Comm eingefuehrt: Prioritaetslogik (seq > updatedAt), Persistenz und Whisper-Fallback fuer grosse Datensaetze.",
+			"Neues GuildLog-Modul hinzugefuegt: eigene Seite, Dock-Icon, Slash-Command und optionaler Chat-Echo fuer getrackte Ereignisse.",
+			"GuildLog trackt jetzt Join/Rejoin/Leave, Befoerderung/Degradierung, Online-Status, Notiz-/Offiziersnotiz-Aenderungen, Namenswechsel, Serverwechsel, Fraktionswechsel, Volkswechsel und Levelaenderungen.",
+			"Diff-Stabilitaet im GuildLog verbessert durch GUID-first Key-Matching, History-Key-Migration, Event-Queue und kurze Duplikat-Sperre.",
+			"GuildLog-Persistenz behoben durch robustere Guild-Key-Ermittlung und guild-scoped Speicherung mit Migration aus Legacy-/In-Memory-Status.",
+		},
+	},
+	{
 		version = "1.3.28",
 		date = "2026-02-14",
 		title_en = "Global locale system and CharInfo UI redesign",
