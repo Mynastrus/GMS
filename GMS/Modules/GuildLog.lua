@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "GUILDLOG",
 	SHORT_NAME   = "GuildLog",
 	DISPLAY_NAME = "Guild Log",
-	VERSION      = "1.0.0",
+	VERSION      = "1.0.1",
 }
 
 local LibStub = LibStub
@@ -29,6 +29,7 @@ local date = date
 local IsInGuild = IsInGuild
 local GetNumGuildMembers = GetNumGuildMembers
 local GetGuildRosterInfo = GetGuildRosterInfo
+local GetRealmName = GetRealmName
 local C_GuildInfo = C_GuildInfo
 local GuildRoster = GuildRoster
 local C_Timer = C_Timer
@@ -75,11 +76,38 @@ GuildLog._scanScheduled = GuildLog._scanScheduled or false
 GuildLog._ui = GuildLog._ui or nil
 GuildLog._uiRefreshToken = GuildLog._uiRefreshToken or 0
 GuildLog._baselineLogged = GuildLog._baselineLogged or false
+GuildLog._pollTicker = GuildLog._pollTicker or nil
+GuildLog._scanToken = GuildLog._scanToken or 0
+GuildLog._recentEventSigs = GuildLog._recentEventSigs or {}
 
 local OPTIONS_DEFAULTS = {
 	chatEcho = false,
 	maxEntries = 1000,
 }
+
+local function GetGuildStorageKey()
+	if type(IsInGuild) == "function" and IsInGuild() and type(GMS.GetGuildGUID) == "function" then
+		local g = GMS:GetGuildGUID()
+		if type(g) == "string" and g ~= "" then
+			return g
+		end
+	end
+	return "NO_GUILD"
+end
+
+local function GetPersistentOptionsRoot()
+	if not GMS or type(GMS.db) ~= "table" or type(GMS.db.global) ~= "table" then
+		return nil
+	end
+
+	local global = GMS.db.global
+	global.guildLogStore = global.guildLogStore or { byGuild = {} }
+	global.guildLogStore.byGuild = global.guildLogStore.byGuild or {}
+
+	local key = GetGuildStorageKey()
+	global.guildLogStore.byGuild[key] = global.guildLogStore.byGuild[key] or {}
+	return global.guildLogStore.byGuild[key]
+end
 
 local function T(key, fallback, ...)
 	if type(GMS.T) == "function" then
@@ -101,14 +129,12 @@ local function ClampMaxEntries(v)
 end
 
 local function EnsureOptions()
-	if type(GMS.RegisterModuleOptions) == "function" then
-		pcall(function()
-			GMS:RegisterModuleOptions(MODULE_NAME, OPTIONS_DEFAULTS, "PROFILE")
-		end)
+	local opts = GetPersistentOptionsRoot()
+	if type(opts) ~= "table" then
+		-- fallback: in-memory table (used until DB is ready)
+		opts = GuildLog._options or {}
 	end
-	if type(GMS.GetModuleOptions) ~= "function" then return nil end
-	local ok, opts = pcall(GMS.GetModuleOptions, GMS, MODULE_NAME)
-	if not ok or type(opts) ~= "table" then return nil end
+
 	if opts.chatEcho == nil then opts.chatEcho = false end
 	opts.maxEntries = ClampMaxEntries(opts.maxEntries)
 	if type(opts.entries) ~= "table" then opts.entries = {} end
@@ -176,10 +202,93 @@ local function PushEntry(kind, msg, data)
 	end
 end
 
+local function BuildEventSignature(kind, msg, data)
+	local d = type(data) == "table" and data or nil
+	local guid = d and tostring(d.guid or "") or ""
+	local oldName = d and tostring(d.oldName or "") or ""
+	local newName = d and tostring(d.newName or "") or ""
+	local oldRealm = d and tostring(d.oldRealm or "") or ""
+	local newRealm = d and tostring(d.newRealm or "") or ""
+	local oldFaction = d and tostring(d.oldFaction or "") or ""
+	local newFaction = d and tostring(d.newFaction or "") or ""
+	local oldRace = d and tostring(d.oldRace or "") or ""
+	local newRace = d and tostring(d.newRace or "") or ""
+	return table.concat({
+		tostring(kind or ""),
+		tostring(msg or ""),
+		guid,
+		oldName, newName,
+		oldRealm, newRealm,
+		oldFaction, newFaction,
+		oldRace, newRace,
+	}, "|")
+end
+
+local function EmitEvent(kind, msg, data)
+	local now = (GetTime and GetTime()) or 0
+	local cache = GuildLog._recentEventSigs or {}
+	GuildLog._recentEventSigs = cache
+
+	for sig, ts in pairs(cache) do
+		if (now - (tonumber(ts) or 0)) > 1.25 then
+			cache[sig] = nil
+		end
+	end
+
+	local sig = BuildEventSignature(kind, msg, data)
+	local last = tonumber(cache[sig]) or 0
+	if (now - last) < 1.25 then
+		return
+	end
+
+	cache[sig] = now
+	PushEntry(kind, msg, data)
+end
+
 local function NormalizeName(name)
 	local n = tostring(name or "")
 	n = n:gsub("^%s+", ""):gsub("%s+$", "")
 	return n
+end
+
+local function SplitNameRealm(rawName)
+	local full = tostring(rawName or "")
+	local name, realm = full:match("^([^%-]+)%-(.+)$")
+	if not name then
+		name = full
+		realm = tostring((type(GetRealmName) == "function" and GetRealmName()) or "")
+	end
+	return NormalizeName(name), NormalizeName(realm), NormalizeName(full)
+end
+
+local function GetRosterFactionByIndex(index)
+	if type(index) ~= "number" then return "" end
+	if type(C_GuildInfo) ~= "table" then return "" end
+
+	local infoFn = C_GuildInfo.GetGuildRosterMemberInfo or C_GuildInfo.GetGuildRosterMemberData
+	if type(infoFn) ~= "function" then return "" end
+
+	local ok, info = pcall(infoFn, index)
+	if not ok or type(info) ~= "table" then return "" end
+
+	local faction = info.faction or info.factionName or info.factionGroup
+	if type(faction) ~= "string" then return "" end
+	return NormalizeName(faction)
+end
+
+local function GetRosterRaceByIndex(index)
+	if type(index) ~= "number" then return "" end
+	if type(C_GuildInfo) ~= "table" then return "" end
+
+	local infoFn = C_GuildInfo.GetGuildRosterMemberInfo or C_GuildInfo.GetGuildRosterMemberData
+	if type(infoFn) ~= "function" then return "" end
+
+	local ok, info = pcall(infoFn, index)
+	if not ok or type(info) ~= "table" then return "" end
+
+	local race = info.raceName or info.race
+	if type(race) ~= "string" then return "" end
+	return NormalizeName(race)
 end
 
 local function EnsureHistoryEntry(guid, name)
@@ -265,6 +374,39 @@ local function SeedHistoryFromSnapshot(snapshot)
 	end
 end
 
+local function MigrateHistoryKey(oldKey, newKey, memberName)
+	if oldKey == newKey then return end
+	local hist = MemberHistory()
+	if type(hist) ~= "table" then return end
+	local oldId = tostring(oldKey or "")
+	local newId = tostring(newKey or "")
+	if oldId == "" or newId == "" then return end
+
+	local oldEntry = hist[oldId]
+	local newEntry = hist[newId]
+	if type(oldEntry) ~= "table" then return end
+
+	if type(newEntry) ~= "table" then
+		hist[newId] = oldEntry
+		newEntry = oldEntry
+	else
+		newEntry.name = tostring(memberName or newEntry.name or oldEntry.name or "")
+		newEntry.everMember = newEntry.everMember or oldEntry.everMember
+		newEntry.currentMember = newEntry.currentMember or oldEntry.currentMember
+		newEntry.firstTrackedAt = math.min(tonumber(newEntry.firstTrackedAt) or math.huge, tonumber(oldEntry.firstTrackedAt) or math.huge)
+		newEntry.firstJoinAt = math.min(tonumber(newEntry.firstJoinAt) or math.huge, tonumber(oldEntry.firstJoinAt) or math.huge)
+		newEntry.lastJoinAt = math.max(tonumber(newEntry.lastJoinAt) or 0, tonumber(oldEntry.lastJoinAt) or 0)
+		newEntry.lastLeaveAt = math.max(tonumber(newEntry.lastLeaveAt) or 0, tonumber(oldEntry.lastLeaveAt) or 0)
+		newEntry.joinCount = math.max(tonumber(newEntry.joinCount) or 0, tonumber(oldEntry.joinCount) or 0)
+		newEntry.leftCount = math.max(tonumber(newEntry.leftCount) or 0, tonumber(oldEntry.leftCount) or 0)
+		newEntry.rejoinCount = math.max(tonumber(newEntry.rejoinCount) or 0, tonumber(oldEntry.rejoinCount) or 0)
+	end
+
+	newEntry.guid = newId
+	newEntry.name = tostring(memberName or newEntry.name or "")
+	hist[oldId] = nil
+end
+
 local function BuildCurrentRosterSnapshot()
 	local out = {}
 	if not IsInGuild or not IsInGuild() then return out end
@@ -275,7 +417,9 @@ local function BuildCurrentRosterSnapshot()
 	local total = tonumber(GetNumGuildMembers()) or 0
 	for i = 1, total do
 		local name, rank, rankIndex, level, class, zone, note, officerNote, online, status, classFileName, _, _, _, _, _, guid = GetGuildRosterInfo(i)
-		local normalizedName = NormalizeName(name)
+		local nameShort, realm, normalizedName = SplitNameRealm(name)
+		local faction = GetRosterFactionByIndex(i)
+		local race = GetRosterRaceByIndex(i)
 		local memberKey = nil
 		if type(guid) == "string" and guid ~= "" then
 			memberKey = guid
@@ -287,6 +431,10 @@ local function BuildCurrentRosterSnapshot()
 				memberKey = memberKey,
 				guid = (type(guid) == "string" and guid) or "",
 				name = normalizedName,
+				nameShort = nameShort,
+				realm = realm,
+				faction = faction,
+				race = race,
 				rank = tostring(rank or ""),
 				rankIndex = tonumber(rankIndex) or 0,
 				level = tonumber(level) or 0,
@@ -306,52 +454,147 @@ end
 local function DiffRosterAndLog(prev, curr)
 	prev = prev or {}
 	curr = curr or {}
+	local events = {}
+	local consumedOld = {}
 
-	for guid, newM in pairs(curr) do
-		local oldM = prev[guid]
+	local prevByGuid = {}
+	local prevByName = {}
+	for key, m in pairs(prev) do
+		if type(m) == "table" then
+			local guid = tostring(m.guid or "")
+			local name = tostring(m.name or "")
+			if guid ~= "" then prevByGuid[guid] = key end
+			if name ~= "" then prevByName[name] = key end
+		end
+	end
+
+	local function QueueEvent(kind, msg, data)
+		events[#events + 1] = {
+			kind = kind,
+			msg = msg,
+			data = data,
+		}
+	end
+
+	for newKey, newM in pairs(curr) do
+		local guid = tostring(newM and newM.guid or "")
+		local oldKey = newKey
+		local oldM = prev[oldKey]
+
+		if not oldM and guid ~= "" and prevByGuid[guid] then
+			oldKey = prevByGuid[guid]
+			oldM = prev[oldKey]
+		end
+		if not oldM and type(newM) == "table" and tostring(newM.name or "") ~= "" and prevByName[newM.name] then
+			oldKey = prevByName[newM.name]
+			oldM = prev[oldKey]
+		end
+
+		if oldM and oldKey ~= newKey then
+			MigrateHistoryKey(oldKey, newKey, newM.name)
+		end
+
+		if oldM then
+			consumedOld[oldKey] = true
+		end
+
 		if not oldM then
-			local history, isRejoin = MarkJoin(guid, newM.name, true)
+			local history, isRejoin = MarkJoin(newKey, newM.name, true)
 			if isRejoin then
-				PushEntry("REJOIN", T("GA_REJOIN", "%s rejoined the guild.", tostring(newM.name or guid)), {
-					guid = guid,
+				QueueEvent("REJOIN", T("GA_REJOIN", "%s rejoined the guild.", tostring(newM.name or newKey)), {
+					guid = newKey,
 					history = history,
 				})
 			else
-				PushEntry("JOIN", T("GA_JOIN", "%s joined the guild.", tostring(newM.name or guid)), {
-					guid = guid,
+				QueueEvent("JOIN", T("GA_JOIN", "%s joined the guild.", tostring(newM.name or newKey)), {
+					guid = newKey,
 					history = history,
 				})
 			end
 		else
-			EnsureHistoryEntry(guid, newM.name)
+			EnsureHistoryEntry(newKey, newM.name)
+			if oldM.nameShort ~= newM.nameShort then
+				QueueEvent("NAME_CHANGE", T(
+					"GA_NAME_CHANGED",
+					"%s changed character name to %s.",
+					tostring(oldM.nameShort or oldM.name or newKey),
+					tostring(newM.nameShort or newM.name or newKey)
+				), {
+					guid = newKey,
+					oldName = oldM.nameShort or oldM.name,
+					newName = newM.nameShort or newM.name,
+				})
+			end
+			if oldM.realm ~= newM.realm then
+				QueueEvent("REALM_CHANGE", T(
+					"GA_REALM_CHANGED",
+					"%s changed realm from %s to %s.",
+					tostring(newM.nameShort or newM.name or newKey),
+					tostring(oldM.realm or "-"),
+					tostring(newM.realm or "-")
+				), {
+					guid = newKey,
+					name = newM.nameShort or newM.name,
+					oldRealm = oldM.realm,
+					newRealm = newM.realm,
+				})
+			end
+			if oldM.faction ~= "" and newM.faction ~= "" and oldM.faction ~= newM.faction then
+				QueueEvent("FACTION_CHANGE", T(
+					"GA_FACTION_CHANGED",
+					"%s changed faction from %s to %s.",
+					tostring(newM.nameShort or newM.name or newKey),
+					tostring(oldM.faction or "-"),
+					tostring(newM.faction or "-")
+				), {
+					guid = newKey,
+					name = newM.nameShort or newM.name,
+					oldFaction = oldM.faction,
+					newFaction = newM.faction,
+				})
+			end
+			if oldM.race ~= "" and newM.race ~= "" and oldM.race ~= newM.race then
+				QueueEvent("RACE_CHANGE", T(
+					"GA_RACE_CHANGED",
+					"%s changed race from %s to %s.",
+					tostring(newM.nameShort or newM.name or newKey),
+					tostring(oldM.race or "-"),
+					tostring(newM.race or "-")
+				), {
+					guid = newKey,
+					name = newM.nameShort or newM.name,
+					oldRace = oldM.race,
+					newRace = newM.race,
+				})
+			end
 			if oldM.rankIndex ~= newM.rankIndex then
 				if newM.rankIndex < oldM.rankIndex then
-					PushEntry("PROMOTE", T("GA_PROMOTE", "%s promoted (%s -> %s).", tostring(newM.name or guid), tostring(oldM.rank or oldM.rankIndex), tostring(newM.rank or newM.rankIndex)))
+					QueueEvent("PROMOTE", T("GA_PROMOTE", "%s promoted (%s -> %s).", tostring(newM.name or newKey), tostring(oldM.rank or oldM.rankIndex), tostring(newM.rank or newM.rankIndex)))
 				else
-					PushEntry("DEMOTE", T("GA_DEMOTE", "%s demoted (%s -> %s).", tostring(newM.name or guid), tostring(oldM.rank or oldM.rankIndex), tostring(newM.rank or newM.rankIndex)))
+					QueueEvent("DEMOTE", T("GA_DEMOTE", "%s demoted (%s -> %s).", tostring(newM.name or newKey), tostring(oldM.rank or oldM.rankIndex), tostring(newM.rank or newM.rankIndex)))
 				end
 			end
 			if oldM.online ~= newM.online then
 				if newM.online then
-					PushEntry("ONLINE", T("GA_ONLINE", "%s is now online.", tostring(newM.name or guid)))
+					QueueEvent("ONLINE", T("GA_ONLINE", "%s is now online.", tostring(newM.name or newKey)))
 				else
-					PushEntry("OFFLINE", T("GA_OFFLINE", "%s went offline.", tostring(newM.name or guid)))
+					QueueEvent("OFFLINE", T("GA_OFFLINE", "%s went offline.", tostring(newM.name or newKey)))
 				end
 			end
 			if oldM.note ~= newM.note then
-				PushEntry("NOTE", T(
+				QueueEvent("NOTE", T(
 					"GA_NOTE_CHANGED_DETAIL",
 					"%s updated public note (%s -> %s).",
-					tostring(newM.name or guid),
+					tostring(newM.name or newKey),
 					tostring(oldM.note or "-"),
 					tostring(newM.note or "-")
 				))
 			end
 			if oldM.officerNote ~= newM.officerNote then
-				PushEntry("OFFICER_NOTE", T(
+				QueueEvent("OFFICER_NOTE", T(
 					"GA_OFFICER_NOTE_CHANGED_DETAIL",
 					"%s updated officer note (%s -> %s).",
-					tostring(newM.name or guid),
+					tostring(newM.name or newKey),
 					tostring(oldM.officerNote or "-"),
 					tostring(newM.officerNote or "-")
 				))
@@ -359,14 +602,19 @@ local function DiffRosterAndLog(prev, curr)
 		end
 	end
 
-	for guid, oldM in pairs(prev) do
-		if not curr[guid] then
-			local history = MarkLeave(guid, oldM.name)
-			PushEntry("LEAVE", T("GA_LEAVE", "%s left the guild.", tostring(oldM.name or guid)), {
-				guid = guid,
+	for oldKey, oldM in pairs(prev) do
+		if not consumedOld[oldKey] and not curr[oldKey] then
+			local history = MarkLeave(oldKey, oldM.name)
+			QueueEvent("LEAVE", T("GA_LEAVE", "%s left the guild.", tostring(oldM.name or oldKey)), {
+				guid = oldKey,
 				history = history,
 			})
 		end
+	end
+
+	for i = 1, #events do
+		local e = events[i]
+		EmitEvent(e.kind, e.msg, e.data)
 	end
 end
 
@@ -406,13 +654,38 @@ function GuildLog:RequestRosterRefresh()
 	end
 end
 
-function GuildLog:ScheduleScan()
-	if self._scanScheduled then return end
+function GuildLog:ScheduleScan(forceRefresh, immediate)
+	if self._scanScheduled and not immediate then return end
 	self._scanScheduled = true
+	self._scanToken = (tonumber(self._scanToken) or 0) + 1
+	local token = self._scanToken
+
+	if forceRefresh then
+		self:RequestRosterRefresh()
+	end
+
+	if immediate then
+		self._scanScheduled = false
+		self:ScanGuildChanges()
+		if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+			C_Timer.After(0.35, function()
+				if token ~= GuildLog._scanToken then return end
+				GuildLog:ScanGuildChanges()
+			end)
+		end
+		return
+	end
+
 	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-		C_Timer.After(0.25, function()
+		C_Timer.After(forceRefresh and 0.70 or 0.25, function()
+			if token ~= GuildLog._scanToken then return end
 			GuildLog._scanScheduled = false
 			GuildLog:ScanGuildChanges()
+			-- Second pass catches late roster cache updates (e.g. note edits).
+			C_Timer.After(0.60, function()
+				if token ~= GuildLog._scanToken then return end
+				GuildLog:ScanGuildChanges()
+			end)
 		end)
 	else
 		self._scanScheduled = false
@@ -608,11 +881,29 @@ function GuildLog:OnEnable()
 		end)
 	end
 
-	self:RegisterEvent("GUILD_ROSTER_UPDATE", "ScheduleScan")
-	self:RegisterEvent("PLAYER_GUILD_UPDATE", "ScheduleScan")
+	self:RegisterEvent("GUILD_ROSTER_UPDATE", function()
+		GuildLog:ScheduleScan(false, true)
+	end)
+	self:RegisterEvent("PLAYER_GUILD_UPDATE", function()
+		GuildLog:ScheduleScan(true)
+	end)
 
 	self:RequestRosterRefresh()
-	self:ScheduleScan()
+	self:ScheduleScan(true)
+
+	-- Retry options binding once after login in case DB became ready late.
+	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+		C_Timer.After(1.0, function()
+			GuildLog:InitializeOptions()
+		end)
+	end
+
+	if not self._pollTicker and type(C_Timer) == "table" and type(C_Timer.NewTicker) == "function" then
+		self._pollTicker = C_Timer.NewTicker(15, function()
+			GuildLog:RequestRosterRefresh()
+			GuildLog:ScheduleScan(false)
+		end)
+	end
 
 	GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
 	LOCAL_LOG("INFO", "GuildLog enabled")
@@ -620,6 +911,12 @@ end
 
 function GuildLog:OnDisable()
 	self._scanScheduled = false
+	self._scanToken = (tonumber(self._scanToken) or 0) + 1
+	local ticker = self._pollTicker
+	if ticker and type(ticker["Cancel"]) == "function" then
+		pcall(ticker["Cancel"], ticker)
+	end
+	self._pollTicker = nil
 	self._ui = nil
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end

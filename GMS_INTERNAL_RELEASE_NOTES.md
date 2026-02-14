@@ -24,6 +24,9 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] `119e31d` Notiz-/Offiziersnotiz-Änderungen im GuildLog auf Detailausgabe (`alt -> neu`) umgestellt.
 - [x] (uncommitted) `GuildLog` auf robustere Erkennung/Anzeige angepasst: Profilscope für Optionen, Fallback-Key bei fehlender GUID, Baseline-Eintrag beim Erstscan, Alias-Bereinigung (`glog`).
 - [x] (uncommitted) `deDE`-Locale auf Umlaute/ß in relevanten Strings umgestellt.
+- [x] (uncommitted) `GuildLog` um Volkswechsel-Tracking (`RACE_CHANGE`) erweitert inkl. `enUS`/`deDE`-Locale-Texten.
+- [x] (uncommitted) `GuildLog`-Diff auf stabile Key-Auflösung erweitert (GUID/Name-Mapping + History-Migration), damit Key-Wechsel keine falschen Leave/Join-Paare erzeugen.
+- [x] (uncommitted) `GuildLog`-Eventverarbeitung auf Scan-lokale Queue umgestellt und kurze Duplikat-Sperre für Event-Stürme ergänzt.
 
 ### Fixed
 - [x] (uncommitted) Fehlerbild „GuildLog zeigt nichts / speichert nichts“ adressiert durch persistente Optionsinitialisierung und stabileres Snapshot-Matching.
