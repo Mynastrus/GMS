@@ -85,28 +85,43 @@ local OPTIONS_DEFAULTS = {
 	maxEntries = 1000,
 }
 
-local function GetGuildStorageKey()
-	if type(IsInGuild) == "function" and IsInGuild() and type(GMS.GetGuildGUID) == "function" then
-		local g = GMS:GetGuildGUID()
-		if type(g) == "string" and g ~= "" then
-			return g
-		end
-	end
-	return "NO_GUILD"
-end
+GuildLog._optionsRegistered = GuildLog._optionsRegistered or false
 
-local function GetPersistentOptionsRoot()
+local function GetLegacyOptionsRoot()
 	if not GMS or type(GMS.db) ~= "table" or type(GMS.db.global) ~= "table" then
 		return nil
 	end
-
 	local global = GMS.db.global
-	global.guildLogStore = global.guildLogStore or { byGuild = {} }
-	global.guildLogStore.byGuild = global.guildLogStore.byGuild or {}
+	if type(global.guildLogStore) ~= "table" then return nil end
+	if type(global.guildLogStore.byGuild) ~= "table" then return nil end
 
-	local key = GetGuildStorageKey()
-	global.guildLogStore.byGuild[key] = global.guildLogStore.byGuild[key] or {}
+	local key = "NO_GUILD"
+	if type(IsInGuild) == "function" and IsInGuild() and type(GMS.GetGuildGUID) == "function" then
+		local g = GMS:GetGuildGUID()
+		if type(g) == "string" and g ~= "" then
+			key = g
+		end
+	end
 	return global.guildLogStore.byGuild[key]
+end
+
+local function EnsureModuleOptionsRegistered()
+	if GuildLog._optionsRegistered then return end
+	if type(GMS.RegisterModuleOptions) ~= "function" then return end
+	pcall(function()
+		GMS:RegisterModuleOptions(MODULE_NAME, OPTIONS_DEFAULTS, "GUILD")
+	end)
+	GuildLog._optionsRegistered = true
+end
+
+local function GetScopedOptions()
+	EnsureModuleOptionsRegistered()
+	if type(GMS.GetModuleOptions) ~= "function" then return nil end
+	local ok, opts = pcall(GMS.GetModuleOptions, GMS, MODULE_NAME)
+	if not ok or type(opts) ~= "table" then
+		return nil
+	end
+	return opts
 end
 
 local function T(key, fallback, ...)
@@ -129,10 +144,44 @@ local function ClampMaxEntries(v)
 end
 
 local function EnsureOptions()
-	local opts = GetPersistentOptionsRoot()
+	local oldOpts = GuildLog._options
+	local opts = GetScopedOptions()
 	if type(opts) ~= "table" then
 		-- fallback: in-memory table (used until DB is ready)
-		opts = GuildLog._options or {}
+		opts = oldOpts or {}
+	elseif type(oldOpts) == "table" and oldOpts ~= opts then
+		if (type(opts.entries) ~= "table" or #opts.entries == 0) and type(oldOpts.entries) == "table" and #oldOpts.entries > 0 then
+			opts.entries = oldOpts.entries
+		end
+		if (type(opts.memberHistory) ~= "table" or next(opts.memberHistory) == nil) and type(oldOpts.memberHistory) == "table" then
+			opts.memberHistory = oldOpts.memberHistory
+		end
+		if opts.chatEcho == nil and oldOpts.chatEcho ~= nil then
+			opts.chatEcho = oldOpts.chatEcho and true or false
+		end
+		if opts.maxEntries == nil and oldOpts.maxEntries ~= nil then
+			opts.maxEntries = tonumber(oldOpts.maxEntries) or opts.maxEntries
+		end
+	end
+
+	local legacy = GetLegacyOptionsRoot()
+	if type(legacy) == "table" then
+		if type(opts.entries) ~= "table" or #opts.entries == 0 then
+			if type(legacy.entries) == "table" and #legacy.entries > 0 then
+				opts.entries = legacy.entries
+			end
+		end
+		if type(opts.memberHistory) ~= "table" or next(opts.memberHistory) == nil then
+			if type(legacy.memberHistory) == "table" then
+				opts.memberHistory = legacy.memberHistory
+			end
+		end
+		if opts.chatEcho == nil and legacy.chatEcho ~= nil then
+			opts.chatEcho = legacy.chatEcho and true or false
+		end
+		if opts.maxEntries == nil and legacy.maxEntries ~= nil then
+			opts.maxEntries = tonumber(legacy.maxEntries) or opts.maxEntries
+		end
 	end
 
 	if opts.chatEcho == nil then opts.chatEcho = false end
@@ -567,6 +616,20 @@ local function DiffRosterAndLog(prev, curr)
 					newRace = newM.race,
 				})
 			end
+			if (tonumber(oldM.level) or 0) ~= (tonumber(newM.level) or 0) then
+				QueueEvent("LEVEL_CHANGE", T(
+					"GA_LEVEL_CHANGED",
+					"%s changed level from %d to %d.",
+					tostring(newM.nameShort or newM.name or newKey),
+					tonumber(oldM.level) or 0,
+					tonumber(newM.level) or 0
+				), {
+					guid = newKey,
+					name = newM.nameShort or newM.name,
+					oldLevel = tonumber(oldM.level) or 0,
+					newLevel = tonumber(newM.level) or 0,
+				})
+			end
 			if oldM.rankIndex ~= newM.rankIndex then
 				if newM.rankIndex < oldM.rankIndex then
 					QueueEvent("PROMOTE", T("GA_PROMOTE", "%s promoted (%s -> %s).", tostring(newM.name or newKey), tostring(oldM.rank or oldM.rankIndex), tostring(newM.rank or newM.rankIndex)))
@@ -620,6 +683,11 @@ end
 
 function GuildLog:ScanGuildChanges()
 	local curr = BuildCurrentRosterSnapshot()
+	if type(IsInGuild) == "function" and IsInGuild() and self._snapshot and next(self._snapshot) ~= nil and next(curr) == nil then
+		-- Avoid treating transient empty roster snapshots as mass-leaves.
+		self:RequestRosterRefresh()
+		return
+	end
 	if not self._snapshot then
 		self._snapshot = curr
 		SeedHistoryFromSnapshot(curr)
@@ -885,11 +953,12 @@ function GuildLog:OnEnable()
 		GuildLog:ScheduleScan(false, true)
 	end)
 	self:RegisterEvent("PLAYER_GUILD_UPDATE", function()
+		GuildLog:InitializeOptions()
 		GuildLog:ScheduleScan(true)
 	end)
 
 	self:RequestRosterRefresh()
-	self:ScheduleScan(true)
+	self:ScheduleScan(true, true)
 
 	-- Retry options binding once after login in case DB became ready late.
 	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then

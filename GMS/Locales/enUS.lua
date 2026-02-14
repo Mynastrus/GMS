@@ -79,6 +79,7 @@ GMS:RegisterLocale("enUS", {
 	GA_REALM_CHANGED = "%s changed realm from %s to %s.",
 	GA_FACTION_CHANGED = "%s changed faction from %s to %s.",
 	GA_RACE_CHANGED = "%s changed race from %s to %s.",
+	GA_LEVEL_CHANGED = "%s changed level from %d to %d.",
 	GA_ONLINE = "%s is now online.",
 	GA_OFFLINE = "%s went offline.",
 	GA_NOTE_CHANGED = "%s updated public note.",

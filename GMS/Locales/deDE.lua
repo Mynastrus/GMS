@@ -79,6 +79,7 @@ GMS:RegisterLocale("deDE", {
 	GA_REALM_CHANGED = "%s hat den Server von %s zu %s gewechselt.",
 	GA_FACTION_CHANGED = "%s hat die Fraktion von %s zu %s gewechselt.",
 	GA_RACE_CHANGED = "%s hat das Volk von %s zu %s gewechselt.",
+	GA_LEVEL_CHANGED = "%s hat das Level von %d auf %d geändert.",
 	GA_ONLINE = "%s ist jetzt online.",
 	GA_OFFLINE = "%s ist jetzt offline.",
 	GA_NOTE_CHANGED = "%s hat die öffentliche Notiz geändert.",

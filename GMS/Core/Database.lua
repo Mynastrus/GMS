@@ -19,6 +19,7 @@ local GetTime      = GetTime
 local IsInGuild    = IsInGuild
 local GetGuildInfo = GetGuildInfo
 local GetRealmName = GetRealmName
+local UnitFactionGroup = UnitFactionGroup
 local ReloadUI     = ReloadUI
 local wipe         = wipe
 ---@diagnostic enable: undefined-global
@@ -150,19 +151,44 @@ function GMS:GetGuildGUID()
 		return nil
 	end
 
-	-- 1. Try modern API (Retail)
-	local gInfo = (C_GuildInfo and C_GuildInfo.GetGuildTabardInfo) and C_GuildInfo.GetGuildTabardInfo("player")
-	if GetGuildInfo then
-		local guildName, guildRankName, guildRankIndex, realm, _, _, _, _, isGuildLeader, _, _, _, _, isMobile, _, _, guildGUID = GetGuildInfo("player")
-		if guildGUID and guildGUID ~= "" then
-			return guildGUID
-		end
+	local guildName = nil
+	local guildGUID = nil
 
-		-- 2. Fallback: Generate stable key from Name + Realm
-		if guildName and guildName ~= "" then
-			local realmName = GetRealmName and GetRealmName() or "Unknown"
-			return string.format("GUILD_%s_%s", guildName, realmName)
+	-- 1) Try classic/global API
+	if GetGuildInfo then
+		local n, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, g = GetGuildInfo("player")
+		if type(n) == "string" and n ~= "" then
+			guildName = n
 		end
+		if type(g) == "string" and g ~= "" then
+			guildGUID = g
+		end
+	end
+
+	-- 2) Try C_GuildInfo API variants
+	if (not guildName or guildName == "") and type(C_GuildInfo) == "table" and type(C_GuildInfo.GetGuildInfo) == "function" then
+		local ok, n = pcall(C_GuildInfo.GetGuildInfo, "player")
+		if ok and type(n) == "string" and n ~= "" then
+			guildName = n
+		end
+	end
+
+	if (not guildGUID or guildGUID == "") and type(C_GuildInfo) == "table" and type(C_GuildInfo.GetGuildGUID) == "function" then
+		local ok, g = pcall(C_GuildInfo.GetGuildGUID, "player")
+		if ok and type(g) == "string" and g ~= "" then
+			guildGUID = g
+		end
+	end
+
+	if guildGUID and guildGUID ~= "" then
+		return guildGUID
+	end
+
+	-- 3) Stable fallback key from Realm + Faction + GuildName
+	if guildName and guildName ~= "" then
+		local realmName = (GetRealmName and GetRealmName()) or "Unknown"
+		local faction = (UnitFactionGroup and UnitFactionGroup("player")) or "Unknown"
+		return string.format("%s|%s|%s", tostring(realmName), tostring(faction), tostring(guildName))
 	end
 
 	return nil

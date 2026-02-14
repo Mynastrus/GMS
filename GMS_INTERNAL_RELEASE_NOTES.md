@@ -27,9 +27,14 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] (uncommitted) `GuildLog` um Volkswechsel-Tracking (`RACE_CHANGE`) erweitert inkl. `enUS`/`deDE`-Locale-Texten.
 - [x] (uncommitted) `GuildLog`-Diff auf stabile Key-Auflösung erweitert (GUID/Name-Mapping + History-Migration), damit Key-Wechsel keine falschen Leave/Join-Paare erzeugen.
 - [x] (uncommitted) `GuildLog`-Eventverarbeitung auf Scan-lokale Queue umgestellt und kurze Duplikat-Sperre für Event-Stürme ergänzt.
+- [x] (uncommitted) `GuildLog` um Leveländerungs-Tracking (`LEVEL_CHANGE`) inkl. `enUS`/`deDE`-Locale-Texte erweitert.
+- [x] (uncommitted) `GuildLog`-Optionen auf `GUILD`-Scope (`GMS_Guild_DB`) umgestellt und Legacy-Store-Migration ergänzt.
+- [x] (uncommitted) `GuildLog` migriert In-Memory-Daten beim Rebind zuverlässig in den persistenten Guild-Scope.
 
 ### Fixed
 - [x] (uncommitted) Fehlerbild „GuildLog zeigt nichts / speichert nichts“ adressiert durch persistente Optionsinitialisierung und stabileres Snapshot-Matching.
+- [x] (uncommitted) Leere, temporäre Roster-Snapshots werden nicht mehr als Massen-Änderung verarbeitet (verhindert falsche/fehlende Folgeevents).
+- [x] (uncommitted) Guild-Key-Fallback in `Database:GetGuildGUID()` robuster gemacht (Realm|Faction|GuildName), damit Guild-Scoped Daten zuverlässig persistieren.
 
 ### Rules/Infra
 - [x] Commit-Abdeckung gemäß `GMS_PROJECT_RULES` Abschnitt 11.5 nachgezogen (alle Änderungen seit `v1.3.28` im Unreleased-Block erfasst).
