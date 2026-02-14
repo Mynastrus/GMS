@@ -96,6 +96,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.3.24",
+		date = "2026-02-14",
+		title_en = "Roster polish: row sizing, context actions, and hover isolation",
+		title_de = "Roster-Feinschliff: Zeilenhoehe, Kontextaktionen und Hover-Isolation",
+		notes_en = {
+			"Roster row height increased for cleaner spacing and hover fit.",
+			"Context menu now opens at cursor position and invite/whisper actions were hardened for roster names.",
+			"Self-invite is blocked in the context menu.",
+			"Hover tooltip content was compacted and refined, including guild notes.",
+			"Roster hover/tooltip effects are now restricted to the Roster page only and no longer leak into other pages.",
+		},
+		notes_de = {
+			"Die Zeilenhoehe im Roster wurde fuer sauberere Abstaende und besseren Hover-Fit erhoeht.",
+			"Das Kontextmenue oeffnet jetzt an der Mausposition; Invite/Whisper-Aktionen wurden fuer Roster-Namen robuster gemacht.",
+			"Selbst-Einladungen werden im Kontextmenue blockiert.",
+			"Der Hover-Tooltip wurde kompakter und strukturierter gestaltet, inkl. Gildennotizen.",
+			"Hover-/Tooltip-Effekte sind jetzt strikt auf die Roster-Seite begrenzt und erscheinen nicht mehr auf anderen Seiten.",
+		},
+	},
+	{
 		version = "1.3.23",
 		date = "2026-02-14",
 		title_en = "Roster UX update: compact tooltips, context menu, and stable layout",

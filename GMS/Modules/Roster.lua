@@ -1468,6 +1468,10 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 					hover:Hide()
 
 					row.frame:SetScript("OnEnter", function(self)
+						if not (GMS.UI and GMS.UI._page == METADATA.INTERN_NAME) then
+							if GameTooltip then GameTooltip:Hide() end
+							return
+						end
 						hover:Show()
 						if GameTooltip then
 							local _, _, _, classHex = GetClassColor(rowClassFile)
@@ -1523,6 +1527,9 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 						if GameTooltip then GameTooltip:Hide() end
 					end)
 					row.frame:SetScript("OnMouseUp", function(_, mouseButton)
+						if not (GMS.UI and GMS.UI._page == METADATA.INTERN_NAME) then
+							return
+						end
 						if mouseButton == "RightButton" then
 							if Roster and type(Roster.ShowMemberContextMenu) == "function" then
 								Roster:ShowMemberContextMenu(row.frame, {
