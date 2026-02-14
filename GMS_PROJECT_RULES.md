@@ -265,6 +265,35 @@ end
 
 Dieses Regelwerk ist **verbindlich und dauerhaft gültig** für das Projekt GMS.
 Änderungen am Regelwerk erfolgen **nur explizit** und werden versioniert dokumentiert.
+
+---
+
+## 11. Release Notes & Changelog (Pflicht)
+
+### 11.1 Changelog-Extension
+
+* Es gibt eine dedizierte Extension `Core/Changelog.lua` mit `TYPE = "EXT"` und eigenem `METADATA`.
+* Die Extension **MUSS** eine UI-Seite `CHANGELOG` registrieren.
+* Die Seite **MUSS alle Release-Einträge vollständig anzeigen** (kein hartes Limit wie "nur letzte 5").
+
+### 11.2 Datenstruktur (verbindlich)
+
+* Release-Einträge werden zentral in einer Tabelle `RELEASES` gepflegt.
+* Jeder Eintrag **MUSS** folgende Felder enthalten:
+  * `version`
+  * `date`
+  * `title_en`
+  * `title_de`
+  * `notes_en` (Liste)
+  * `notes_de` (Liste)
+* Reihenfolge: **neuester Eintrag zuerst**.
+
+### 11.3 Pflege bei Releases
+
+* Bei jeder Erhöhung von `## Version` in `GMS.toc` **MUSS** ein passender Eintrag in `RELEASES` ergänzt werden.
+* Inhalt der Release Notes ist immer **zweisprachig (EN + DE)**.
+* Changelog-Einträge müssen den tatsächlich ausgelieferten Änderungen entsprechen.
+
 ## AI Interaction & Artifacts
 The following rules apply to the AI assistant's interaction with artifacts:
 - **Auto-Approval**: `implementation_plan.md` and `walkthrough.md` should generally be set to `ShouldAutoProceed = true` unless major breaking changes or critical design decisions require explicit user confirmation.
