@@ -59,6 +59,7 @@ local ChatFrame_SendTell         = ChatFrame_SendTell
 local ChatEdit_ChooseBoxForSend  = ChatEdit_ChooseBoxForSend
 local ChatEdit_ActivateChat      = ChatEdit_ActivateChat
 local InviteUnit                 = InviteUnit
+local C_PartyInfo                = C_PartyInfo
 local CLASS_ICON_TCOORDS         = CLASS_ICON_TCOORDS
 local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
 local GameFontNormalSmall        = GameFontNormalSmall
@@ -815,9 +816,45 @@ local function OpenChatEditWithText(text)
 	end
 end
 
+local function TryInviteUnitByName(nameFull, nameShort)
+	local full = tostring(nameFull or "")
+	local short = tostring(nameShort or "")
+
+	local function TryInvite(target)
+		target = tostring(target or "")
+		if target == "" then return false end
+
+		if type(C_PartyInfo) == "table" and type(C_PartyInfo.InviteUnit) == "function" then
+			local ok = pcall(C_PartyInfo.InviteUnit, target)
+			if ok then return true end
+		end
+		if type(InviteUnit) == "function" then
+			local ok = pcall(InviteUnit, target)
+			if ok then return true end
+		end
+		return false
+	end
+
+	if TryInvite(full) then return true end
+	if TryInvite(short) then return true end
+
+	-- Fallback: short name parsed from full if needed.
+	local parsedShort = full:match("^([^%-]+)")
+	if parsedShort and parsedShort ~= short and TryInvite(parsedShort) then
+		return true
+	end
+
+	return false
+end
+
 function Roster:ShowMemberContextMenu(anchorFrame, memberData)
 	if type(memberData) ~= "table" then return end
 	local nameFull = tostring(memberData.name_full or memberData.name or "")
+	local nameShort = tostring(memberData.name or "")
+	local isSelf = false
+	if type(UnitGUID) == "function" and type(memberData.guid) == "string" and memberData.guid ~= "" then
+		isSelf = (memberData.guid == UnitGUID("player"))
+	end
 	if nameFull == "" then return end
 
 	if type(EasyMenu) ~= "function" and type(LoadAddOn) == "function" then
@@ -858,9 +895,11 @@ function Roster:ShowMemberContextMenu(anchorFrame, memberData)
 		{
 			text = "In Gruppe einladen",
 			notCheckable = true,
+			disabled = isSelf,
 			func = function()
-				if type(InviteUnit) == "function" then
-					InviteUnit(nameFull)
+				if isSelf then return end
+				if not TryInviteUnitByName(nameFull, nameShort) then
+					OpenChatEditWithText("/invite " .. (nameFull ~= "" and nameFull or nameShort))
 				end
 			end,
 		},
@@ -1269,8 +1308,11 @@ local function BuildRosterHeaderRow(parent, rebuildFn)
 				bg:SetColorTexture(1, 1, 1, 0.08)
 				bg:Hide()
 
-				lbl:SetCallback("OnEnter", function() bg:Show() end)
 				lbl:SetCallback("OnLeave", function() bg:Hide() end)
+				lbl:SetCallback("OnEnter", function()
+					bg:Show()
+					if GameTooltip then GameTooltip:Hide() end
+				end)
 				lbl:SetCallback("OnClick", function(_, _, mouseButton)
 					if mouseButton ~= "LeftButton" then return end
 					SetRosterSortKey(def.sortKey)
@@ -1286,6 +1328,12 @@ local function BuildRosterHeaderRow(parent, rebuildFn)
 				lbl.label:SetFontObject(GameFontNormalSmallOutline)
 				lbl.label:SetJustifyH(IsRightAlignedColumn(colId) and "RIGHT" or "LEFT")
 				lbl:SetWidth(w)
+				if lbl.frame and type(lbl.frame.SetScript) == "function" then
+					lbl.frame:EnableMouse(true)
+					lbl.frame:SetScript("OnEnter", function()
+						if GameTooltip then GameTooltip:Hide() end
+					end)
+				end
 				header:AddChild(lbl)
 			end
 		end
@@ -1386,6 +1434,10 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 				local row = AceGUI:Create("SimpleGroup")
 				row:SetFullWidth(true)
 				row:SetLayout("Flow")
+				row:SetHeight(16)
+				if type(row.SetAutoAdjustHeight) == "function" then
+					row:SetAutoAdjustHeight(false)
+				end
 				parent:AddChild(row)
 
 				if row.frame then
