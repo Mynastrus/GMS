@@ -25,6 +25,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 
 ### Fixed
 - [x] Persistenz-Inkonsistenzen zwischen Modulen reduziert, da alle Moduloptionen jetzt aus derselben strukturierten Datenbasis aufgeloest werden.
+- [x] Scope-Roots fuer `CHAR`/`GUILD` auf die bestehende direkte Datenstruktur korrigiert (`global.characters[charKey].<MODULE>` / `global.guilds[guildKey].<MODULE>`), damit Modulwerte sichtbar und konsistent persistieren.
 
 ### Rules/Infra
 - [x] Versionsupdates fuer geaenderte Dateien gemaess Projektregeln (`Database`, `Comm`, `GuildLog`).

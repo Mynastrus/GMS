@@ -9,7 +9,7 @@ local METADATA = {
 	INTERN_NAME  = "DB",
 	SHORT_NAME   = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION      = "1.1.0",
+	VERSION      = "1.1.1",
 }
 
 -- Blizzard Globals
@@ -149,7 +149,6 @@ function GMS:InitializeStandardDatabases(force)
 		global = self.db.global
 	end
 	global.version = tonumber(global.version) or 2
-	global.modules = type(global.modules) == "table" and global.modules or {}
 	global.characters = type(global.characters) == "table" and global.characters or {}
 	global.guilds = type(global.guilds) == "table" and global.guilds or {}
 
@@ -265,20 +264,17 @@ local function GetScopeRoot(self, scope)
 		profile.modules = type(profile.modules) == "table" and profile.modules or {}
 		return profile.modules
 	elseif scope == "GLOBAL" then
-		global.modules = type(global.modules) == "table" and global.modules or {}
-		return global.modules
+		return global
 	elseif scope == "CHAR" then
 		global.characters = type(global.characters) == "table" and global.characters or {}
 		local cKey = self:GetCharacterGUID()
 		global.characters[cKey] = type(global.characters[cKey]) == "table" and global.characters[cKey] or {}
-		global.characters[cKey].modules = type(global.characters[cKey].modules) == "table" and global.characters[cKey].modules or {}
-		return global.characters[cKey].modules
+		return global.characters[cKey]
 	elseif scope == "GUILD" then
 		global.guilds = type(global.guilds) == "table" and global.guilds or {}
 		local gKey = self:GetGuildStorageKey()
 		global.guilds[gKey] = type(global.guilds[gKey]) == "table" and global.guilds[gKey] or {}
-		global.guilds[gKey].modules = type(global.guilds[gKey].modules) == "table" and global.guilds[gKey].modules or {}
-		return global.guilds[gKey].modules
+		return global.guilds[gKey]
 	end
 	return nil
 end
@@ -330,7 +326,6 @@ function GMS:Database_ResetAll()
 		if type(self.db.global) == "table" then
 			wipe(self.db.global)
 			self.db.global.version = 2
-			self.db.global.modules = {}
 			self.db.global.characters = {}
 			self.db.global.guilds = {}
 		end
