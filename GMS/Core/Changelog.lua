@@ -96,6 +96,22 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.3.27",
+		date = "2026-02-14",
+		title_en = "Release automation now builds ZIP artifacts",
+		title_de = "Release-Automation erstellt jetzt ZIP-Artefakte",
+		notes_en = {
+			"The release script now creates a RELEASE folder automatically at repository root.",
+			"After tagging, it packs the complete GMS addon folder into RELEASE/GMS_<TOC_VERSION>.zip.",
+			"If an archive for the same version already exists, it is replaced.",
+		},
+		notes_de = {
+			"Das Release-Script erstellt jetzt automatisch einen RELEASE-Ordner im Repository-Root.",
+			"Nach dem Tagging wird der komplette GMS-Ordner als RELEASE/GMS_<TOC_VERSION>.zip verpackt.",
+			"Falls bereits ein Archiv fuer dieselbe Version existiert, wird es ersetzt.",
+		},
+	},
+	{
 		version = "1.3.26",
 		date = "2026-02-14",
 		title_en = "Packaging workflow alignment for CurseForge",
