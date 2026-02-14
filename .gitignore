@@ -10,7 +10,6 @@
 *.log
 
 ## WoW AddOn Packager / Release
-.pkgmeta
 .releases/
 .wago/
 .wowmeta
