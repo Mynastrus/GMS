@@ -69,14 +69,16 @@ Bei **jeder Dateiänderung** wird die `METADATA.VERSION` angepasst.
 
 ### 3.2 Synchronisation mit GMS.toc
 
-* Eine Änderung an der Version einer einzelnen Lua-Datei **MUSS** eine entsprechende Erhöhung der Version in der `GMS.toc` zur Folge haben.
+* Eine Änderung an der Version einer einzelnen Lua-Datei **MUSS NICHT** automatisch eine Erhöhung der Version in der `GMS.toc` auslösen.
 * Die `## Version`-Angabe in der `GMS.toc` ist die **Source of Truth** für die globale Anzeige.
 * Die Versionen der einzelnen Dateien bleiben unabhängig und werden **nicht** zwangsweise angeglichen.
+* Die `GMS.toc`-Version wird nur im **Release-Modus** erhöht (siehe 3.4 und 11.4).
 
 ### 3.4 TOC Versionierung nach Tasks
 
-* Nach **jedem vollständig abgeschlossenen Task** (Objective), der Code-Änderungen beinhält, **MUSS** die globale Version in der `GMS.toc` erhöht werden.
-* Dies stellt sicher, dass Nutzer des Addons über Updates informiert werden, auch wenn nur interne Refactorings stattgefunden haben.
+* Nach einem **echten Release-Task** (gebündelte Auslieferung) **MUSS** die globale Version in der `GMS.toc` erhöht werden.
+* Normale Entwicklungs-/Update-Commits in einer laufenden Batch-Reihe erhöhen die `GMS.toc`-Version **nicht**.
+* Dies stellt sicher, dass Nutzer nur bei tatsächlichen Releases eine neue Addon-Version sehen.
 
 ---
 
@@ -304,6 +306,10 @@ Dieses Regelwerk ist **verbindlich und dauerhaft gültig** für das Projekt GMS.
   * `Fixed`
   * `Rules/Infra`
 * Erst bei einem **echten Release** werden die kuratierten Punkte aus `GMS_INTERNAL_RELEASE_NOTES.md` in `RELEASES` (EN + DE) übernommen.
+* Ein echter Release umfasst mindestens:
+  * kuratierter `RELEASES`-Eintrag in `Core/Changelog.lua`
+  * Erhöhung von `## Version` in `GMS.toc`
+  * optionales Git-Tag `vX.Y.Z`
 * Nach erfolgreichem Release wird `Unreleased` zurückgesetzt (leeren/neu starten), damit die nächste Iteration sauber beginnt.
 
 ## AI Interaction & Artifacts

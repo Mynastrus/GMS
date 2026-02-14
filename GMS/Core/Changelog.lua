@@ -34,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.6",
+	VERSION      = "1.3.7",
 }
 
 -- ###########################################################################
@@ -95,6 +95,20 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 -- ###########################################################################
 
 local RELEASES = {
+	{
+		version = "1.3.19",
+		date = "2026-02-14",
+		title_en = "Visual NEW marker for unseen release entries",
+		title_de = "Visueller NEU-Marker fuer ungesehene Release-Eintraege",
+		notes_en = {
+			"Release entries newer than the last seen changelog version are now marked with NEW.",
+			"Marker text is locale-dependent (EN: NEW, DE: NEU).",
+		},
+		notes_de = {
+			"Release-Eintraege neuer als die zuletzt gesehene Changelog-Version werden jetzt mit NEU markiert.",
+			"Marker-Text ist locale-abhaengig (EN: NEW, DE: NEU).",
+		},
+	},
 	{
 		version = "1.3.16",
 		date = "2026-02-14",
@@ -355,6 +369,24 @@ local function GetEffectiveSeenVersion(opts)
 	return GetStandaloneSeenVersion()
 end
 
+local function IsReleaseNewForSeenVersion(releaseVersion, seenVersion)
+	local target = tostring(releaseVersion or "")
+	local seen = tostring(seenVersion or "")
+	if target == "" then return false end
+	if seen == "" then return true end
+
+	for i = 1, #RELEASES do
+		local v = tostring(RELEASES[i].version or "")
+		if v == target then
+			return true
+		end
+		if v == seen then
+			return false
+		end
+	end
+	return false
+end
+
 local function EnsureOptions()
 	if not GMS or type(GMS.RegisterModuleOptions) ~= "function" then
 		return nil
@@ -502,7 +534,7 @@ local function RenderNotes(lines)
 	return table.concat(out, "\n")
 end
 
-local function BuildReleaseBlock(parent, release)
+local function BuildReleaseBlock(parent, release, isNew)
 	local mode = ResolveLanguageMode()
 	local formattedDate = FormatDateByLanguage(release.date, mode)
 
@@ -514,10 +546,12 @@ local function BuildReleaseBlock(parent, release)
 
 	local titleText = (mode == "DE") and tostring(release.title_de or "-") or tostring(release.title_en or "-")
 	local notesText = (mode == "DE") and RenderNotes(release.notes_de) or RenderNotes(release.notes_en)
+	local newLabel = (mode == "DE") and "NEU" or "NEW"
+	local newBadge = isNew and ("  |cff00ff00[" .. newLabel .. "]|r") or ""
 
 	local title = AceGUI:Create("Label")
 	title:SetFullWidth(true)
-	title:SetText("|cff03A9F4" .. titleText)
+	title:SetText("|cff03A9F4" .. titleText .. "|r" .. newBadge)
 	box:AddChild(title)
 
 	local notes = AceGUI:Create("Label")
@@ -527,6 +561,9 @@ local function BuildReleaseBlock(parent, release)
 end
 
 local function BuildChangelogPage(root, id, isCached)
+	local opts = Changelog._options or EnsureOptions()
+	local seenBeforeOpen = GetEffectiveSeenVersion(opts)
+
 	if GMS.UI and type(GMS.UI.Header_BuildIconText) == "function" then
 		local mode = ResolveLanguageMode()
 		GMS.UI:Header_BuildIconText({
@@ -540,9 +577,9 @@ local function BuildChangelogPage(root, id, isCached)
 		GMS.UI:SetStatusText("CHANGELOG: " .. tostring(#RELEASES) .. " releases loaded (" .. ResolveLanguageMode() .. ")")
 	end
 
-	MarkCurrentVersionSeen("manual-open")
-
-	if isCached then return end
+	if isCached and type(root.ReleaseChildren) == "function" then
+		root:ReleaseChildren()
+	end
 
 	root:SetLayout("Fill")
 
@@ -553,8 +590,12 @@ local function BuildChangelogPage(root, id, isCached)
 	root:AddChild(scroll)
 
 	for i = 1, #RELEASES do
-		BuildReleaseBlock(scroll, RELEASES[i])
+		local release = RELEASES[i]
+		local isNew = IsReleaseNewForSeenVersion(release.version, seenBeforeOpen)
+		BuildReleaseBlock(scroll, release, isNew)
 	end
+
+	MarkCurrentVersionSeen("manual-open")
 end
 
 local function RegisterInUI()
