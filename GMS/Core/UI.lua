@@ -54,7 +54,7 @@ local METADATA = {
 	INTERN_NAME  = "UI",
 	SHORT_NAME   = "UI",
 	DISPLAY_NAME = "Guild Management System",
-	VERSION      = "1.0.5",
+	VERSION      = "1.0.7",
 }
 
 -- ###########################################################################
@@ -225,11 +225,17 @@ function UI:InitializeOptions()
 end
 
 local function GetWindowDB()
-	if not UI._options then
+	local opts = UI._options
+	if type(opts) ~= "table" then
 		return DEFAULTS.profile.window
 	end
-	UI._options.window = UI._options.window or {}
-	return UI._options.window
+	local wnd = opts.window
+	if type(wnd) ~= "table" then
+		wnd = {}
+		---@diagnostic disable-next-line: inject-field
+		opts.window = wnd
+	end
+	return wnd
 end
 
 local function SaveActivePage(pageName)
@@ -321,8 +327,11 @@ function UI:SetStatusText(msg)
 		self._statusLabelFS = lbl.label
 	end
 
+	---@diagnostic disable-next-line: undefined-field
 	if self._statusLabelFS and self._statusLabelFS.SetText then
+		---@diagnostic disable-next-line: undefined-field
 		self._statusLabelFS:SetText(msg) -- Farbcodes ok
+	---@diagnostic disable-next-line: undefined-field
 	elseif self._statusLabelWidget and self._statusLabelWidget.SetText then
 		self._statusLabelWidget:SetText(msg)
 	end
@@ -660,7 +669,9 @@ end
 if type(UI.Navigate) ~= "function" then
 	function UI:Navigate(_)
 		self:EnsureFallbackContentRoot()
+		---@diagnostic disable-next-line: undefined-field
 		if self._fallbackRoot and self._fallbackRoot.ReleaseChildren then
+			---@diagnostic disable-next-line: undefined-field
 			self._fallbackRoot:ReleaseChildren()
 			self:RenderFallbackContent(self._fallbackRoot, "Navigate() aktiv, aber PAGES-Section fehlt.")
 		end
@@ -727,7 +738,9 @@ end
 if type(UI.Navigate) ~= "function" then
 	function UI:Navigate(_)
 		self:EnsureFallbackContentRoot()
+		---@diagnostic disable-next-line: undefined-field
 		if self._fallbackRoot and self._fallbackRoot.ReleaseChildren then
+			---@diagnostic disable-next-line: undefined-field
 			self._fallbackRoot:ReleaseChildren()
 			self:RenderFallbackContent(self._fallbackRoot, "UI_Pages Extension fehlt.")
 		end

@@ -9,7 +9,7 @@ local METADATA = {
 	INTERN_NAME  = "DB",
 	SHORT_NAME   = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION      = "1.0.4",
+	VERSION      = "1.0.5",
 }
 
 -- Blizzard Globals
@@ -134,6 +134,7 @@ function GMS:InitializeStandardDatabases(force)
 
 	-- Initialize Manual Guild DB (Raw Table, manual keying by GuildGUID)
 	if type(_G.GMS_Guild_DB) ~= "table" then
+		---@diagnostic disable-next-line: inject-field
 		_G.GMS_Guild_DB = {}
 	end
 	self.guild_db = _G.GMS_Guild_DB

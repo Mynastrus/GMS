@@ -15,7 +15,7 @@ local METADATA = {
 	INTERN_NAME  = "GMS_CORE",
 	SHORT_NAME   = "CORE",
 	DISPLAY_NAME = "GMS Core",
-	VERSION      = "1.0.0",
+	VERSION      = "1.0.1",
 }
 
 -- ---------------------------------------------------------------------------
@@ -74,6 +74,7 @@ end
 --	Global Export (für /run & Debugging)
 -- ---------------------------------------------------------------------------
 
+---@diagnostic disable-next-line: inject-field
 _G.GMS = GMS
 
 -- ###########################################################################

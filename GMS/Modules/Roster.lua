@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.0.4",
+	VERSION      = "1.0.6",
 }
 
 local LibStub = LibStub
@@ -837,6 +837,22 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 	Step()
 end
 
+local function GetAsyncBatchSize(defaultValue)
+	local opts = Roster._options
+	if type(opts) ~= "table" then return defaultValue end
+	local v = tonumber(opts.asyncBatchSize)
+	if not v then return defaultValue end
+	return v
+end
+
+local function GetAsyncDelay(defaultValue)
+	local opts = Roster._options
+	if type(opts) ~= "table" then return defaultValue end
+	local v = tonumber(opts.asyncDelay)
+	if not v then return defaultValue end
+	return v
+end
+
 -- ###########################################################################
 -- #	PUBLIC REFRESH API
 -- ###########################################################################
@@ -848,8 +864,8 @@ end
 -- ---------------------------------------------------------------------------
 function Roster:API_RefreshRosterView(perFrame)
 	if not self._lastListParent then return end
-	local asyncBatch = (Roster._options and Roster._options.asyncBatchSize) or 10
-	local asyncWait  = (Roster._options and Roster._options.asyncDelay) or 0.05
+	local asyncBatch = GetAsyncBatchSize(10)
+	local asyncWait  = GetAsyncDelay(0.05)
 	BuildGuildRosterLabelsAsync(self._lastListParent, perFrame or asyncBatch, asyncWait)
 end
 
@@ -905,7 +921,9 @@ function Roster:OnGuildRosterUpdate(canScan)
 		end
 	end
 
+	---@diagnostic disable-next-line: undefined-field
 	if changed and self._lastListParent.DoLayout then
+		---@diagnostic disable-next-line: undefined-field
 		self._lastListParent:DoLayout()
 	end
 end
@@ -946,8 +964,8 @@ local function BuildRosterPageUI(root, id, isCached)
 
 	Roster._lastListParent = content
 
-	local asyncBatch = (Roster._options and Roster._options.asyncBatchSize) or 5
-	local asyncWait  = (Roster._options and Roster._options.asyncDelay) or 0.05
+	local asyncBatch = GetAsyncBatchSize(5)
+	local asyncWait  = GetAsyncDelay(0.05)
 	BuildGuildRosterLabelsAsync(content, asyncBatch, asyncWait)
 
 	C_Timer.After(0.2, function()
@@ -1081,7 +1099,9 @@ function Roster:OnEnable()
 	self:RegisterMessage("GMS_CONFIG_CHANGED", function(_, targetKey, key, value)
 		if targetKey == "ROSTER" then
 			self:InitializeOptions() -- Refresh local ref
-			if self._lastListParent and self._lastListParent.frame:IsShown() then
+			---@diagnostic disable-next-line: undefined-field
+			local frame = self._lastListParent and self._lastListParent.frame or nil
+			if frame and frame.IsShown and frame:IsShown() then
 				self:API_RefreshRosterView()
 			end
 		end

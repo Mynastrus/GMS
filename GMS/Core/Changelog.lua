@@ -34,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.5",
+	VERSION      = "1.3.6",
 }
 
 -- ###########################################################################
@@ -310,6 +310,7 @@ end
 
 local function EnsureStandaloneState()
 	if type(_G.GMS_Changelog_DB) ~= "table" then
+		---@diagnostic disable-next-line: inject-field
 		_G.GMS_Changelog_DB = {}
 	end
 	return _G.GMS_Changelog_DB

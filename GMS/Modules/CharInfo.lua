@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.4",
+	VERSION      = "1.0.6",
 }
 
 local LibStub = LibStub
@@ -100,6 +100,9 @@ CHARINFO._pageRegistered = CHARINFO._pageRegistered or false
 CHARINFO._dockRegistered = CHARINFO._dockRegistered or false
 CHARINFO._integrated     = CHARINFO._integrated or false
 CHARINFO._ticker         = CHARINFO._ticker or nil
+
+---@class GMSTickerHandle
+---@field Cancel fun(self: GMSTickerHandle)
 
 -- DB for character-specific options (migrated to new API)
 CHARINFO._options = CHARINFO._options or nil
@@ -435,7 +438,11 @@ function CHARINFO:TryIntegrateWithUIIfAvailable()
 
 	if okPage and okDock then
 		self._integrated = true
-		if self._ticker and self._ticker.Cancel then self._ticker:Cancel() end
+		if self._ticker then
+			local ticker = self._ticker
+			---@cast ticker GMSTickerHandle
+			pcall(function() ticker:Cancel() end)
+		end
 		self._ticker = nil
 		LOCAL_LOG("INFO", "Integrated with UI")
 		return true
@@ -453,7 +460,11 @@ function CHARINFO:StartIntegrationTicker()
 		tries = tries + 1
 		if CHARINFO:TryIntegrateWithUIIfAvailable() then return end
 		if tries >= 30 then
-			if CHARINFO._ticker and CHARINFO._ticker.Cancel then CHARINFO._ticker:Cancel() end
+			if CHARINFO._ticker then
+				local ticker = CHARINFO._ticker
+				---@cast ticker GMSTickerHandle
+				pcall(function() ticker:Cancel() end)
+			end
 			CHARINFO._ticker = nil
 			LOCAL_LOG("WARN", "UI not available (gave up retries)")
 		end
@@ -481,10 +492,11 @@ function CHARINFO:InitializeOptions()
 	end
 
 	-- Auto-log current player character
-	if self._options and self._options.autoLog then
+	local opts = (type(self._options) == "table") and self._options or nil
+	if opts and opts.autoLog then
 		local snap = GetPlayerSnapshot()
 		if snap and snap.name_full then
-			self._options.lastUpdate = time and time() or 0
+			opts.lastUpdate = time and time() or 0
 			LOCAL_LOG("INFO", "Character auto-logged: %s", tostring(snap.name_full))
 		else
 			LOCAL_LOG("WARN", "Character snapshot missing; not auto-logged")
@@ -521,7 +533,11 @@ function CHARINFO:OnEnable()
 end
 
 function CHARINFO:OnDisable()
-	if self._ticker and self._ticker.Cancel then self._ticker:Cancel() end
+	if self._ticker then
+		local ticker = self._ticker
+		---@cast ticker GMSTickerHandle
+		pcall(function() ticker:Cancel() end)
+	end
 	self._ticker = nil
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
