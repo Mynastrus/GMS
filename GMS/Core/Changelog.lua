@@ -96,6 +96,24 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.3.25",
+		date = "2026-02-14",
+		title_en = "CharInfo redesign and packaging metadata update",
+		title_de = "CharInfo-Redesign und Paket-Metadaten-Update",
+		notes_en = {
+			"CharInfo page was reworked to a cleaner card-based layout with a dedicated actions section.",
+			"Player snapshot and context are now displayed as structured key/value lines for faster scanning.",
+			"Added refresh action and removed legacy debug-heavy page content.",
+			"Added CurseForge project metadata to TOC: X-Curse-Project-ID: 863660.",
+		},
+		notes_de = {
+			"Die CharInfo-Seite wurde auf ein aufgeraeumtes, kartenbasiertes Layout mit eigener Aktionssektion umgestellt.",
+			"Spieler-Snapshot und Context werden jetzt als strukturierte Key/Value-Zeilen fuer schnelleres Erfassen angezeigt.",
+			"Refresh-Aktion hinzugefuegt und den alten debuglastigen Seiteninhalt entfernt.",
+			"CurseForge-Projektmetadaten im TOC ergaenzt: X-Curse-Project-ID: 863660.",
+		},
+	},
+	{
 		version = "1.3.24",
 		date = "2026-02-14",
 		title_en = "Roster polish: row sizing, context actions, and hover isolation",

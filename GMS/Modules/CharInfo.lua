@@ -1,7 +1,7 @@
--- ============================================================================
+﻿-- ============================================================================
 --	GMS/Modules/CharInfo.lua
 --	CharInfo MODULE (Ace)
---	- Zugriff auf GMS über AceAddon Registry
+--	- Zugriff auf GMS Ã¼ber AceAddon Registry
 --	- UI-Page + RightDock Icon
 --	- Zeigt Player-Snapshot + ctx (optional) + Auswahl-Buttons
 -- ============================================================================
@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.6",
+	VERSION      = "1.0.7",
 }
 
 local LibStub = LibStub
@@ -221,7 +221,7 @@ local function GetTargetSnapshot()
 	local level = UnitLevel("target")
 	local guid = (UnitGUID and UnitGUID("target")) or nil
 
-	-- Spec / ilvl für target sind ohne Inspect nicht zuverlässig -> bewusst "-"
+	-- Spec / ilvl fÃ¼r target sind ohne Inspect nicht zuverlÃ¤ssig -> bewusst "-"
 	return {
 		name         = name,
 		realm        = realm,
@@ -246,6 +246,41 @@ local function RenderBlock(titleText, lines)
 	return table.concat(out, "\n")
 end
 
+local function AddInfoLine(parent, key, value)
+	if not parent or type(parent.AddChild) ~= "function" then return end
+	local lbl = AceGUI:Create("Label")
+	lbl:SetFullWidth(true)
+	lbl:SetText(string.format("|cff9d9d9d%s:|r |cffffffff%s|r", tostring(key or "-"), tostring(value or "-")))
+	if lbl.label then
+		lbl.label:SetFontObject(GameFontNormalSmallOutline)
+	end
+	parent:AddChild(lbl)
+end
+
+local function BuildSnapshotCard(parent, titleText, snap)
+	if not parent or type(parent.AddChild) ~= "function" then return end
+
+	local box = AceGUI:Create("InlineGroup")
+	box:SetTitle(tostring(titleText or "Info"))
+	box:SetFullWidth(true)
+	box:SetLayout("List")
+	parent:AddChild(box)
+
+	if type(snap) ~= "table" then
+		AddInfoLine(box, "Status", "Keine Daten")
+		return
+	end
+
+	AddInfoLine(box, "Name", snap.name_full or "-")
+	AddInfoLine(box, "Level", snap.level or "-")
+	AddInfoLine(box, "Rasse", snap.race or "-")
+	AddInfoLine(box, "Klasse", snap.class or "-")
+	AddInfoLine(box, "Spezialisierung", snap.spec or "-")
+	AddInfoLine(box, "Itemlevel", string.format("%s (overall %s)", tostring(snap.ilvl or "-"), tostring(snap.ilvl_overall or "-")))
+	AddInfoLine(box, "Gilde", snap.guild or "-")
+	AddInfoLine(box, "GUID", snap.guid or "-")
+end
+
 -- ###########################################################################
 -- #	UI PAGE
 -- ###########################################################################
@@ -263,17 +298,15 @@ function CHARINFO:TryRegisterPage()
 		local ctx = GetNavContext(true) or nil
 		local player = GetPlayerSnapshot()
 
-		-- optional: wenn ctx leer -> "selbst auswählbar" (Button). Wir setzen NICHT automatisch.
 		local ctxName = ctx and ctx.name_full or nil
 		local ctxGuid = ctx and ctx.guid or nil
 		local ctxFrom = ctx and (ctx.from or ctx.source) or nil
 
-		-- Header/Footer
 		if ui2 and type(ui2.Header_BuildIconText) == "function" then
 			ui2:Header_BuildIconText({
 				icon = ICON,
 				text = "|cff03A9F4" .. METADATA.DISPLAY_NAME .. "|r",
-				subtext = ctxName and ("Context: |cffCCCCCC" .. tostring(ctxName) .. "|r") or "Kein Context gesetzt",
+				subtext = ctxName and ("Context aktiv: |cffCCCCCC" .. tostring(ctxName) .. "|r") or "Kein Context gesetzt",
 			})
 		end
 		if ui2 and type(ui2.SetStatusText) == "function" then
@@ -285,36 +318,18 @@ function CHARINFO:TryRegisterPage()
 		local wrapper = AceGUI:Create("SimpleGroup")
 		wrapper:SetFullWidth(true)
 		wrapper:SetFullHeight(true)
-		wrapper:SetLayout("Flow")
+		wrapper:SetLayout("List")
 		root:AddChild(wrapper)
 
-		-- Player Block
-		local lblPlayer = AceGUI:Create("Label")
-		lblPlayer:SetFullWidth(true)
-		lblPlayer:SetText(RenderBlock("Player", {
-			"Name: " .. tostring(player.name_full or "-"),
-			"Level: " .. tostring(player.level or "-"),
-			"Race: " .. tostring(player.race or "-"),
-			"Class: " .. tostring(player.class or "-"),
-			"Spec: " .. tostring(player.spec or "-"),
-			"iLvL: " .. tostring(player.ilvl or "-") .. " (overall " .. tostring(player.ilvl_overall or "-") .. ")",
-			"Guild: " .. tostring(player.guild or "-"),
-			"GUID: " .. tostring(player.guid or "-"),
-		}))
-		if lblPlayer.label then
-			lblPlayer.label:SetFontObject(GameFontNormalSmallOutline)
-		end
-		wrapper:AddChild(lblPlayer)
-
-		-- Buttons row
-		local row = AceGUI:Create("SimpleGroup")
-		row:SetFullWidth(true)
-		row:SetLayout("Flow")
-		wrapper:AddChild(row)
+		local actions = AceGUI:Create("InlineGroup")
+		actions:SetTitle("Aktionen")
+		actions:SetFullWidth(true)
+		actions:SetLayout("Flow")
+		wrapper:AddChild(actions)
 
 		local btnSelf = AceGUI:Create("Button")
-		btnSelf:SetText("Spieler selbst auswählen")
-		btnSelf:SetWidth(200)
+		btnSelf:SetText("Spieler selbst auswaehlen")
+		btnSelf:SetWidth(190)
 		btnSelf:SetCallback("OnClick", function()
 			SetNavContext({
 				from = "charinfo",
@@ -327,10 +342,10 @@ function CHARINFO:TryRegisterPage()
 			end
 			OpenSelf()
 		end)
-		row:AddChild(btnSelf)
+		actions:AddChild(btnSelf)
 
 		local btnTarget = AceGUI:Create("Button")
-		btnTarget:SetText("Target auswählen")
+		btnTarget:SetText("Target auswaehlen")
 		btnTarget:SetWidth(160)
 		btnTarget:SetCallback("OnClick", function()
 			local t = GetTargetSnapshot()
@@ -351,54 +366,47 @@ function CHARINFO:TryRegisterPage()
 			end
 			OpenSelf()
 		end)
-		row:AddChild(btnTarget)
+		actions:AddChild(btnTarget)
 
 		local btnClear = AceGUI:Create("Button")
-		btnClear:SetText("Context löschen")
-		btnClear:SetWidth(140)
+		btnClear:SetText("Context loeschen")
+		btnClear:SetWidth(145)
 		btnClear:SetCallback("OnClick", function()
 			SetNavContext(nil)
 			if ui2 and type(ui2.SetStatusText) == "function" then
-				ui2:SetStatusText("CHARINFO: ctx gelöscht")
+				ui2:SetStatusText("CHARINFO: ctx geloescht")
 			end
 			OpenSelf()
 		end)
-		row:AddChild(btnClear)
+		actions:AddChild(btnClear)
 
-		-- ctx Block (falls vorhanden)
-		local lblCtx = AceGUI:Create("Label")
-		lblCtx:SetFullWidth(true)
-		lblCtx:SetText(RenderBlock("Context", {
-			"From: " .. tostring(ctxFrom or "-"),
-			"Name: " .. tostring(ctxName or "-"),
-			"GUID: " .. tostring(ctxGuid or "-"),
-		}))
-		if lblCtx.label then
-			lblCtx.label:SetFontObject(GameFontNormalSmallOutline)
-		end
-		wrapper:AddChild(lblCtx)
-
-		-- Debug Button
-		local btnDbg = AceGUI:Create("Button")
-		btnDbg:SetText("Debug: Print Player + Ctx")
-		btnDbg:SetWidth(220)
-		btnDbg:SetCallback("OnClick", function()
-			if GMS and type(GMS.Print) == "function" then
-				GMS:Print("CHARINFO player=" .. tostring(player.name_full) .. " guid=" .. tostring(player.guid))
-				GMS:Print("CHARINFO ctx=" .. tostring(ctxName) .. " guid=" .. tostring(ctxGuid) .. " from=" .. tostring(ctxFrom))
-			end
+		local btnRefresh = AceGUI:Create("Button")
+		btnRefresh:SetText("Aktualisieren")
+		btnRefresh:SetWidth(130)
+		btnRefresh:SetCallback("OnClick", function()
+			OpenSelf()
 		end)
-		wrapper:AddChild(btnDbg)
+		actions:AddChild(btnRefresh)
+
+		BuildSnapshotCard(wrapper, "Spieler", player)
+
+		local ctxCard = AceGUI:Create("InlineGroup")
+		ctxCard:SetTitle("Context")
+		ctxCard:SetFullWidth(true)
+		ctxCard:SetLayout("List")
+		wrapper:AddChild(ctxCard)
+		AddInfoLine(ctxCard, "Quelle", ctxFrom or "-")
+		AddInfoLine(ctxCard, "Name", ctxName or "-")
+		AddInfoLine(ctxCard, "GUID", ctxGuid or "-")
+
+		local opts = (type(CHARINFO._options) == "table") and CHARINFO._options or nil
+		local lastUpdate = (opts and tonumber(opts.lastUpdate)) or 0
+		AddInfoLine(wrapper, "Letztes Update", (lastUpdate > 0 and tostring(lastUpdate) or "-"))
 	end)
 
 	self._pageRegistered = true
 	return true
 end
-
--- ###########################################################################
--- #	RIGHT DOCK ICON
--- ###########################################################################
-
 function CHARINFO:TryRegisterDockIcon()
 	if self._dockRegistered then return true end
 
@@ -413,7 +421,7 @@ function CHARINFO:TryRegisterDockIcon()
 		selectable = true,
 		icon = ICON,
 		tooltipTitle = DISPLAY_NAME,
-		tooltipText = "Öffnet die Charakter-Info",
+		tooltipText = "Ã–ffnet die Charakter-Info",
 		onClick = function()
 			local u = UIRef()
 			if u and type(u.Open) == "function" then
@@ -541,3 +549,4 @@ function CHARINFO:OnDisable()
 	self._ticker = nil
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
+
