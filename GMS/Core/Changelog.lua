@@ -96,6 +96,20 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.3.22",
+		date = "2026-02-14",
+		title_en = "Roster hotfix: visibility filter function initialization",
+		title_de = "Roster-Hotfix: Initialisierung der Sichtbarkeits-Filterfunktion",
+		notes_en = {
+			"Fixed Lua runtime error in Roster where FilterMembersByVisibility could be called before local initialization.",
+			"Added local forward declaration so async roster build can safely call the filter function.",
+		},
+		notes_de = {
+			"Lua-Laufzeitfehler im Roster behoben, bei dem FilterMembersByVisibility vor der lokalen Initialisierung aufgerufen werden konnte.",
+			"Lokale Forward-Declaration ergaenzt, damit der asynchrone Roster-Build die Filterfunktion sicher aufrufen kann.",
+		},
+	},
+	{
 		version = "1.3.21",
 		date = "2026-02-14",
 		title_en = "Logs polish and major roster UX/performance update",

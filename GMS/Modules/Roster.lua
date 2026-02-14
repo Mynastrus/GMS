@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.0.10",
+	VERSION      = "1.0.11",
 }
 
 local LibStub = LibStub
@@ -528,6 +528,9 @@ local function BuildGuidOrderSignature(members)
 	return table.concat(parts, "|")
 end
 
+-- Forward declaration (used by async builder before actual definition below)
+local FilterMembersByVisibility
+
 -- ###########################################################################
 -- #	CELL BUILDERS (EINE FUNKTION PRO SPALTE)
 -- ###########################################################################
@@ -951,7 +954,7 @@ local function IsMemberVisibleByOnlineState(member)
 	return showOffline
 end
 
-local function FilterMembersByVisibility(members)
+FilterMembersByVisibility = function(members)
 	if type(members) ~= "table" or #members == 0 then
 		return members or {}
 	end
