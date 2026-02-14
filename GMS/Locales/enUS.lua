@@ -70,6 +70,7 @@ GMS:RegisterLocale("enUS", {
 	GA_SLASH_HELP = "/gms guildlog - opens guild activity log",
 
 	GA_JOIN = "%s joined the guild.",
+	GA_REJOIN = "%s rejoined the guild.",
 	GA_LEAVE = "%s left the guild.",
 	GA_PROMOTE = "%s promoted (%s -> %s).",
 	GA_DEMOTE = "%s demoted (%s -> %s).",
@@ -77,4 +78,6 @@ GMS:RegisterLocale("enUS", {
 	GA_OFFLINE = "%s went offline.",
 	GA_NOTE_CHANGED = "%s updated public note.",
 	GA_OFFICER_NOTE_CHANGED = "%s updated officer note.",
+	GA_NOTE_CHANGED_DETAIL = "%s updated public note (%s -> %s).",
+	GA_OFFICER_NOTE_CHANGED_DETAIL = "%s updated officer note (%s -> %s).",
 })

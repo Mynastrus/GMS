@@ -111,6 +111,7 @@ local function EnsureOptions()
 	if opts.chatEcho == nil then opts.chatEcho = false end
 	opts.maxEntries = ClampMaxEntries(opts.maxEntries)
 	if type(opts.entries) ~= "table" then opts.entries = {} end
+	if type(opts.memberHistory) ~= "table" then opts.memberHistory = {} end
 	GuildLog._options = opts
 	return opts
 end
@@ -120,6 +121,13 @@ local function Entries()
 	if type(opts) ~= "table" then return nil end
 	if type(opts.entries) ~= "table" then opts.entries = {} end
 	return opts.entries
+end
+
+local function MemberHistory()
+	local opts = GuildLog._options or EnsureOptions()
+	if type(opts) ~= "table" then return nil end
+	if type(opts.memberHistory) ~= "table" then opts.memberHistory = {} end
+	return opts.memberHistory
 end
 
 local function FormatNow()
@@ -173,6 +181,89 @@ local function NormalizeName(name)
 	return n
 end
 
+local function EnsureHistoryEntry(guid, name)
+	local hist = MemberHistory()
+	if type(hist) ~= "table" then return nil end
+	local id = tostring(guid or "")
+	if id == "" then return nil end
+	hist[id] = hist[id] or {
+		guid = id,
+		name = tostring(name or ""),
+		everMember = false,
+		currentMember = false,
+		firstTrackedAt = 0,
+		firstTrackedTime = "",
+		firstJoinAt = 0,
+		firstJoinTime = "",
+		lastJoinAt = 0,
+		lastJoinTime = "",
+		lastLeaveAt = 0,
+		lastLeaveTime = "",
+		joinCount = 0,
+		leftCount = 0,
+		rejoinCount = 0,
+	}
+	local e = hist[id]
+	if tostring(name or "") ~= "" then
+		e.name = tostring(name)
+	end
+	if (tonumber(e.firstTrackedAt) or 0) <= 0 then
+		e.firstTrackedAt = (GetTime and GetTime()) or 0
+		e.firstTrackedTime = FormatNow()
+	end
+	return e
+end
+
+local function MarkJoin(guid, name, isObservedJoin)
+	local e = EnsureHistoryEntry(guid, name)
+	if not e then return nil, false end
+	local wasEver = e.everMember == true
+	local wasCurrent = e.currentMember == true
+	local nowTs = (GetTime and GetTime()) or 0
+	local nowTxt = FormatNow()
+
+	if isObservedJoin == true then
+		e.joinCount = (tonumber(e.joinCount) or 0) + 1
+		if (tonumber(e.firstJoinAt) or 0) <= 0 then
+			e.firstJoinAt = nowTs
+			e.firstJoinTime = nowTxt
+		end
+		e.lastJoinAt = nowTs
+		e.lastJoinTime = nowTxt
+		if wasEver and not wasCurrent then
+			e.rejoinCount = (tonumber(e.rejoinCount) or 0) + 1
+		end
+	elseif not wasEver then
+		-- baseline-seed fallback when we cannot observe historical join
+		e.joinCount = math.max(1, tonumber(e.joinCount) or 0)
+	end
+
+	e.everMember = true
+	e.currentMember = true
+
+	local isRejoin = wasEver and not wasCurrent and isObservedJoin == true
+	return e, isRejoin
+end
+
+local function MarkLeave(guid, name)
+	local e = EnsureHistoryEntry(guid, name)
+	if not e then return nil end
+	local nowTs = (GetTime and GetTime()) or 0
+	local nowTxt = FormatNow()
+	e.leftCount = (tonumber(e.leftCount) or 0) + 1
+	e.lastLeaveAt = nowTs
+	e.lastLeaveTime = nowTxt
+	e.currentMember = false
+	return e
+end
+
+local function SeedHistoryFromSnapshot(snapshot)
+	if type(snapshot) ~= "table" then return end
+	for guid, m in pairs(snapshot) do
+		MarkJoin(guid, m and m.name, false)
+	end
+end
+
 local function BuildCurrentRosterSnapshot()
 	local out = {}
 	if not IsInGuild or not IsInGuild() then return out end
@@ -210,8 +301,20 @@ local function DiffRosterAndLog(prev, curr)
 	for guid, newM in pairs(curr) do
 		local oldM = prev[guid]
 		if not oldM then
-			PushEntry("JOIN", T("GA_JOIN", "%s joined the guild.", tostring(newM.name or guid)))
+			local history, isRejoin = MarkJoin(guid, newM.name, true)
+			if isRejoin then
+				PushEntry("REJOIN", T("GA_REJOIN", "%s rejoined the guild.", tostring(newM.name or guid)), {
+					guid = guid,
+					history = history,
+				})
+			else
+				PushEntry("JOIN", T("GA_JOIN", "%s joined the guild.", tostring(newM.name or guid)), {
+					guid = guid,
+					history = history,
+				})
+			end
 		else
+			EnsureHistoryEntry(guid, newM.name)
 			if oldM.rankIndex ~= newM.rankIndex then
 				if newM.rankIndex < oldM.rankIndex then
 					PushEntry("PROMOTE", T("GA_PROMOTE", "%s promoted (%s -> %s).", tostring(newM.name or guid), tostring(oldM.rank or oldM.rankIndex), tostring(newM.rank or newM.rankIndex)))
@@ -227,17 +330,33 @@ local function DiffRosterAndLog(prev, curr)
 				end
 			end
 			if oldM.note ~= newM.note then
-				PushEntry("NOTE", T("GA_NOTE_CHANGED", "%s updated public note.", tostring(newM.name or guid)))
+				PushEntry("NOTE", T(
+					"GA_NOTE_CHANGED_DETAIL",
+					"%s updated public note (%s -> %s).",
+					tostring(newM.name or guid),
+					tostring(oldM.note or "-"),
+					tostring(newM.note or "-")
+				))
 			end
 			if oldM.officerNote ~= newM.officerNote then
-				PushEntry("OFFICER_NOTE", T("GA_OFFICER_NOTE_CHANGED", "%s updated officer note.", tostring(newM.name or guid)))
+				PushEntry("OFFICER_NOTE", T(
+					"GA_OFFICER_NOTE_CHANGED_DETAIL",
+					"%s updated officer note (%s -> %s).",
+					tostring(newM.name or guid),
+					tostring(oldM.officerNote or "-"),
+					tostring(newM.officerNote or "-")
+				))
 			end
 		end
 	end
 
 	for guid, oldM in pairs(prev) do
 		if not curr[guid] then
-			PushEntry("LEAVE", T("GA_LEAVE", "%s left the guild.", tostring(oldM.name or guid)))
+			local history = MarkLeave(guid, oldM.name)
+			PushEntry("LEAVE", T("GA_LEAVE", "%s left the guild.", tostring(oldM.name or guid)), {
+				guid = guid,
+				history = history,
+			})
 		end
 	end
 end
@@ -246,11 +365,24 @@ function GuildLog:ScanGuildChanges()
 	local curr = BuildCurrentRosterSnapshot()
 	if not self._snapshot then
 		self._snapshot = curr
+		SeedHistoryFromSnapshot(curr)
 		LOCAL_LOG("DEBUG", "GuildLog baseline snapshot initialized", tostring(#(Entries() or {})))
 		return
 	end
 	DiffRosterAndLog(self._snapshot, curr)
 	self._snapshot = curr
+end
+
+function GuildLog:GetMemberHistory(guid)
+	local hist = MemberHistory()
+	if type(hist) ~= "table" then return nil end
+	return hist[tostring(guid or "")]
+end
+
+function GuildLog:HasBeenInGuildBefore(guid)
+	local h = self:GetMemberHistory(guid)
+	if type(h) ~= "table" then return false end
+	return (tonumber(h.joinCount) or 0) > 1 or (tonumber(h.rejoinCount) or 0) > 0
 end
 
 function GuildLog:RequestRosterRefresh()

@@ -70,6 +70,7 @@ GMS:RegisterLocale("deDE", {
 	GA_SLASH_HELP = "/gms guildlog - öffnet das Gildenaktivitäts-Log",
 
 	GA_JOIN = "%s ist der Gilde beigetreten.",
+	GA_REJOIN = "%s ist der Gilde erneut beigetreten.",
 	GA_LEAVE = "%s hat die Gilde verlassen.",
 	GA_PROMOTE = "%s wurde befördert (%s -> %s).",
 	GA_DEMOTE = "%s wurde degradiert (%s -> %s).",
@@ -77,4 +78,6 @@ GMS:RegisterLocale("deDE", {
 	GA_OFFLINE = "%s ist jetzt offline.",
 	GA_NOTE_CHANGED = "%s hat die öffentliche Notiz geändert.",
 	GA_OFFICER_NOTE_CHANGED = "%s hat die Offiziersnotiz geändert.",
+	GA_NOTE_CHANGED_DETAIL = "%s hat die öffentliche Notiz geändert (%s -> %s).",
+	GA_OFFICER_NOTE_CHANGED_DETAIL = "%s hat die Offiziersnotiz geändert (%s -> %s).",
 })
