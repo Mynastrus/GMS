@@ -21,6 +21,30 @@ function RunGit([string[]]$GitArgs) {
 	}
 }
 
+function BuildReleaseArchive([string]$RepoRoot, [string]$ResolvedVersion) {
+	$addonDir = Join-Path $RepoRoot "GMS"
+	if (-not (Test-Path $addonDir)) {
+		Fail "Missing addon folder: $addonDir"
+	}
+
+	$releaseDir = Join-Path $RepoRoot "RELEASE"
+	if (-not (Test-Path $releaseDir)) {
+		New-Item -ItemType Directory -Path $releaseDir | Out-Null
+	}
+
+	$zipPath = Join-Path $releaseDir ("GMS_{0}.zip" -f $ResolvedVersion)
+	if (Test-Path $zipPath) {
+		Remove-Item $zipPath -Force
+	}
+
+	Compress-Archive -Path $addonDir -DestinationPath $zipPath -Force
+	if (-not (Test-Path $zipPath)) {
+		Fail "Failed to create release archive: $zipPath"
+	}
+
+	return $zipPath
+}
+
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 	Fail "git is not available in PATH."
 }
@@ -96,6 +120,8 @@ if ($tagExists -and $ForceTag) {
 	RunGit "tag", "-a", $tag, "-m", "Release $tag"
 }
 
+$archivePath = BuildReleaseArchive -RepoRoot $repoRoot -ResolvedVersion $tocVersion
+
 if ($Push) {
 	RunGit "push"
 	RunGit "push", "--tags"
@@ -103,6 +129,7 @@ if ($Push) {
 
 Write-Host ""
 Write-Host "Release tag created: $tag" -ForegroundColor Green
+Write-Host "Release archive created: $archivePath" -ForegroundColor Green
 if ($Push) {
 	Write-Host "Pushed branch and tags to remote." -ForegroundColor Green
 } else {
