@@ -33,7 +33,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..")
 Set-Location $repoRoot
 
-RunGit @("rev-parse", "--show-toplevel") | Out-Null
+RunGit "rev-parse", "--show-toplevel" | Out-Null
 
 $tocPath = Join-Path $repoRoot "GMS/GMS.toc"
 $changelogPath = Join-Path $repoRoot "GMS/Core/Changelog.lua"
@@ -91,14 +91,14 @@ if ($tagExists -and -not $ForceTag) {
 }
 
 if ($tagExists -and $ForceTag) {
-	RunGit @("tag", "-f", $tag, "-m", "Release $tag")
+	RunGit "tag", "-f", $tag, "-m", "Release $tag"
 } else {
-	RunGit @("tag", "-a", $tag, "-m", "Release $tag")
+	RunGit "tag", "-a", $tag, "-m", "Release $tag"
 }
 
 if ($Push) {
-	RunGit @("push")
-	RunGit @("push", "--tags")
+	RunGit "push"
+	RunGit "push", "--tags"
 }
 
 Write-Host ""
