@@ -96,6 +96,28 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.3.21",
+		date = "2026-02-14",
+		title_en = "Logs polish and major roster UX/performance update",
+		title_de = "Logs-Feinschliff und groesseres Roster-UX/Performance-Update",
+		notes_en = {
+			"Logs: empty messages are filtered out from list and copy export.",
+			"Logs: level selector now uses a robust dropdown menu and reflows correctly on resize/new entries.",
+			"Roster: reduced UI churn via debounced roster updates and safer incremental/full rebuild decisions.",
+			"Roster: guild header now shows guild name prominently, plus server/faction, with right-aligned online/offline toggles.",
+			"Roster: added leading presence bullet per member (green online, gray offline, yellow AFK, red DND).",
+			"Roster: sort indicator visibility fixed in header.",
+		},
+		notes_de = {
+			"Logs: leere Messages werden in Liste und Copy-Export nicht mehr angezeigt.",
+			"Logs: der Level-Selektor nutzt jetzt ein robustes Dropdown-Menue und reflowt korrekt bei Resize/neuen Eintraegen.",
+			"Roster: UI-Last reduziert durch entprellte Roster-Updates und robustere Entscheidungen zwischen inkrementellem Update und Full-Rebuild.",
+			"Roster: Header zeigt den Gildennamen prominent sowie Server/Fraktion; Online/Offline-Filter sind rechtsbuendig klickbar.",
+			"Roster: fuehrender Presence-Bullet pro Spieler hinzugefuegt (gruen online, grau offline, gelb AFK, rot DND).",
+			"Roster: Sichtbarkeit des Sortierindikators im Header korrigiert.",
+		},
+	},
+	{
 		version = "1.3.20",
 		date = "2026-02-14",
 		title_en = "Logs console redesign and flexible level filtering",

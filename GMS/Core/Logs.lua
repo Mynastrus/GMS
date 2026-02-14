@@ -38,6 +38,10 @@ local table              = table
 local tonumber           = tonumber
 local CreateFrame        = CreateFrame
 local EasyMenu           = EasyMenu
+local UIDropDownMenu_Initialize = UIDropDownMenu_Initialize
+local UIDropDownMenu_CreateInfo = UIDropDownMenu_CreateInfo
+local UIDropDownMenu_AddButton  = UIDropDownMenu_AddButton
+local ToggleDropDownMenu        = ToggleDropDownMenu
 local ChatFrame_OpenChat = ChatFrame_OpenChat
 ---@diagnostic enable: undefined-global
 
@@ -50,7 +54,7 @@ local METADATA = {
 	INTERN_NAME  = "LOGS",
 	SHORT_NAME   = "Logs",
 	DISPLAY_NAME = "Logging Console",
-	VERSION      = "1.1.17",
+	VERSION      = "1.1.19",
 }
 
 -- ###########################################################################
@@ -244,6 +248,11 @@ end
 
 local function isEntryVisible(entry)
 	if type(entry) ~= "table" then return false end
+	local msg = tostring(entry.msg or "")
+	msg = msg:gsub("[\r\n]+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+	if msg == "" then
+		return false
+	end
 	local lvl = entry.levelNum
 	if type(lvl) ~= "number" then
 		lvl = toLevel(entry.level)
@@ -818,47 +827,76 @@ local function RegisterLogsUI()
 		local function ShowLevelMenu()
 			if type(CreateFrame) ~= "function" then return end
 			LOGS._levelMenuFrame = LOGS._levelMenuFrame or CreateFrame("Frame", "GMS_LOGS_LEVEL_MENU", _G.UIParent, "UIDropDownMenuTemplate")
-			local menu = {}
-			menu[#menu + 1] = {
-				text = "Select All",
-				notCheckable = true,
-				func = function()
-					setAllVisibleLevels(true)
-					UpdateLevelButtonText()
-					TriggerRender()
-				end,
-			}
-			menu[#menu + 1] = {
-				text = "Select None",
-				notCheckable = true,
-				func = function()
-					setAllVisibleLevels(false)
-					UpdateLevelButtonText()
-					TriggerRender()
-				end,
-			}
-			menu[#menu + 1] = { text = " ", disabled = true, notCheckable = true }
+			if type(UIDropDownMenu_Initialize) == "function" and type(ToggleDropDownMenu) == "function" then
+				UIDropDownMenu_Initialize(LOGS._levelMenuFrame, function(_, level)
+					level = level or 1
+					if level ~= 1 or type(UIDropDownMenu_AddButton) ~= "function" then return end
 
-			for i = 1, #VIEW_LEVEL_KEYS do
-				local levelKey = VIEW_LEVEL_KEYS[i]
-				menu[#menu + 1] = {
-					text = levelKey,
-					keepShownOnClick = true,
-					isNotRadio = true,
-					checked = function()
-						return isLevelVisible(levelKey)
-					end,
-					func = function()
-						local p = profile()
-						local k = "view" .. levelKey
-						p[k] = not p[k]
+					local function AddEntry(text, notCheckable, checked, keepShownOnClick, func, disabled)
+						local info = type(UIDropDownMenu_CreateInfo) == "function" and UIDropDownMenu_CreateInfo() or {}
+						info.text = text
+						info.notCheckable = notCheckable and true or false
+						info.checked = checked
+						info.keepShownOnClick = keepShownOnClick and true or false
+						info.isNotRadio = true
+						info.func = func
+						info.disabled = disabled and true or false
+						UIDropDownMenu_AddButton(info, level)
+					end
+
+					AddEntry("Select All", true, false, false, function()
+						setAllVisibleLevels(true)
 						UpdateLevelButtonText()
 						TriggerRender()
-					end,
-				}
-			end
+					end, false)
 
-			if type(EasyMenu) == "function" then
+					AddEntry("Select None", true, false, false, function()
+						setAllVisibleLevels(false)
+						UpdateLevelButtonText()
+						TriggerRender()
+					end, false)
+
+					AddEntry(" ", true, false, false, nil, true)
+
+					for i = 1, #VIEW_LEVEL_KEYS do
+						local levelKey = VIEW_LEVEL_KEYS[i]
+						AddEntry(levelKey, false, isLevelVisible(levelKey), true, function()
+							local p = profile()
+							local k = "view" .. levelKey
+							p[k] = not p[k]
+							UpdateLevelButtonText()
+							TriggerRender()
+						end, false)
+					end
+				end, "MENU")
+
+				local anchor = (levelBtn and levelBtn.frame) or "cursor"
+				ToggleDropDownMenu(1, nil, LOGS._levelMenuFrame, anchor, 0, 0)
+			elseif type(EasyMenu) == "function" then
+				local menu = {}
+				menu[#menu + 1] = { text = "Select All", notCheckable = true, func = function()
+					setAllVisibleLevels(true); UpdateLevelButtonText(); TriggerRender()
+				end }
+				menu[#menu + 1] = { text = "Select None", notCheckable = true, func = function()
+					setAllVisibleLevels(false); UpdateLevelButtonText(); TriggerRender()
+				end }
+				menu[#menu + 1] = { text = " ", disabled = true, notCheckable = true }
+				for i = 1, #VIEW_LEVEL_KEYS do
+					local levelKey = VIEW_LEVEL_KEYS[i]
+					menu[#menu + 1] = {
+						text = levelKey,
+						keepShownOnClick = true,
+						isNotRadio = true,
+						checked = isLevelVisible(levelKey),
+						func = function()
+							local p = profile()
+							local k = "view" .. levelKey
+							p[k] = not p[k]
+							UpdateLevelButtonText()
+							TriggerRender()
+						end,
+					}
+				end
 				EasyMenu(menu, LOGS._levelMenuFrame, "cursor", 0, 0, "MENU")
 			end
 		end
@@ -950,13 +988,8 @@ local function RegisterLogsUI()
 				RenderAll()
 				return
 			end
-			local contentWidth = (scroller.content and scroller.content.GetWidth and scroller.content:GetWidth()) or
-				(scroller.frame and scroller.frame.GetWidth and scroller.frame:GetWidth()) or 900
-			contentWidth = math.max(520, contentWidth - 24)
-			local w = BuildLogRow(entry, contentWidth)
-			table.insert(scroller.children, 1, w)
-			w.frame:SetParent(scroller.content)
-			scroller:DoLayout()
+			-- Always do a full re-render to keep column widths and line layout in sync.
+			RenderAll()
 		end
 
 		LOGS._ui = {
@@ -964,6 +997,32 @@ local function RegisterLogsUI()
 			renderAll = RenderAll,
 			prependEntry = PrependEntry,
 		}
+
+		local resizeToken = 0
+		local function ScheduleRenderAll()
+			resizeToken = resizeToken + 1
+			local token = resizeToken
+			if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+				C_Timer.After(0.05, function()
+					if token ~= resizeToken then return end
+					if LOGS._ui and type(LOGS._ui.renderAll) == "function" then
+						LOGS._ui.renderAll()
+					end
+				end)
+			else
+				RenderAll()
+			end
+		end
+		if scroller.frame and type(scroller.frame.HookScript) == "function" then
+			scroller.frame:HookScript("OnSizeChanged", function()
+				ScheduleRenderAll()
+			end)
+		end
+		if root.frame and type(root.frame.HookScript) == "function" then
+			root.frame:HookScript("OnSizeChanged", function()
+				ScheduleRenderAll()
+			end)
+		end
 
 		RenderAll()
 	end

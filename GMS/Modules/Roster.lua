@@ -2,13 +2,13 @@
 --	GMS/Modules/Roster.lua
 --	ROSTER-Module (Ace-only)
 --	- KEIN _G, KEIN addonTable
---	- Zugriff auf GMS ausschließlich über AceAddon Registry
+--	- Zugriff auf GMS ausschlieÃŸlich Ã¼ber AceAddon Registry
 --	- UI: Registriert Page + RightDock Icon
 --	- Roster-View:
 --		- Modular: Spalten per Column-Registry (jede Spalte eigene Build-Fn)
---		- Header: klickbar, ändert Sortierung (ASC/DESC Toggle)
---		- Erweiterbar: externe Spalten über Augmenter (GUID -> Zusatzdaten)
---		- Async Build: X Einträge pro Frame (Token-Guard gegen alte Builds)
+--		- Header: klickbar, Ã¤ndert Sortierung (ASC/DESC Toggle)
+--		- Erweiterbar: externe Spalten Ã¼ber Augmenter (GUID -> Zusatzdaten)
+--		- Async Build: X EintrÃ¤ge pro Frame (Token-Guard gegen alte Builds)
 -- ============================================================================
 
 local METADATA = {
@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.0.6",
+	VERSION      = "1.0.10",
 }
 
 local LibStub = LibStub
@@ -37,12 +37,16 @@ local GetGuildRosterInfo         = GetGuildRosterInfo
 local GetNumGuildMembers         = GetNumGuildMembers
 local GetFullRoster              = GetFullRoster -- Fallback or custom
 local IsInGuild                  = IsInGuild
+local GetGuildInfo               = GetGuildInfo
 local C_GuildInfo                = C_GuildInfo
 local GuildRoster                = GuildRoster
+local GetRealmName               = GetRealmName
 local GetNormalizedRealmName     = GetNormalizedRealmName
+local UnitFactionGroup           = UnitFactionGroup
 local CLASS_ICON_TCOORDS         = CLASS_ICON_TCOORDS
 local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
 local GameFontNormalSmallOutline = GameFontNormalSmallOutline
+local GameFontNormalLarge        = GameFontNormalLarge
 ---@diagnostic enable: undefined-global
 
 local AceGUI = LibStub("AceGUI-3.0", true)
@@ -103,13 +107,17 @@ Roster._guidToRow = Roster._guidToRow or {}
 Roster._nameCache = Roster._nameCache or {}
 Roster._lastRosterRequest = Roster._lastRosterRequest or 0
 Roster._lastUpdateEvent = Roster._lastUpdateEvent or 0
+Roster._lastGuidOrderSig = Roster._lastGuidOrderSig or ""
+Roster._updateScheduled = Roster._updateScheduled or false
+Roster._optionsRetryScheduled = Roster._optionsRetryScheduled or false
+Roster._nameCacheCount = Roster._nameCacheCount or 0
 
 -- ###########################################################################
 -- #	NAME NORMALIZATION
 -- ###########################################################################
 
 -- ---------------------------------------------------------------------------
---	Stellt sicher, dass ein Charname IMMER den Realm enthält
+--	Stellt sicher, dass ein Charname IMMER den Realm enthÃ¤lt
 --	- "Name"        -> "Name-Realm"
 --	- "Name-Realm"  -> "Name-Realm"
 --
@@ -137,7 +145,14 @@ local function NormalizeCharacterNameWithRealm(rawName)
 	local name_full = name .. "-" .. realm
 
 	-- Store in cache
+	if not Roster._nameCache[rawName] then
+		Roster._nameCacheCount = (Roster._nameCacheCount or 0) + 1
+	end
 	Roster._nameCache[rawName] = { name_full, name, realm }
+	if (Roster._nameCacheCount or 0) > 4000 then
+		wipe(Roster._nameCache)
+		Roster._nameCacheCount = 0
+	end
 
 	return name_full, name, realm
 end
@@ -235,13 +250,14 @@ local function GetAllGuildMembers(sortSpec, skipRequest)
 			m.classFileName = classFileName
 			m.zone = zone or ""
 			m.online = online and true or false
+			m.status = status
 			m.guid = GUID
 			m.note = note or ""
 
 			-- Generate a Data Fingerprint for incremental updates
-			m.fingerprint = string.format("%s:%d:%s:%s:%s",
+			m.fingerprint = string.format("%s:%d:%s:%s:%s:%s",
 				GUID or "no-guid", level or 0, rankIndex or 0,
-				m.online and "1" or "0", note or "")
+				m.online and "1" or "0", tostring(status or ""), note or "")
 
 			members[#members + 1] = m
 		end
@@ -276,7 +292,7 @@ end
 -- ###########################################################################
 
 -- ---------------------------------------------------------------------------
---	Gibt Icon Pfad für classFileName zurück (fallback QuestionMark)
+--	Gibt Icon Pfad fÃ¼r classFileName zurÃ¼ck (fallback QuestionMark)
 --	@param classFileName string
 --	@return string
 -- ---------------------------------------------------------------------------
@@ -306,7 +322,7 @@ local function GetClassIconPathFromClassFileName(classFileName)
 end
 
 -- ---------------------------------------------------------------------------
---	Erstellt ein AceGUI Icon für eine Klasse
+--	Erstellt ein AceGUI Icon fÃ¼r eine Klasse
 --
 --	@param classFileName string
 --	@return AceGUIWidget|nil
@@ -329,7 +345,7 @@ local function CreateClassIconWidget(classFileName)
 end
 
 -- ---------------------------------------------------------------------------
---	Gibt die Klassenfarbe für ein classFileName zurück
+--	Gibt die Klassenfarbe fÃ¼r ein classFileName zurÃ¼ck
 --
 --	@param classFileName string
 --	@return number r, number g, number b, string hex
@@ -352,7 +368,7 @@ end
 -- ###########################################################################
 
 -- ---------------------------------------------------------------------------
---	Registriert eine neue Spalte für den Roster (erweiterbar)
+--	Registriert eine neue Spalte fÃ¼r den Roster (erweiterbar)
 --
 --	@param def table
 --		- id string (unique)
@@ -482,6 +498,36 @@ local function BuildRosterSortSpec()
 	return spec
 end
 
+local function GetPresenceState(member)
+	if not member or not member.online then
+		return "OFFLINE"
+	end
+
+	local st = member.status
+	if type(st) == "number" then
+		if st == 1 then return "AFK" end
+		if st == 2 then return "DND" end
+	elseif type(st) == "string" then
+		local s = st:lower()
+		if s:find("afk", 1, true) then return "AFK" end
+		if s:find("dnd", 1, true) then return "DND" end
+	end
+
+	return "ONLINE"
+end
+
+local function BuildGuidOrderSignature(members)
+	if type(members) ~= "table" or #members == 0 then
+		return ""
+	end
+	local parts = {}
+	for i = 1, #members do
+		local m = members[i]
+		parts[i] = (m and m.guid) or ("idx:" .. tostring(i))
+	end
+	return table.concat(parts, "|")
+end
+
 -- ###########################################################################
 -- #	CELL BUILDERS (EINE FUNKTION PRO SPALTE)
 -- ###########################################################################
@@ -498,6 +544,27 @@ local function BuildCell_ClassIcon(row, member, ctx)
 	if icon then
 		row:AddChild(icon)
 	end
+end
+
+local function BuildCell_PresenceDot(row, member, ctx)
+	local state = GetPresenceState(member)
+	local color = "|cff9d9d9d" -- OFFLINE gray
+	if state == "ONLINE" then
+		color = "|cff4dff88" -- green
+	elseif state == "AFK" then
+		color = "|cffffd24d" -- yellow
+	elseif state == "DND" then
+		color = "|cffff4d4d" -- red
+	end
+
+	local dot = AceGUI:Create("Label")
+	dot:SetText(color .. "●|r")
+	dot:SetWidth(14)
+	if dot.label then
+		dot.label:SetFontObject(GameFontNormalSmallOutline)
+		dot.label:SetJustifyH("CENTER")
+	end
+	row:AddChild(dot)
 end
 
 -- ---------------------------------------------------------------------------
@@ -618,6 +685,15 @@ local function EnsureDefaultRosterColumnsRegistered()
 	Roster._defaultColumnsSeeded = true
 
 	Roster:API_RegisterRosterColumnDefinition({
+		id = "presence",
+		title = "",
+		width = 14,
+		order = 5,
+		sortable = false,
+		buildCellFn = BuildCell_PresenceDot,
+	})
+
+	Roster:API_RegisterRosterColumnDefinition({
 		id = "class",
 		title = "",
 		width = 22,
@@ -699,12 +775,13 @@ local function BuildRosterHeaderRow(parent, rebuildFn)
 
 				local arrow = ""
 				if Roster._sortState.key == def.sortKey then
-					arrow = (Roster._sortState.desc == true) and " |cffffd100▼|r" or " |cffffd100▲|r"
+					arrow = (Roster._sortState.desc == true) and " |cffffd100[v]|r" or " |cffffd100[^]|r"
 				end
 
 				lbl:SetText("|cffc8c8c8" .. title .. "|r" .. arrow)
 				lbl.label:SetFontObject(GameFontNormalSmallOutline)
-				lbl:SetWidth(w)
+				lbl.label:SetJustifyH("LEFT")
+				lbl:SetWidth(w + 18)
 
 				local bg = lbl.frame:CreateTexture(nil, "BACKGROUND")
 				bg:SetAllPoints(lbl.frame)
@@ -738,9 +815,9 @@ end
 -- ###########################################################################
 
 -- ---------------------------------------------------------------------------
---	Baut Guild-Roster-Labels asynchron (X Einträge pro Frame)
+--	Baut Guild-Roster-Labels asynchron (X EintrÃ¤ge pro Frame)
 --	- Nutzt Column-Registry + Header + SortState
---	- Ruft externe Augmenter für Zusatzspalten auf (GUID -> member.someField)
+--	- Ruft externe Augmenter fÃ¼r Zusatzspalten auf (GUID -> member.someField)
 --
 --	@param parent AceGUIWidget
 --	@param perFrame number
@@ -754,6 +831,8 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 
 	perFrame = tonumber(perFrame) or 10
 	delay = tonumber(delay) or 0.05
+	if perFrame < 1 then perFrame = 1 end
+	if delay < 0 then delay = 0 end
 
 	Roster._buildToken = (Roster._buildToken or 0) + 1
 	local myToken = Roster._buildToken
@@ -774,6 +853,8 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 	BuildRosterHeaderRow(parent, Rebuild)
 
 	local members = GetAllGuildMembers(BuildRosterSortSpec())
+	members = FilterMembersByVisibility(members)
+	Roster._lastGuidOrderSig = BuildGuidOrderSignature(members)
 	if not members or #members == 0 then
 		local empty = AceGUI:Create("Label")
 		empty:SetText("Keine Gildenmitglieder gefunden.")
@@ -827,6 +908,7 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 			created = created + 1
 		end
 
+		-- Layout once per chunk, not per row.
 		parent:DoLayout()
 
 		if index <= total then
@@ -842,6 +924,8 @@ local function GetAsyncBatchSize(defaultValue)
 	if type(opts) ~= "table" then return defaultValue end
 	local v = tonumber(opts.asyncBatchSize)
 	if not v then return defaultValue end
+	if v < 1 then v = 1 end
+	if v > 100 then v = 100 end
 	return v
 end
 
@@ -850,7 +934,48 @@ local function GetAsyncDelay(defaultValue)
 	if type(opts) ~= "table" then return defaultValue end
 	local v = tonumber(opts.asyncDelay)
 	if not v then return defaultValue end
+	if v < 0 then v = 0 end
+	if v > 1 then v = 1 end
 	return v
+end
+
+local function IsMemberVisibleByOnlineState(member)
+	Roster._options = Roster._options or {}
+	local opts = Roster._options
+	local showOnline = (opts.showOnline ~= false)
+	local showOffline = (opts.showOffline ~= false)
+
+	if member and member.online then
+		return showOnline
+	end
+	return showOffline
+end
+
+local function FilterMembersByVisibility(members)
+	if type(members) ~= "table" or #members == 0 then
+		return members or {}
+	end
+
+	Roster._options = Roster._options or {}
+	local opts = Roster._options
+	local showOnline = (opts.showOnline ~= false)
+	local showOffline = (opts.showOffline ~= false)
+
+	if showOnline and showOffline then
+		return members
+	end
+	if (not showOnline) and (not showOffline) then
+		return {}
+	end
+
+	local out = {}
+	for i = 1, #members do
+		local m = members[i]
+		if IsMemberVisibleByOnlineState(m) then
+			out[#out + 1] = m
+		end
+	end
+	return out
 end
 
 -- ###########################################################################
@@ -878,54 +1003,63 @@ function Roster:OnGuildRosterUpdate(canScan)
 	if not GMS.UI or GMS.UI._page ~= "ROSTER" then return end
 	if not self._lastListParent then return end
 
-	-- THROTTLE: Max once every 5 seconds for UI updates
+	-- Debounce bursty events and limit processing frequency.
 	local now = GetTime()
-	if (now - Roster._lastUpdateEvent) < 5 then return end
-	Roster._lastUpdateEvent = now
+	if self._updateScheduled then return end
+	if (now - Roster._lastUpdateEvent) < 1 then return end
+	self._updateScheduled = true
 
-	-- Get current members (Skip new server request to avoid recursion loop)
-	local members = GetAllGuildMembers(BuildRosterSortSpec(), true)
-
-	-- If member count changed, full rebuild is safer
-	local currentCount = #members
-	local displayedCount = 0
-	for _ in pairs(self._guidToRow) do displayedCount = displayedCount + 1 end
-
-	if currentCount ~= displayedCount then
+	if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then
+		self._updateScheduled = false
 		self:API_RefreshRosterView()
 		return
 	end
 
-	-- Incremental update for visible rows
-	local ctx = {
-		ui = GMS.UI,
-	}
+	C_Timer.After(0.30, function()
+		Roster._updateScheduled = false
+		Roster._lastUpdateEvent = GetTime()
+		if not GMS.UI or GMS.UI._page ~= "ROSTER" then return end
+		if not Roster._lastListParent then return end
 
-	local changed = false
-	for _, m in ipairs(members) do
-		local row = self._guidToRow[m.guid]
+		-- Get current members (skip new server request to avoid recursion loop)
+		local members = GetAllGuildMembers(BuildRosterSortSpec(), true)
+		members = FilterMembersByVisibility(members)
 
-		-- Only rebuild row if data fingerprint changed
-		if row and row.ReleaseChildren and row._dataFingerprint ~= m.fingerprint then
-			row:ReleaseChildren()
-			ApplyRosterMemberAugmenters(m, ctx)
-			for _, colId in ipairs(Roster._columns.order) do
-				local def = Roster._columns.map[colId]
-				if def and type(def.buildCellFn) == "function" then
-					pcall(def.buildCellFn, row, m, ctx)
-				end
-			end
-			row._dataFingerprint = m.fingerprint
-			row:DoLayout()
-			changed = true
+		-- If count or order changed, full rebuild is safer and cheaper than patching order.
+		local currentCount = #members
+		local displayedCount = 0
+		for _ in pairs(Roster._guidToRow) do displayedCount = displayedCount + 1 end
+		local sig = BuildGuidOrderSignature(members)
+		if currentCount ~= displayedCount or sig ~= (Roster._lastGuidOrderSig or "") then
+			Roster._lastGuidOrderSig = sig
+			Roster:API_RefreshRosterView()
+			return
 		end
-	end
 
-	---@diagnostic disable-next-line: undefined-field
-	if changed and self._lastListParent.DoLayout then
-		---@diagnostic disable-next-line: undefined-field
-		self._lastListParent:DoLayout()
-	end
+		-- Incremental update for visible rows
+		local ctx = { ui = GMS.UI }
+		local changed = false
+		for _, m in ipairs(members) do
+			local row = Roster._guidToRow[m.guid]
+			if row and row.ReleaseChildren and row._dataFingerprint ~= m.fingerprint then
+				row:ReleaseChildren()
+				ApplyRosterMemberAugmenters(m, ctx)
+				for _, colId in ipairs(Roster._columns.order) do
+					local def = Roster._columns.map[colId]
+					if def and type(def.buildCellFn) == "function" then
+						pcall(def.buildCellFn, row, m, ctx)
+					end
+				end
+				row._dataFingerprint = m.fingerprint
+				row:DoLayout()
+				changed = true
+			end
+		end
+
+		if changed and Roster._lastListParent.DoLayout then
+			Roster._lastListParent:DoLayout()
+		end
+	end)
 end
 
 -- ###########################################################################
@@ -937,10 +1071,98 @@ end
 --	@param root AceGUIWidget
 --	@return nil
 -- ---------------------------------------------------------------------------
-local function BuildRosterPageUI(root, id, isCached)
-	if GMS.UI and type(GMS.UI.Header_BuildDefault) == "function" then
-		GMS.UI:Header_BuildDefault()
+local function BuildRosterHeaderUI()
+	if not (GMS.UI and type(GMS.UI.GetHeaderContent) == "function") then return end
+	local header = GMS.UI:GetHeaderContent()
+	if not header then return end
+	if header.SetLayout then header:SetLayout("List") end
+	if header.ReleaseChildren then header:ReleaseChildren() end
+
+	local guildName = ""
+	if type(GetGuildInfo) == "function" then
+		guildName = tostring((GetGuildInfo("player")) or "")
 	end
+	if guildName == "" then guildName = "Roster" end
+
+	local realm = (type(GetNormalizedRealmName) == "function" and tostring(GetNormalizedRealmName() or ""))
+		or (type(GetRealmName) == "function" and tostring(GetRealmName() or ""))
+		or "-"
+	local faction = (type(UnitFactionGroup) == "function" and tostring((UnitFactionGroup("player")) or "")) or "-"
+	if faction == "" then faction = "-" end
+
+	local line1 = AceGUI:Create("SimpleGroup")
+	line1:SetFullWidth(true)
+	line1:SetLayout("Flow")
+	header:AddChild(line1)
+
+	local title = AceGUI:Create("Label")
+	title:SetText("|cff03A9F4" .. guildName .. "|r")
+	title:SetWidth(420)
+	if title.label then title.label:SetFontObject(GameFontNormalLarge) end
+	line1:AddChild(title)
+
+	local spacer = AceGUI:Create("Label")
+	spacer:SetText("")
+	spacer:SetWidth(40)
+	line1:AddChild(spacer)
+
+	Roster._options = Roster._options or {}
+	local opts = Roster._options
+	local cbOnline = AceGUI:Create("CheckBox")
+	cbOnline:SetLabel("Online")
+	cbOnline:SetWidth(90)
+	cbOnline:SetValue(opts.showOnline ~= false)
+	cbOnline:SetCallback("OnValueChanged", function(_, _, v)
+		opts.showOnline = v and true or false
+		if Roster and type(Roster.API_RefreshRosterView) == "function" then
+			Roster:API_RefreshRosterView()
+		end
+	end)
+	line1:AddChild(cbOnline)
+
+	local cbOffline = AceGUI:Create("CheckBox")
+	cbOffline:SetLabel("Offline")
+	cbOffline:SetWidth(90)
+	cbOffline:SetValue(opts.showOffline ~= false)
+	cbOffline:SetCallback("OnValueChanged", function(_, _, v)
+		opts.showOffline = v and true or false
+		if Roster and type(Roster.API_RefreshRosterView) == "function" then
+			Roster:API_RefreshRosterView()
+		end
+	end)
+	line1:AddChild(cbOffline)
+
+	local line2 = AceGUI:Create("Label")
+	line2:SetFullWidth(true)
+	line2:SetText(string.format("|cffb8b8b8Server:|r %s   |cffb8b8b8Fraktion:|r %s", realm, faction))
+	if line2.label then line2.label:SetFontObject(GameFontNormalSmallOutline) end
+	header:AddChild(line2)
+
+	local function UpdateHeaderWidths()
+		local totalW = (line1.frame and line1.frame.GetWidth and line1.frame:GetWidth()) or 760
+		local rightW = 190
+		local minLeft = 260
+		local leftW = totalW - rightW - 16
+		if leftW < minLeft then leftW = minLeft end
+		title:SetWidth(leftW)
+		local s = totalW - leftW - rightW
+		if s < 10 then s = 10 end
+		spacer:SetWidth(s)
+	end
+
+	UpdateHeaderWidths()
+	if line1.frame and type(line1.frame.HookScript) == "function" then
+		line1.frame:HookScript("OnSizeChanged", function()
+			UpdateHeaderWidths()
+		end)
+	end
+	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+		C_Timer.After(0, UpdateHeaderWidths)
+	end
+end
+
+local function BuildRosterPageUI(root, id, isCached)
+	BuildRosterHeaderUI()
 
 	if isCached then return end
 
@@ -979,7 +1201,7 @@ end
 -- ###########################################################################
 
 -- ---------------------------------------------------------------------------
---	Registriert Page + Dock Icon (wenn UI verfügbar ist)
+--	Registriert Page + Dock Icon (wenn UI verfÃ¼gbar ist)
 --	@return boolean
 -- ---------------------------------------------------------------------------
 function Roster:TryRegisterRosterPageInUI()
@@ -991,8 +1213,8 @@ function Roster:TryRegisterRosterPageInUI()
 		return false
 	end
 
-	GMS.UI:RegisterPage(METADATA.INTERN_NAME, 50, METADATA.DISPLAY_NAME, function(root)
-		BuildRosterPageUI(root)
+	GMS.UI:RegisterPage(METADATA.INTERN_NAME, 50, METADATA.DISPLAY_NAME, function(root, id, isCached)
+		BuildRosterPageUI(root, id, isCached)
 	end)
 
 	self._pageRegistered = true
@@ -1002,7 +1224,7 @@ function Roster:TryRegisterRosterPageInUI()
 end
 
 -- ---------------------------------------------------------------------------
---	Registriert RightDock Icon für die Roster-Page
+--	Registriert RightDock Icon fÃ¼r die Roster-Page
 --	@return boolean
 -- ---------------------------------------------------------------------------
 function Roster:TryRegisterRosterDockIconInUI()
@@ -1020,7 +1242,7 @@ function Roster:TryRegisterRosterDockIconInUI()
 		selectable = true,
 		icon = "Interface\\Icons\\Achievement_guildperk_everybodysfriend",
 		tooltipTitle = METADATA.DISPLAY_NAME,
-		tooltipText = "Öffnet die Roster-Page",
+		tooltipText = "Ã–ffnet die Roster-Page",
 		onClick = function()
 			GMS.UI:Open(METADATA.INTERN_NAME)
 		end,
@@ -1053,11 +1275,12 @@ end
 Roster._options = Roster._options or nil
 
 local OPTIONS_DEFAULTS = {
+	showOnline = true,
 	showOffline = true,
 	autoRefresh = true,
 	lastRefresh = 0,
-	asyncBatchSize = { name = "Einträge pro Schritt (Batch)", type = "range", min = 1, max = 50, step = 1, default = 5 },
-	asyncDelay = { name = "Verzögerung (Schrittpause, Sek)", type = "range", min = 0, max = 1, step = 0.01, default = 0.05 },
+	asyncBatchSize = 8,
+	asyncDelay = 0.02,
 }
 
 function Roster:InitializeOptions()
@@ -1073,10 +1296,20 @@ function Roster:InitializeOptions()
 		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "ROSTER")
 		if ok and opts then
 			self._options = opts
+			if self._options.showOnline == nil then self._options.showOnline = true end
+			if self._options.showOffline == nil then self._options.showOffline = true end
+			if type(self._options.asyncBatchSize) == "table" then
+				self._options.asyncBatchSize = tonumber(self._options.asyncBatchSize.default) or 8
+			end
+			if type(self._options.asyncDelay) == "table" then
+				self._options.asyncDelay = tonumber(self._options.asyncDelay.default) or 0.02
+			end
+			self._optionsRetryScheduled = false
 			LOCAL_LOG("INFO", "Roster options initialized (GUILD scope)")
 		else
 			-- If not in guild or gdb not ready, retry in 5s
-			if IsInGuild and IsInGuild() then
+			if IsInGuild and IsInGuild() and not self._optionsRetryScheduled then
+				self._optionsRetryScheduled = true
 				C_Timer.After(5, function() Roster:InitializeOptions() end)
 			end
 			LOCAL_LOG("WARN", "Failed to retrieve Roster options (deferred)")
@@ -1134,11 +1367,15 @@ function Roster:OnEnable()
 end
 
 function Roster:OnDisable()
+	self._updateScheduled = false
+	self._lastListParent = nil
+	self._lastGuidOrderSig = ""
+	wipe(self._guidToRow)
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
 
 -- ---------------------------------------------------------------------------
---	Liefert Member-Daten per GUID (für andere Module/Berechtigungen)
+--	Liefert Member-Daten per GUID (fÃ¼r andere Module/Berechtigungen)
 --	Nutzt GetGuildRosterInfo direkt (Throttled by Blizzard), falls kein Cache
 --	@param guid string
 --	@return table|nil { guid, name, rankIndex, classFileName, online, ... }
@@ -1170,3 +1407,4 @@ function Roster:GetMemberByGUID(guid)
 	end
 	return nil
 end
+
