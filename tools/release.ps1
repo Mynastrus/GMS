@@ -12,10 +12,10 @@ function Fail([string]$Message) {
 	exit 1
 }
 
-function RunGit([string[]]$Args) {
-	$cmd = "git " + ($Args -join " ")
+function RunGit([string[]]$GitArgs) {
+	$cmd = "git " + ($GitArgs -join " ")
 	Write-Host ">> $cmd"
-	& git @Args
+	& git @GitArgs
 	if ($LASTEXITCODE -ne 0) {
 		Fail "Git command failed: $cmd"
 	}
