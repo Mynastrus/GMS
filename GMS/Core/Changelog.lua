@@ -96,6 +96,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.3.20",
+		date = "2026-02-14",
+		title_en = "Logs console redesign and flexible level filtering",
+		title_de = "Logs-Konsole ueberarbeitet und Level-Filter flexibilisiert",
+		notes_en = {
+			"Logs list layout was compacted with adaptive columns so entries remain on a single line at default window size.",
+			"Logs controls were moved into the global page header, and entries now render directly in content without an extra InlineGroup.",
+			"Level filtering now uses a multi-select dropdown menu (Select All/None + TRACE/DEBUG/INFO/WARN/ERROR) with persistent per-level visibility.",
+			"Legacy min-level setting is migrated automatically to the new per-level visibility flags.",
+			"Logs dock icon now uses the bottom right-dock lane (with top-lane fallback for compatibility).",
+		},
+		notes_de = {
+			"Das Layout der Logs-Liste wurde verdichtet und nutzt adaptive Spalten, sodass Eintraege in der Standardfenstergroesse einzeilig bleiben.",
+			"Die Logs-Steuerung wurde in den globalen Seiten-Header verschoben; die Eintraege werden nun direkt im Content ohne zusaetzliche InlineGroup gerendert.",
+			"Der Level-Filter nutzt jetzt ein Multi-Select-Dropdown (Alles/Keins + TRACE/DEBUG/INFO/WARN/ERROR) mit persistenter Sichtbarkeit pro Level.",
+			"Das bisherige Min-Level-Setting wird automatisch auf die neuen Sichtbarkeits-Flags pro Level migriert.",
+			"Das Logs-Dock-Icon wird jetzt im unteren RightDock-Bereich registriert (mit Top-Fallback fuer Kompatibilitaet).",
+		},
+	},
+	{
 		version = "1.3.19",
 		date = "2026-02-14",
 		title_en = "Visual NEW marker for unseen release entries",

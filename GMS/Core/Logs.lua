@@ -8,7 +8,7 @@
 --	- UI Page (AceGUI) + Live-Update (Notify + optional Ticker)
 --	- Slash: /gms logs -> öffnet LOGS Page
 --	- UI Integration: kompatibel mit GMS.UI:RegisterPage(id, order, title, buildFn)
---	- RightDock: nutzt GMS.UI:AddRightDockIconTop(...)
+--	- RightDock: nutzt GMS.UI:AddRightDockIconBottom(...)
 -- ============================================================================
 
 local LibStub = LibStub
@@ -32,9 +32,12 @@ local pairs              = pairs
 local rawget             = rawget
 local pcall              = pcall
 local print              = print
+local ipairs             = ipairs
 local C_Timer            = C_Timer
 local table              = table
 local tonumber           = tonumber
+local CreateFrame        = CreateFrame
+local EasyMenu           = EasyMenu
 local ChatFrame_OpenChat = ChatFrame_OpenChat
 ---@diagnostic enable: undefined-global
 
@@ -47,7 +50,7 @@ local METADATA = {
 	INTERN_NAME  = "LOGS",
 	SHORT_NAME   = "Logs",
 	DISPLAY_NAME = "Logging Console",
-	VERSION      = "1.1.3",
+	VERSION      = "1.1.17",
 }
 
 -- ###########################################################################
@@ -121,6 +124,11 @@ local REG_DEFAULTS = {
 	logINFO    = true,
 	logWARN    = true,
 	logERROR   = true,
+	viewTRACE  = false,
+	viewDEBUG  = false,
+	viewINFO   = true,
+	viewWARN   = true,
+	viewERROR  = true,
 }
 
 local COLORS = {
@@ -165,6 +173,48 @@ local function levelName(n)
 	return LOGS.LEVEL_NAMES[n] or "INFO"
 end
 
+local VIEW_LEVEL_KEYS = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR" }
+local VIEW_LEVEL_DEFAULTS = {
+	TRACE = false,
+	DEBUG = false,
+	INFO = true,
+	WARN = true,
+	ERROR = true,
+}
+
+local function ensureViewLevelFilter(p)
+	local hasAny = false
+	for i = 1, #VIEW_LEVEL_KEYS do
+		local key = VIEW_LEVEL_KEYS[i]
+		if p["view" .. key] ~= nil then
+			hasAny = true
+			break
+		end
+	end
+
+	if not hasAny then
+		local legacyMin = tonumber(p.minLevel)
+		if legacyMin then
+			for i = 1, #VIEW_LEVEL_KEYS do
+				local key = VIEW_LEVEL_KEYS[i]
+				p["view" .. key] = (i >= legacyMin)
+			end
+		else
+			for i = 1, #VIEW_LEVEL_KEYS do
+				local key = VIEW_LEVEL_KEYS[i]
+				p["view" .. key] = VIEW_LEVEL_DEFAULTS[key]
+			end
+		end
+	else
+		for i = 1, #VIEW_LEVEL_KEYS do
+			local key = VIEW_LEVEL_KEYS[i]
+			if p["view" .. key] == nil then
+				p["view" .. key] = VIEW_LEVEL_DEFAULTS[key]
+			end
+		end
+	end
+end
+
 local function nowReadable(fmt)
 	if type(date) == "function" then
 		return date(fmt or "%Y-%m-%d %H:%M:%S")
@@ -173,7 +223,51 @@ local function nowReadable(fmt)
 end
 
 local function profile()
-	return GMS:GetModuleOptions("LOGS") or REG_DEFAULTS
+	local p = GMS:GetModuleOptions("LOGS") or REG_DEFAULTS
+	ensureViewLevelFilter(p)
+	return p
+end
+
+local function isLevelVisible(levelOrName)
+	local p = profile()
+	local name = nil
+	if type(levelOrName) == "number" then
+		name = levelName(levelOrName)
+	elseif type(levelOrName) == "string" then
+		name = tostring(levelOrName):upper()
+	end
+	if not name or name == "" then
+		return true
+	end
+	return p["view" .. name] == true
+end
+
+local function isEntryVisible(entry)
+	if type(entry) ~= "table" then return false end
+	local lvl = entry.levelNum
+	if type(lvl) ~= "number" then
+		lvl = toLevel(entry.level)
+	end
+	return isLevelVisible(lvl)
+end
+
+local function setAllVisibleLevels(flag)
+	local p = profile()
+	local v = flag and true or false
+	for i = 1, #VIEW_LEVEL_KEYS do
+		local key = VIEW_LEVEL_KEYS[i]
+		p["view" .. key] = v
+	end
+end
+
+local function countVisibleLevels()
+	local count = 0
+	for i = 1, #VIEW_LEVEL_KEYS do
+		if isLevelVisible(VIEW_LEVEL_KEYS[i]) then
+			count = count + 1
+		end
+	end
+	return count
 end
 
 local function allowForOutput(levelNum)
@@ -379,10 +473,9 @@ local function _scheduleNotifyIngest()
 			-- live UI: prepend only newly ingested entries (cheap)
 			if LOGS._ui and LOGS._ui.prependEntry then
 				local entries = LOGS._entries or {}
-				local minLvl = profile().minLevel or LOGS.LEVELS.INFO
 				for i = #entries - added + 1, #entries do
 					local e = entries[i]
-					if e and (e.levelNum or 1) >= minLvl then
+					if e and isEntryVisible(e) then
 						pcall(LOGS._ui.prependEntry, e)
 					end
 				end
@@ -430,9 +523,28 @@ function LOGS:Init()
 end
 
 -- PUBLIC CONFIG
-function GMS:Logs_SetLevel(level) profile().minLevel = toLevel(level) end
+function GMS:Logs_SetLevel(level)
+	local lvl = toLevel(level)
+	local p = profile()
+	p.minLevel = lvl
+	for i = 1, #VIEW_LEVEL_KEYS do
+		local key = VIEW_LEVEL_KEYS[i]
+		p["view" .. key] = (i >= lvl)
+	end
+end
 
-function GMS:Logs_GetLevel() return profile().minLevel end
+function GMS:Logs_GetLevel()
+	local p = profile()
+	if p.minLevel then
+		return p.minLevel
+	end
+	for i = 1, #VIEW_LEVEL_KEYS do
+		if p["view" .. VIEW_LEVEL_KEYS[i]] == true then
+			return i
+		end
+	end
+	return LOGS.LEVELS.INFO
+end
 
 function GMS:Logs_EnableChat(v) profile().chat = not not v end
 
@@ -522,8 +634,9 @@ local function UI_RegisterPage_Compat(pageId, order, title, buildFn)
 end
 
 local function UI_RegisterDockIcon_Compat(pageId, title)
-	if not (GMS.UI and type(GMS.UI.AddRightDockIconTop) == "function") then return false end
-	GMS.UI:AddRightDockIconTop({
+	if not (GMS.UI and (type(GMS.UI.AddRightDockIconBottom) == "function" or type(GMS.UI.AddRightDockIconTop) == "function")) then return false end
+	local addIcon = GMS.UI.AddRightDockIconBottom or GMS.UI.AddRightDockIconTop
+	addIcon(GMS.UI, {
 		id = pageId,
 		order = 90,
 		selectable = true,
@@ -545,28 +658,117 @@ end
 -- #	UI PAGE
 -- ###########################################################################
 
-local function BuildLogRow(entry)
-	local grp = AceGUI:Create("SimpleGroup")
-	grp:SetFullWidth(true)
-	grp:SetLayout("List")
-
-	local color = COLORS[entry.level] or "|cffffffff"
-	local origin = ""
-	if (entry.type and entry.type ~= "") or (entry.source and entry.source ~= "") then
-		origin = string.format(" [%s:%s]", entry.type or "", entry.source or "")
+local function BuildLogRow(entry, totalWidth)
+	local function OneLine(text)
+		local s = tostring(text or "")
+		s = s:gsub("[\r\n]+", " ")
+		s = s:gsub("%s%s+", " ")
+		return s:gsub("^%s+", ""):gsub("%s+$", "")
 	end
 
-	local header = string.format("%s[%s]%s %s%s", color, entry.level, "|r", entry.time or "", origin)
+	local available = tonumber(totalWidth) or 900
+	if available < 520 then available = 520 end
 
-	local hdr = AceGUI:Create("Label")
-	hdr:SetText(header)
-	hdr:SetFullWidth(true)
-	grp:AddChild(hdr)
+	-- Keep headroom for group/frame padding + spacing so Flow does not wrap.
+	local inner = available - 56
+	if inner < 420 then inner = 420 end
 
-	local body = AceGUI:Create("Label")
-	body:SetText(color .. (entry.msg or "") .. "|r")
-	body:SetFullWidth(true)
-	grp:AddChild(body)
+	local COL_TIME = 126
+	local COL_LEVEL = 56
+	local COL_SOURCE = math.floor(inner * 0.22)
+	if COL_SOURCE < 110 then COL_SOURCE = 110 end
+	if COL_SOURCE > 190 then COL_SOURCE = 190 end
+
+	local msgWidth = inner - (COL_TIME + COL_LEVEL + COL_SOURCE)
+	if msgWidth < 220 then
+		local deficit = 220 - msgWidth
+		COL_SOURCE = math.max(90, COL_SOURCE - deficit)
+		msgWidth = inner - (COL_TIME + COL_LEVEL + COL_SOURCE)
+	end
+	if msgWidth < 180 then
+		local deficit = 180 - msgWidth
+		COL_TIME = math.max(108, COL_TIME - deficit)
+		msgWidth = inner - (COL_TIME + COL_LEVEL + COL_SOURCE)
+	end
+	if msgWidth < 140 then msgWidth = 140 end
+
+	local grp = AceGUI:Create("SimpleGroup")
+	grp:SetFullWidth(true)
+	grp:SetLayout("Flow")
+
+	local color = COLORS[entry.level] or "|cffffffff"
+	local timeText = OneLine(entry.time or "")
+	local levelText = OneLine(entry.level or "INFO")
+	local typeText = OneLine(entry.type or "-")
+	local sourceText = OneLine(entry.source or "-")
+
+	local function ResolveDisplayName(srcType, srcName)
+		local t = tostring(srcType or "")
+		local s = tostring(srcName or "")
+		if s == "" then return "-" end
+
+		local reg = nil
+		if GMS and GMS.REGISTRY then
+			if t == "EXT" then reg = GMS.REGISTRY.EXT end
+			if t == "MOD" then reg = GMS.REGISTRY.MOD end
+		end
+		if type(reg) ~= "table" then
+			return s
+		end
+
+		local su = s:upper()
+		for _, meta in pairs(reg) do
+			local key = tostring(meta.key or ""):upper()
+			local name = tostring(meta.name or ""):upper()
+			local display = tostring(meta.displayName or "")
+			local displayU = display:upper()
+			if su == key or su == name or su == displayU then
+				return (display ~= "" and display) or s
+			end
+		end
+		return s
+	end
+
+	local displayName = ResolveDisplayName(typeText, sourceText)
+
+	local lTime = AceGUI:Create("Label")
+	lTime:SetWidth(COL_TIME)
+	lTime:SetText("|cffb0b0b0" .. timeText .. "|r")
+	if lTime.label then
+		lTime.label:SetWordWrap(false)
+		lTime.label:SetMaxLines(1)
+	end
+	grp:AddChild(lTime)
+
+	local lType = AceGUI:Create("Label")
+	lType:SetWidth(COL_LEVEL)
+	lType:SetText(color .. levelText .. "|r")
+	if lType.label then
+		lType.label:SetWordWrap(false)
+		lType.label:SetMaxLines(1)
+	end
+	grp:AddChild(lType)
+
+	local lSource = AceGUI:Create("Label")
+	lSource:SetWidth(COL_SOURCE)
+	lSource:SetText("|cff03A9F4" .. displayName .. "|r")
+	if lSource.label then
+		lSource.label:SetWordWrap(false)
+		lSource.label:SetMaxLines(1)
+	end
+	grp:AddChild(lSource)
+
+	local msg = OneLine(entry.msg or "")
+	if msg ~= "" then
+		local body = AceGUI:Create("Label")
+		body:SetWidth(msgWidth)
+		body:SetText("|cffd8d8d8" .. msg .. "|r")
+		if body.label then
+			body.label:SetWordWrap(false)
+			body.label:SetMaxLines(1)
+		end
+		grp:AddChild(body)
+	end
 
 	return grp
 end
@@ -585,122 +787,121 @@ local function RegisterLogsUI()
 	local PAGE_ID = "LOGS"
 	local TITLE = "Logs"
 
-	local function BuildPage(root, id, isCached)
-		if isCached then return end
-		root:SetLayout("List")
+	local function BuildLogsHeaderControls()
+		if not (GMS.UI and type(GMS.UI.GetHeaderContent) == "function") then return end
+		local header = GMS.UI:GetHeaderContent()
+		if not header then return end
+		if header.SetLayout then header:SetLayout("Flow") end
 
-		local header = AceGUI:Create("InlineGroup")
-		header:SetTitle("Logs")
-		header:SetFullWidth(true)
-		header:SetLayout("Flow")
-		root:AddChild(header)
+		local function TriggerRender()
+			if LOGS._ui and type(LOGS._ui.renderAll) == "function" then
+				LOGS._ui.renderAll()
+			end
+		end
+
+		local title = AceGUI:Create("Label")
+		title:SetText("|cff03A9F4Logging Console|r")
+		title:SetWidth(160)
+		header:AddChild(title)
+
+		local levelLabel = AceGUI:Create("Label")
+		levelLabel:SetText("Levels:")
+		levelLabel:SetWidth(46)
+		header:AddChild(levelLabel)
+
+		local levelBtn = AceGUI:Create("Button")
+		levelBtn:SetWidth(160)
+		local function UpdateLevelButtonText()
+			local c = countVisibleLevels()
+			levelBtn:SetText(string.format("Select (%d/5)", c))
+		end
+		local function ShowLevelMenu()
+			if type(CreateFrame) ~= "function" then return end
+			LOGS._levelMenuFrame = LOGS._levelMenuFrame or CreateFrame("Frame", "GMS_LOGS_LEVEL_MENU", _G.UIParent, "UIDropDownMenuTemplate")
+			local menu = {}
+			menu[#menu + 1] = {
+				text = "Select All",
+				notCheckable = true,
+				func = function()
+					setAllVisibleLevels(true)
+					UpdateLevelButtonText()
+					TriggerRender()
+				end,
+			}
+			menu[#menu + 1] = {
+				text = "Select None",
+				notCheckable = true,
+				func = function()
+					setAllVisibleLevels(false)
+					UpdateLevelButtonText()
+					TriggerRender()
+				end,
+			}
+			menu[#menu + 1] = { text = " ", disabled = true, notCheckable = true }
+
+			for i = 1, #VIEW_LEVEL_KEYS do
+				local levelKey = VIEW_LEVEL_KEYS[i]
+				menu[#menu + 1] = {
+					text = levelKey,
+					keepShownOnClick = true,
+					isNotRadio = true,
+					checked = function()
+						return isLevelVisible(levelKey)
+					end,
+					func = function()
+						local p = profile()
+						local k = "view" .. levelKey
+						p[k] = not p[k]
+						UpdateLevelButtonText()
+						TriggerRender()
+					end,
+				}
+			end
+
+			if type(EasyMenu) == "function" then
+				EasyMenu(menu, LOGS._levelMenuFrame, "cursor", 0, 0, "MENU")
+			end
+		end
+		levelBtn:SetCallback("OnClick", function()
+			ShowLevelMenu()
+		end)
+		UpdateLevelButtonText()
+		header:AddChild(levelBtn)
 
 		local btnRefresh = AceGUI:Create("Button")
 		btnRefresh:SetText("Refresh")
-		btnRefresh:SetWidth(120)
+		btnRefresh:SetWidth(110)
+		btnRefresh:SetCallback("OnClick", function()
+			TriggerRender()
+		end)
 		header:AddChild(btnRefresh)
 
 		local btnClear = AceGUI:Create("Button")
 		btnClear:SetText("Clear")
-		btnClear:SetWidth(120)
+		btnClear:SetWidth(110)
+		btnClear:SetCallback("OnClick", function()
+			GMS:Logs_Clear()
+			TriggerRender()
+		end)
 		header:AddChild(btnClear)
 
 		local btnCopy = AceGUI:Create("Button")
-		btnCopy:SetText("Copy")
-		btnCopy:SetWidth(120)
-		header:AddChild(btnCopy)
-
-		local listGroup = AceGUI:Create("InlineGroup")
-		listGroup:SetTitle("Entries (newest first)")
-		listGroup:SetFullWidth(true)
-		listGroup:SetLayout("Fill")
-		root:AddChild(listGroup)
-
-		local scroller = AceGUI:Create("ScrollFrame")
-		scroller:SetLayout("List")
-		scroller:SetFullWidth(true)
-		scroller:SetFullHeight(true)
-		listGroup:AddChild(scroller)
-
-		-- Make entries container consume remaining height under the header (AceGUI List-parent workaround)
-		local function UpdateEntriesHeight()
-			if not (root and root.frame and header and header.frame and listGroup and listGroup.frame) then return end
-
-			local rootH = root.frame:GetHeight() or 0
-			local headerH = header.frame:GetHeight() or 0
-
-			local padding = 28
-			local minH = 140
-
-			local avail = rootH - headerH - padding
-			if avail < minH then avail = minH end
-
-			listGroup:SetHeight(avail)
-			scroller:SetFullHeight(true)
-
-			if root.DoLayout then root:DoLayout() end
-		end
-
-		UpdateEntriesHeight()
-		if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-			C_Timer.After(0, UpdateEntriesHeight)
-		end
-
-		if root.frame and type(root.frame.HookScript) == "function" then
-			root.frame:HookScript("OnSizeChanged", function()
-				UpdateEntriesHeight()
-			end)
-		end
-
-		local function RenderAll()
-			LOGS:IngestGlobalBuffer()
-
-			scroller:ReleaseChildren()
-			local entries = LOGS._entries or {}
-			local minLvl = profile().minLevel or LOGS.LEVELS.INFO
-			for i = #entries, 1, -1 do
-				local e = entries[i]
-				if e and (e.levelNum or 1) >= minLvl then
-					scroller:AddChild(BuildLogRow(e))
-				end
-			end
-
-			UpdateEntriesHeight()
-		end
-
-		local function PrependEntry(entry)
-			if not scroller or not scroller.children then
-				RenderAll()
-				return
-			end
-			local w = BuildLogRow(entry)
-			table.insert(scroller.children, 1, w)
-			w.frame:SetParent(scroller.content)
-			scroller:DoLayout()
-			UpdateEntriesHeight()
-		end
-
-		LOGS._ui = {
-			scroller = scroller,
-			renderAll = RenderAll,
-			prependEntry = PrependEntry,
-		}
-
-		btnRefresh:SetCallback("OnClick", function() RenderAll() end)
-		btnClear:SetCallback("OnClick", function() GMS:Logs_Clear(); RenderAll() end)
-
+		btnCopy:SetText("Copy (2000)")
+		btnCopy:SetWidth(130)
 		btnCopy:SetCallback("OnClick", function()
 			LOGS:IngestGlobalBuffer()
 
-			local entries = GMS:Logs_GetEntries(2000, profile().minLevel or 1)
+			local entries = GMS:Logs_GetEntries(2000, 1)
 			local lines = {}
 			for i = 1, #entries do
 				local e = entries[i]
-				local origin = ""
-				if (e.type and e.type ~= "") or (e.source and e.source ~= "") then
-					origin = string.format(" [%s:%s]", e.type or "", e.source or "")
+				if isEntryVisible(e) then
+					local origin = ""
+					if (e.type and e.type ~= "") or (e.source and e.source ~= "") then
+						origin = string.format(" [%s:%s]", e.type or "", e.source or "")
+					end
+					lines[#lines + 1] = string.format("[%s][%s]%s %s", e.level, e.time or "", origin, e.msg or "")
 				end
-				lines[#lines + 1] = string.format("[%s][%s]%s %s", e.level, e.time or "", origin, e.msg or "")
 			end
 			local text = table.concat(lines, "\n")
 			if type(ChatFrame_OpenChat) == "function" then
@@ -709,6 +910,60 @@ local function RegisterLogsUI()
 				chatPrint(text)
 			end
 		end)
+		header:AddChild(btnCopy)
+	end
+
+	local function BuildPage(root, id, isCached)
+		BuildLogsHeaderControls()
+		if isCached then
+			if LOGS._ui and type(LOGS._ui.renderAll) == "function" then
+				LOGS._ui.renderAll()
+			end
+			return
+		end
+		root:SetLayout("Fill")
+
+		local scroller = AceGUI:Create("ScrollFrame")
+		scroller:SetLayout("List")
+		scroller:SetFullWidth(true)
+		scroller:SetFullHeight(true)
+		root:AddChild(scroller)
+
+		local function RenderAll()
+			LOGS:IngestGlobalBuffer()
+
+			scroller:ReleaseChildren()
+			local entries = LOGS._entries or {}
+			local contentWidth = (scroller.content and scroller.content.GetWidth and scroller.content:GetWidth()) or
+				(scroller.frame and scroller.frame.GetWidth and scroller.frame:GetWidth()) or 900
+			contentWidth = math.max(520, contentWidth - 24)
+			for i = #entries, 1, -1 do
+				local e = entries[i]
+				if e and isEntryVisible(e) then
+					scroller:AddChild(BuildLogRow(e, contentWidth))
+				end
+			end
+		end
+
+		local function PrependEntry(entry)
+			if not scroller or not scroller.children then
+				RenderAll()
+				return
+			end
+			local contentWidth = (scroller.content and scroller.content.GetWidth and scroller.content:GetWidth()) or
+				(scroller.frame and scroller.frame.GetWidth and scroller.frame:GetWidth()) or 900
+			contentWidth = math.max(520, contentWidth - 24)
+			local w = BuildLogRow(entry, contentWidth)
+			table.insert(scroller.children, 1, w)
+			w.frame:SetParent(scroller.content)
+			scroller:DoLayout()
+		end
+
+		LOGS._ui = {
+			scroller = scroller,
+			renderAll = RenderAll,
+			prependEntry = PrependEntry,
+		}
 
 		RenderAll()
 	end
@@ -785,10 +1040,9 @@ local function StartTicker()
 		local added = LOGS:IngestGlobalBuffer()
 		if added > 0 and LOGS._ui and LOGS._ui.prependEntry then
 			local entries = LOGS._entries or {}
-			local minLvl = profile().minLevel or LOGS.LEVELS.INFO
 			for i = #entries - added + 1, #entries do
 				local e = entries[i]
-				if e and (e.levelNum or 1) >= minLvl then
+				if e and isEntryVisible(e) then
 					pcall(LOGS._ui.prependEntry, e)
 				end
 			end

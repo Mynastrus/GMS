@@ -1,4 +1,4 @@
-# GMS Internal Release Notes
+﻿# GMS Internal Release Notes
 
 Dieses Dokument ist die interne Sammelstelle fuer alle Aenderungen seit dem letzten echten Release.
 Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changelog.lua` uebernommen.
@@ -15,19 +15,19 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 ## Unreleased
 
 ### Added
-- [ ] Beschreibung der Neuerung (`path/to/file.lua`)
+- [ ] (aktuell keine neuen Features seit letztem Release)
 
 ### Changed
-- [ ] Beschreibung der Aenderung (`path/to/file.lua`)
+- [ ] (aktuell keine Aenderungen seit letztem Release)
 
 ### Fixed
-- [ ] Beschreibung des Fixes (`path/to/file.lua`)
+- [ ] (aktuell keine separaten Bugfix-Only Eintraege seit letztem Release)
 
 ### Rules/Infra
-- [ ] Regel-, Build-, Tooling- oder Prozessaenderung (`path/to/file`)
+- [ ] (aktuell keine Rules/Infra-Aenderungen seit letztem Release)
 
 ## Last Release Snapshot
 
-- Version: `1.3.13`
+- Version: `1.3.20`
 - Date: `2026-02-14`
 - Source: `GMS/Core/Changelog.lua` -> `RELEASES[1]`

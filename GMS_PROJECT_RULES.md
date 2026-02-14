@@ -312,6 +312,16 @@ Dieses Regelwerk ist **verbindlich und dauerhaft gültig** für das Projekt GMS.
   * optionales Git-Tag `vX.Y.Z`
 * Nach erfolgreichem Release wird `Unreleased` zurückgesetzt (leeren/neu starten), damit die nächste Iteration sauber beginnt.
 
+### 11.5 Commit-Abdeckung im Unreleased-Log (Pflicht)
+
+* **Jeder Commit** mit Code-/Config-/Dokumentationsänderungen **MUSS** in `GMS_INTERNAL_RELEASE_NOTES.md` unter `## Unreleased` erfasst werden.
+* Falls ein Commit mehrere Kategorien betrifft, werden die Punkte auf `Added`, `Changed`, `Fixed` und/oder `Rules/Infra` verteilt.
+* Einträge müssen mindestens enthalten:
+  * kurze Änderungsbeschreibung
+  * betroffene Datei(en)
+  * optional Commit-Hash zur Rückverfolgung
+* Vor einem Release ist `Unreleased` auf Vollständigkeit gegen `git log` seit dem letzten Tag zu prüfen.
+
 ## AI Interaction & Artifacts
 The following rules apply to the AI assistant's interaction with artifacts:
 - **Auto-Approval**: `implementation_plan.md` and `walkthrough.md` should generally be set to `ShouldAutoProceed = true` unless major breaking changes or critical design decisions require explicit user confirmation.
