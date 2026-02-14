@@ -96,6 +96,24 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.3.28",
+		date = "2026-02-14",
+		title_en = "Global locale system and CharInfo UI redesign",
+		title_de = "Globales Locale-System und CharInfo-UI-Redesign",
+		notes_en = {
+			"Added a global localization system in Locales/ with language files (enUS/deDE) and fallback handling.",
+			"Core chat output and multiple UI texts now resolve by client locale (deDE -> German, otherwise English fallback).",
+			"CharInfo page was redesigned to a cleaner card-based layout with profile header, structured info cards, and action panel.",
+			"Fixed additional Lua diagnostics in Logs/Roster option and global access handling.",
+		},
+		notes_de = {
+			"Globales Lokalisierungssystem im Ordner Locales/ hinzugefuegt, inkl. Sprachdateien (enUS/deDE) und Fallback-Logik.",
+			"Core-Chat-Ausgaben und mehrere UI-Texte werden jetzt ueber die Client-Locale aufgeloest (deDE -> Deutsch, sonst Englisch-Fallback).",
+			"Die CharInfo-Seite wurde auf ein aufgeraeumtes kartenbasiertes Layout mit Profilkopf, strukturierten Info-Cards und Aktionsbereich umgestellt.",
+			"Weitere Lua-Diagnostics in Logs/Roster (Optionen und Global-Zugriffe) behoben.",
+		},
+	},
+	{
 		version = "1.3.27",
 		date = "2026-02-14",
 		title_en = "Release automation now builds ZIP artifacts",
