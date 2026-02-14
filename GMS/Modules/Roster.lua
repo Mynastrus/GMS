@@ -880,21 +880,21 @@ function Roster:ShowMemberContextMenu(anchorFrame, memberData)
 	local menu = {
 		{ text = targetName, isTitle = true, notCheckable = true },
 		{
-			text = "Anfluestern",
+			text = (type(GMS.T) == "function" and GMS:T("ROSTER_CTX_WHISPER")) or "Whisper",
 			notCheckable = true,
 			func = function()
 				OpenChatEditWithText("/w " .. targetName .. " ")
 			end,
 		},
 		{
-			text = "Name kopieren (inkl. Realm)",
+			text = (type(GMS.T) == "function" and GMS:T("ROSTER_CTX_COPY_NAME")) or "Copy name (with realm)",
 			notCheckable = true,
 			func = function()
 				OpenChatEditWithText((nameFull ~= "" and nameFull) or targetName)
 			end,
 		},
 		{
-			text = "In Gruppe einladen",
+			text = (type(GMS.T) == "function" and GMS:T("ROSTER_CTX_INVITE")) or "Invite to group",
 			notCheckable = true,
 			disabled = isSelf,
 			func = function()
@@ -1391,7 +1391,7 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 	Roster._lastGuidOrderSig = BuildGuidOrderSignature(members)
 	if not members or #members == 0 then
 		local empty = AceGUI:Create("Label")
-		empty:SetText("Keine Gildenmitglieder gefunden.")
+		empty:SetText((type(GMS.T) == "function" and GMS:T("ROSTER_EMPTY")) or "No guild members found.")
 		empty:SetFullWidth(true)
 		parent:AddChild(empty)
 		parent:DoLayout()
@@ -1671,11 +1671,14 @@ UpdateRosterStatus = function(displayedCount, totalCount)
 	local msg = ""
 
 	if q ~= "" then
-		msg = string.format("|cffb8b8b8Roster:|r angezeigt %d von %d (Suche: %s)", shown, total, q)
+		msg = (type(GMS.T) == "function" and GMS:T("ROSTER_STATUS_SEARCH", shown, total, q))
+			or string.format("|cffb8b8b8Roster:|r showing %d of %d (search: %s)", shown, total, q)
 	elseif shown ~= total then
-		msg = string.format("|cffb8b8b8Roster:|r angezeigt %d von %d", shown, total)
+		msg = (type(GMS.T) == "function" and GMS:T("ROSTER_STATUS_FILTERED", shown, total))
+			or string.format("|cffb8b8b8Roster:|r showing %d of %d", shown, total)
 	else
-		msg = string.format("|cffb8b8b8Roster:|r %d Mitglieder", total)
+		msg = (type(GMS.T) == "function" and GMS:T("ROSTER_STATUS_TOTAL", total))
+			or string.format("|cffb8b8b8Roster:|r %d members", total)
 	end
 
 	GMS.UI:SetStatusText(msg)
@@ -1864,7 +1867,7 @@ local function BuildRosterHeaderUI()
 	row:AddChild(searchCol)
 
 	local searchLabel = AceGUI:Create("Label")
-	searchLabel:SetText("Suche:")
+	searchLabel:SetText((type(GMS.T) == "function" and GMS:T("ROSTER_SEARCH")) or "Search:")
 	searchLabel:SetWidth(45)
 	searchCol:AddChild(searchLabel)
 
@@ -1880,7 +1883,7 @@ local function BuildRosterHeaderUI()
 	row:AddChild(filterCol)
 
 	local cbOffline = AceGUI:Create("CheckBox")
-	cbOffline:SetLabel("Offlinemitglieder anzeigen")
+	cbOffline:SetLabel((type(GMS.T) == "function" and GMS:T("ROSTER_SHOW_OFFLINE")) or "Show offline members")
 	cbOffline:SetWidth(210)
 	cbOffline:SetValue(opts.showOffline ~= false)
 	cbOffline:SetCallback("OnValueChanged", function(_, _, v)
@@ -2050,7 +2053,7 @@ function Roster:TryRegisterRosterDockIconInUI()
 		selectable = true,
 		icon = "Interface\\Icons\\Achievement_guildperk_everybodysfriend",
 		tooltipTitle = METADATA.DISPLAY_NAME,
-		tooltipText = "Oeffnet die Roster-Page",
+		tooltipText = (type(GMS.T) == "function" and GMS:T("ROSTER_DOCK_TOOLTIP")) or "Open roster page",
 		onClick = function()
 			GMS.UI:Open(METADATA.INTERN_NAME)
 		end,

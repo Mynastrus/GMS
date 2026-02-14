@@ -1,12 +1,12 @@
 -- ============================================================================
 --	GMS/Core/Logs.lua
 --	LOGS EXTENSION (no GMS:NewModule)
---	- Ingest: übernimmt Einträge aus GMS._LOG_BUFFER in eigenen Ringbuffer
---	- Ringbuffer persistiert via AceDB (falls verfügbar), sonst in-memory
+--	- Ingest: Ã¼bernimmt EintrÃ¤ge aus GMS._LOG_BUFFER in eigenen Ringbuffer
+--	- Ringbuffer persistiert via AceDB (falls verfÃ¼gbar), sonst in-memory
 --	- Notify Hook: LOCAL_LOG schreibt Buffer (SoT) + optional _LOG_NOTIFY(entry, idx)
 --	  Logs.lua installiert _LOG_NOTIFY und ingested gebatched
 --	- UI Page (AceGUI) + Live-Update (Notify + optional Ticker)
---	- Slash: /gms logs -> öffnet LOGS Page
+--	- Slash: /gms logs -> Ã¶ffnet LOGS Page
 --	- UI Integration: kompatibel mit GMS.UI:RegisterPage(id, order, title, buildFn)
 --	- RightDock: nutzt GMS.UI:AddRightDockIconBottom(...)
 -- ============================================================================
@@ -652,7 +652,7 @@ local function UI_RegisterDockIcon_Compat(pageId, title)
 		selectable = true,
 		icon = "Interface\\Icons\\INV_Misc_Note_05",
 		tooltipTitle = title or pageId,
-		tooltipText = "Logs anzeigen",
+		tooltipText = (type(GMS.T) == "function" and GMS:T("LOGS_DOCK_TOOLTIP")) or "Open logs",
 		onClick = function()
 			if GMS.UI and type(GMS.UI.Navigate) == "function" then
 				GMS.UI:Navigate(pageId)
@@ -810,12 +810,12 @@ local function RegisterLogsUI()
 		end
 
 		local title = AceGUI:Create("Label")
-		title:SetText("|cff03A9F4Logging Console|r")
+		title:SetText("|cff03A9F4" .. ((type(GMS.T) == "function" and GMS:T("LOGS_HEADER_TITLE")) or "Logging Console") .. "|r")
 		title:SetWidth(160)
 		header:AddChild(title)
 
 		local levelLabel = AceGUI:Create("Label")
-		levelLabel:SetText("Levels:")
+		levelLabel:SetText((type(GMS.T) == "function" and GMS:T("LOGS_LEVELS")) or "Levels:")
 		levelLabel:SetWidth(46)
 		header:AddChild(levelLabel)
 
@@ -823,7 +823,7 @@ local function RegisterLogsUI()
 		levelBtn:SetWidth(160)
 		local function UpdateLevelButtonText()
 			local c = countVisibleLevels()
-			levelBtn:SetText(string.format("Select (%d/5)", c))
+			levelBtn:SetText((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_FMT", c)) or string.format("Select (%d/5)", c))
 		end
 		local function ShowLevelMenu()
 			if type(CreateFrame) ~= "function" then return end
@@ -845,13 +845,13 @@ local function RegisterLogsUI()
 						UIDropDownMenu_AddButton(info, level)
 					end
 
-					AddEntry("Select All", true, false, false, function()
+					AddEntry((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_ALL")) or "Select All", true, false, false, function()
 						setAllVisibleLevels(true)
 						UpdateLevelButtonText()
 						TriggerRender()
 					end, false)
 
-					AddEntry("Select None", true, false, false, function()
+					AddEntry((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_NONE")) or "Select None", true, false, false, function()
 						setAllVisibleLevels(false)
 						UpdateLevelButtonText()
 						TriggerRender()
@@ -875,10 +875,10 @@ local function RegisterLogsUI()
 				ToggleDropDownMenu(1, nil, LOGS._levelMenuFrame, anchor, 0, 0)
 			elseif type(EasyMenu) == "function" then
 				local menu = {}
-				menu[#menu + 1] = { text = "Select All", notCheckable = true, func = function()
+				menu[#menu + 1] = { text = ((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_ALL")) or "Select All"), notCheckable = true, func = function()
 					setAllVisibleLevels(true); UpdateLevelButtonText(); TriggerRender()
 				end }
-				menu[#menu + 1] = { text = "Select None", notCheckable = true, func = function()
+				menu[#menu + 1] = { text = ((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_NONE")) or "Select None"), notCheckable = true, func = function()
 					setAllVisibleLevels(false); UpdateLevelButtonText(); TriggerRender()
 				end }
 				menu[#menu + 1] = { text = " ", disabled = true, notCheckable = true }
@@ -908,7 +908,7 @@ local function RegisterLogsUI()
 		header:AddChild(levelBtn)
 
 		local btnRefresh = AceGUI:Create("Button")
-		btnRefresh:SetText("Refresh")
+		btnRefresh:SetText((type(GMS.T) == "function" and GMS:T("LOGS_REFRESH")) or "Refresh")
 		btnRefresh:SetWidth(110)
 		btnRefresh:SetCallback("OnClick", function()
 			TriggerRender()
@@ -916,7 +916,7 @@ local function RegisterLogsUI()
 		header:AddChild(btnRefresh)
 
 		local btnClear = AceGUI:Create("Button")
-		btnClear:SetText("Clear")
+		btnClear:SetText((type(GMS.T) == "function" and GMS:T("LOGS_CLEAR")) or "Clear")
 		btnClear:SetWidth(110)
 		btnClear:SetCallback("OnClick", function()
 			GMS:Logs_Clear()
@@ -925,7 +925,7 @@ local function RegisterLogsUI()
 		header:AddChild(btnClear)
 
 		local btnCopy = AceGUI:Create("Button")
-		btnCopy:SetText("Copy (2000)")
+		btnCopy:SetText((type(GMS.T) == "function" and GMS:T("LOGS_COPY")) or "Copy (2000)")
 		btnCopy:SetWidth(130)
 		btnCopy:SetCallback("OnClick", function()
 			LOGS:IngestGlobalBuffer()
@@ -1051,7 +1051,7 @@ local function RegisterLogsSlash()
 		GMS:Slash_RegisterSubCommand("logs", function()
 			UI_Open("LOGS")
 		end, {
-			help = "/gms logs - öffnet die Logs UI",
+			help = (type(GMS.T) == "function" and GMS:T("LOGS_SLASH_HELP")) or "/gms logs - opens the logs UI",
 			alias = { "log" },
 			owner = "LOGS",
 		})
@@ -1067,7 +1067,7 @@ local function RegisterLogsSlash()
 	if type(SC.RegisterSubCommand) == "function" then
 		SC:RegisterSubCommand("logs", {
 			title = "Logs",
-			help = "/gms logs - öffnet die Logs UI",
+			help = (type(GMS.T) == "function" and GMS:T("LOGS_SLASH_HELP")) or "/gms logs - opens the logs UI",
 			handler = function() UI_Open("LOGS") end,
 		})
 		LOGS._slashRegistered = true
@@ -1078,7 +1078,7 @@ local function RegisterLogsSlash()
 	SC.SUB = SC.SUB or {}
 	SC.SUB.logs = SC.SUB.logs or {}
 	SC.SUB.logs.title = SC.SUB.logs.title or "Logs"
-	SC.SUB.logs.desc = SC.SUB.logs.desc or "Öffnet die Logs UI"
+	SC.SUB.logs.desc = SC.SUB.logs.desc or ((type(GMS.T) == "function" and GMS:T("LOGS_SUB_FALLBACK_DESC")) or "Opens the logs UI")
 	SC.SUB.logs.run = function()
 		UI_Open("LOGS")
 	end
@@ -1137,3 +1137,4 @@ GMS:SetReady("EXT:" .. METADATA.INTERN_NAME)
 
 GMS:SetReady("EXT:LOGS")
 LOCAL_LOG("INFO", "EXT:LOGS READY")
+

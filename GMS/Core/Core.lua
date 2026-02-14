@@ -218,8 +218,8 @@ function GMS:OnEnable()
 			helpCmd = self:ChatLink_Build("CMD_HELP", "/gms ?", "GMS Hilfe")
 		end
 
-		self:Printf("Addon geladen: Guild Management System v%s", tostring(self.VERSION or "?.?.?"))
-		self:Print(("Mit  %s  kannst du das Hauptfenster aufrufen und mit  %s  die Hilfe."):format(gmsCmd, helpCmd))
+		self:Print(self:T("CORE_STARTUP_LOADED", tostring(self.VERSION or "?.?.?")))
+		self:Print(self:T("CORE_STARTUP_HINT", gmsCmd, helpCmd))
 	end
 end
 

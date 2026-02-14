@@ -105,7 +105,7 @@ GMS.SlashCommands = GMS.SlashCommands or {}
 local SlashCommands = GMS.SlashCommands
 
 local EXT_NAME = METADATA.INTERN_NAME
-local DISPLAY_NAME = "Chateingabe"
+local DISPLAY_NAME = (type(GMS.T) == "function" and GMS:T("SLASH_DISPLAY_NAME")) or "Chateingabe"
 
 SlashCommands.SUBCOMMAND_REGISTRY = SlashCommands.SUBCOMMAND_REGISTRY or {}
 SlashCommands.PRIMARY_COMMAND = SlashCommands.PRIMARY_COMMAND or "gms"
@@ -168,8 +168,8 @@ local function PrintGmsHelp(registry, header)
 		if header and header ~= "" then
 			GMS:Print(header)
 		end
-		GMS:Print("Usage: /gms <subcommand> [args]")
-		GMS:Print("Example: /gms help")
+		GMS:Print((type(GMS.T) == "function" and GMS:T("SLASH_HELP_USAGE")) or "Usage: /gms <subcommand> [args]")
+		GMS:Print((type(GMS.T) == "function" and GMS:T("SLASH_HELP_EXAMPLE")) or "Example: /gms help")
 	end
 
 	local keys = {}
@@ -178,7 +178,7 @@ local function PrintGmsHelp(registry, header)
 
 	if #keys == 0 then
 		if type(GMS.Print) == "function" then
-			GMS:Print("No subcommands registered.")
+			GMS:Print((type(GMS.T) == "function" and GMS:T("SLASH_HELP_NONE")) or "No subcommands registered.")
 		end
 		return
 	end
@@ -226,7 +226,8 @@ local function HandleGmsSlashCommandInput(input)
 
 	local entry = FindSubCommandEntry(SlashCommands.SUBCOMMAND_REGISTRY, sub)
 	if not entry or type(entry.handlerFn) ~= "function" then
-		return PrintGmsHelp(SlashCommands.SUBCOMMAND_REGISTRY, "Unknown subcommand: " .. sub)
+		local unknown = (type(GMS.T) == "function" and GMS:T("SLASH_UNKNOWN_SUBCOMMAND", tostring(sub))) or ("Unknown subcommand: " .. tostring(sub))
+		return PrintGmsHelp(SlashCommands.SUBCOMMAND_REGISTRY, unknown)
 	end
 
 	local ok, err = pcall(entry.handlerFn, args)
@@ -292,7 +293,7 @@ if not SlashCommands._defaultsLoaded then
 	GMS:Slash_RegisterSubCommand("reload", function()
 		if ReloadUI then ReloadUI() end
 	end, {
-		help = "Lädt die UI neu.",
+		help = (type(GMS.T) == "function" and GMS:T("SLASH_HELP_RELOAD")) or "Laedt die UI neu.",
 		alias = { "rl" },
 		owner = EXT_NAME,
 	})
@@ -301,3 +302,4 @@ end
 GMS:SetReady("EXT:" .. METADATA.INTERN_NAME)
 
 LOCAL_LOG("INFO", "SlashCommands extension loaded")
+

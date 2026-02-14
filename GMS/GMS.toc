@@ -56,6 +56,9 @@ Libs\LibDeflate\lib.xml
 # =========================
 
 Core\Core.lua
+Locales\Locale.lua
+Locales\enUS.lua
+Locales\deDE.lua
 Core\ModuleStates.lua
 Core\Database.lua
 Core\Permissions.lua

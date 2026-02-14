@@ -405,7 +405,7 @@ function UI:Header_BuildSearch(opts)
 	Header_EnsureLayout()
 
 	local iconPath = tostring(opts.icon or "Interface\\Icons\\INV_Misc_Search_01")
-	local placeholder = tostring(opts.placeholder or "Suche…")
+	local placeholder = tostring(opts.placeholder or "Search...")
 	local onChanged = opts.onChanged
 	local onEnter = opts.onEnter
 
@@ -476,7 +476,7 @@ function UI:Header_BuildControls(opts)
 	self:Header_Clear()
 	Header_EnsureLayout()
 
-	local title = tostring(opts.title or "Filter / Aktionen")
+	local title = tostring(opts.title or "Filters / Actions")
 	local onToggleA = opts.onToggleA
 	local onToggleB = opts.onToggleB
 	local onToggleC = opts.onToggleC
@@ -521,7 +521,7 @@ function UI:Header_BuildControls(opts)
 	self._headerContent:AddChild(cbC)
 
 	local btn = AceGUI:Create("Button")
-	btn:SetText(tostring(opts.buttonText or "Aktualisieren"))
+	btn:SetText(tostring(opts.buttonText or ((type(GMS.T) == "function" and GMS:T("LOGS_REFRESH")) or "Refresh")))
 	btn:SetWidth(140)
 	btn:SetCallback("OnClick", function()
 		if type(onClickMain) == "function" then pcall(onClickMain) end
@@ -534,7 +534,8 @@ end
 -- Default Header: Addon Info
 function UI:Header_BuildDefault()
 	local version = (GMS and GMS.VERSION) and tostring(GMS.VERSION) or ""
-	local sub = (version ~= "" and ("Version: |cffCCCCCC" .. version .. "|r")) or "UI Extension aktiv"
+	local sub = (version ~= "" and ((type(GMS.T) == "function" and GMS:T("UI_HEADER_SUB_VERSION", version)) or ("Version: |cffCCCCCC" .. version .. "|r")))
+		or ((type(GMS.T) == "function" and GMS:T("UI_HEADER_SUB_ACTIVE")) or "UI extension active")
 	return self:Header_BuildIconText({
 		icon = "Interface\\Icons\\INV_Misc_Note_05",
 		text = "|cff03A9F4[GMS]|r " .. DISPLAY_NAME,
@@ -647,18 +648,18 @@ function UI:RenderFallbackContent(root, hintText)
 	if not AceGUI or not root then return end
 
 	local title = AceGUI:Create("Label")
-	title:SetText("|cff03A9F4GMS|r – UI ist geladen.")
+	title:SetText((type(GMS.T) == "function" and GMS:T("UI_FALLBACK_TITLE")) or "|cff03A9F4GMS|r - UI is loaded.")
 	title:SetFontObject(GameFontNormalLarge)
 	title:SetFullWidth(true)
 	root:AddChild(title)
 
 	local hint = AceGUI:Create("Label")
-	hint:SetText(tostring(hintText or "Pages-System ist nicht aktiv (oder entfernt)."))
+	hint:SetText(tostring(hintText or ((type(GMS.T) == "function" and GMS:T("UI_FALLBACK_HINT_PAGES_INACTIVE")) or "Pages system is not active (or removed).")))
 	hint:SetFullWidth(true)
 	root:AddChild(hint)
 
 	local resetBtn = AceGUI:Create("Button")
-	resetBtn:SetText("Fenster zurücksetzen (Position/Größe)")
+	resetBtn:SetText((type(GMS.T) == "function" and GMS:T("UI_RESET_WINDOW")) or "Reset window (position/size)")
 	resetBtn:SetFullWidth(true)
 	resetBtn:SetCallback("OnClick", function()
 		UI:ResetWindowToDefaults()
@@ -673,7 +674,7 @@ if type(UI.Navigate) ~= "function" then
 		if self._fallbackRoot and self._fallbackRoot.ReleaseChildren then
 			---@diagnostic disable-next-line: undefined-field
 			self._fallbackRoot:ReleaseChildren()
-			self:RenderFallbackContent(self._fallbackRoot, "Navigate() aktiv, aber PAGES-Section fehlt.")
+			self:RenderFallbackContent(self._fallbackRoot, (type(GMS.T) == "function" and GMS:T("UI_FALLBACK_HINT_NAV_MISSING")) or "Navigate() active, but PAGES section is missing.")
 		end
 	end
 end
@@ -742,7 +743,7 @@ if type(UI.Navigate) ~= "function" then
 		if self._fallbackRoot and self._fallbackRoot.ReleaseChildren then
 			---@diagnostic disable-next-line: undefined-field
 			self._fallbackRoot:ReleaseChildren()
-			self:RenderFallbackContent(self._fallbackRoot, "UI_Pages Extension fehlt.")
+			self:RenderFallbackContent(self._fallbackRoot, (type(GMS.T) == "function" and GMS:T("UI_FALLBACK_HINT_UI_PAGES_MISSING")) or "UI_Pages extension missing.")
 		end
 	end
 end
@@ -877,7 +878,7 @@ function UI:CreateFrame()
 		UI:Header_BuildDefault()
 	end
 	if UI._footerContent then
-		UI:SetStatusText("Status: bereit")
+		UI:SetStatusText((type(GMS.T) == "function" and GMS:T("UI_STATUS_READY")) or "Status: ready")
 	end
 
 	-- Background fürs Content (wie gehabt)
@@ -1034,7 +1035,7 @@ function UI:RegisterUiSlashCommandIfAvailable()
 		rest = TRIM(rest)
 		UI:Open((rest ~= "" and rest) or nil)
 	end, {
-		help = "Öffnet die GMS UI (/gms ui [page])",
+		help = (type(GMS.T) == "function" and GMS:T("UI_CMD_OPEN_HELP")) or "Opens the GMS UI (/gms ui [page])",
 		alias = { "open" },
 		owner = EXT_NAME,
 	})
