@@ -1,0 +1,13 @@
+package-as: GMS
+
+ignore:
+  - .github
+  - .gitignore
+  - README.md
+  - LICENSE
+  - GMS_INTERNAL_RELEASE_NOTES.md
+  - GMS_PROJECT_RULES.md
+  - tools
+
+include:
+  - GMS/**
