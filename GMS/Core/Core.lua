@@ -15,7 +15,7 @@ local METADATA = {
 	INTERN_NAME  = "GMS_CORE",
 	SHORT_NAME   = "CORE",
 	DISPLAY_NAME = "GMS Core",
-	VERSION      = "1.0.1",
+	VERSION      = "1.0.4",
 }
 
 -- ---------------------------------------------------------------------------
@@ -187,6 +187,40 @@ end
 
 function GMS:OnEnable()
 	LOCAL_LOG("INFO", "OnEnable")
+
+	if not self._startupHintShown then
+		self._startupHintShown = true
+
+		if type(self.ChatLink_Define) == "function" and type(self.ChatLink_OnClick) == "function" then
+			self:ChatLink_Define("CMD_GMS", {
+				title = "|cff03A9F4GMS: Hauptfenster|r",
+				label = "/gms",
+				hint = "/gms",
+			})
+			self:ChatLink_Define("CMD_HELP", {
+				title = "|cff03A9F4GMS: Hilfe|r",
+				label = "/gms ?",
+				hint = "/gms ?",
+			})
+
+			self:ChatLink_OnClick("CMD_GMS", function()
+				if type(self.SlashCommand) == "function" then self:SlashCommand("") end
+			end)
+			self:ChatLink_OnClick("CMD_HELP", function()
+				if type(self.SlashCommand) == "function" then self:SlashCommand("?") end
+			end)
+		end
+
+		local gmsCmd = "/gms"
+		local helpCmd = "/gms ?"
+		if type(self.ChatLink_Build) == "function" then
+			gmsCmd = self:ChatLink_Build("CMD_GMS", "/gms", "GMS Hauptfenster")
+			helpCmd = self:ChatLink_Build("CMD_HELP", "/gms ?", "GMS Hilfe")
+		end
+
+		self:Printf("Addon geladen: Guild Management System v%s", tostring(self.VERSION or "?.?.?"))
+		self:Print(("Mit  %s  kannst du das Hauptfenster aufrufen und mit  %s  die Hilfe."):format(gmsCmd, helpCmd))
+	end
 end
 
 function GMS:OnDisable()

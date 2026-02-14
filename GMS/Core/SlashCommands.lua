@@ -12,7 +12,7 @@ local METADATA = {
 	INTERN_NAME = "SLASH",
 	SHORT_NAME = "SLASH",
 	DISPLAY_NAME = "Slash Commands",
-	VERSION = "1.0.3",
+	VERSION = "1.0.4",
 }
 
 -- ---------------------------------------------------------------------------
@@ -205,6 +205,18 @@ local function HandleGmsSlashCommandInput(input)
 	local sub, args = ParseGmsSlashInput(input)
 
 	if sub == "" then
+		if type(GMS.UI_Open) == "function" then
+			local ok = pcall(function() return GMS:UI_Open(nil) end)
+			if ok then return end
+		end
+		local uiEntry = FindSubCommandEntry(SlashCommands.SUBCOMMAND_REGISTRY, "ui")
+		if uiEntry and type(uiEntry.handlerFn) == "function" then
+			local ok, err = pcall(uiEntry.handlerFn, "")
+			if not ok then
+				LOCAL_LOG("ERROR", "Default /gms UI handler error", err)
+			end
+			return
+		end
 		return HandleGmsSlashCommandInput("?")
 	end
 
