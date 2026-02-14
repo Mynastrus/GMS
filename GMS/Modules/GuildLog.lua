@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "GUILDLOG",
 	SHORT_NAME   = "GuildLog",
 	DISPLAY_NAME = "Guild Log",
-	VERSION      = "1.0.1",
+	VERSION      = "1.1.0",
 }
 
 local LibStub = LibStub
@@ -87,24 +87,6 @@ local OPTIONS_DEFAULTS = {
 
 GuildLog._optionsRegistered = GuildLog._optionsRegistered or false
 
-local function GetLegacyOptionsRoot()
-	if not GMS or type(GMS.db) ~= "table" or type(GMS.db.global) ~= "table" then
-		return nil
-	end
-	local global = GMS.db.global
-	if type(global.guildLogStore) ~= "table" then return nil end
-	if type(global.guildLogStore.byGuild) ~= "table" then return nil end
-
-	local key = "NO_GUILD"
-	if type(IsInGuild) == "function" and IsInGuild() and type(GMS.GetGuildGUID) == "function" then
-		local g = GMS:GetGuildGUID()
-		if type(g) == "string" and g ~= "" then
-			key = g
-		end
-	end
-	return global.guildLogStore.byGuild[key]
-end
-
 local function EnsureModuleOptionsRegistered()
 	if GuildLog._optionsRegistered then return end
 	if type(GMS.RegisterModuleOptions) ~= "function" then return end
@@ -144,44 +126,9 @@ local function ClampMaxEntries(v)
 end
 
 local function EnsureOptions()
-	local oldOpts = GuildLog._options
 	local opts = GetScopedOptions()
 	if type(opts) ~= "table" then
-		-- fallback: in-memory table (used until DB is ready)
-		opts = oldOpts or {}
-	elseif type(oldOpts) == "table" and oldOpts ~= opts then
-		if (type(opts.entries) ~= "table" or #opts.entries == 0) and type(oldOpts.entries) == "table" and #oldOpts.entries > 0 then
-			opts.entries = oldOpts.entries
-		end
-		if (type(opts.memberHistory) ~= "table" or next(opts.memberHistory) == nil) and type(oldOpts.memberHistory) == "table" then
-			opts.memberHistory = oldOpts.memberHistory
-		end
-		if opts.chatEcho == nil and oldOpts.chatEcho ~= nil then
-			opts.chatEcho = oldOpts.chatEcho and true or false
-		end
-		if opts.maxEntries == nil and oldOpts.maxEntries ~= nil then
-			opts.maxEntries = tonumber(oldOpts.maxEntries) or opts.maxEntries
-		end
-	end
-
-	local legacy = GetLegacyOptionsRoot()
-	if type(legacy) == "table" then
-		if type(opts.entries) ~= "table" or #opts.entries == 0 then
-			if type(legacy.entries) == "table" and #legacy.entries > 0 then
-				opts.entries = legacy.entries
-			end
-		end
-		if type(opts.memberHistory) ~= "table" or next(opts.memberHistory) == nil then
-			if type(legacy.memberHistory) == "table" then
-				opts.memberHistory = legacy.memberHistory
-			end
-		end
-		if opts.chatEcho == nil and legacy.chatEcho ~= nil then
-			opts.chatEcho = legacy.chatEcho and true or false
-		end
-		if opts.maxEntries == nil and legacy.maxEntries ~= nil then
-			opts.maxEntries = tonumber(legacy.maxEntries) or opts.maxEntries
-		end
+		opts = GuildLog._options or {}
 	end
 
 	if opts.chatEcho == nil then opts.chatEcho = false end
@@ -192,15 +139,22 @@ local function EnsureOptions()
 	return opts
 end
 
+local function EnsureOptionsCompat()
+	-- Keep function name for existing call sites during transition; now fully new DB only.
+	local opts = GetScopedOptions()
+	if type(opts) == "table" then GuildLog._options = opts end
+	return EnsureOptions()
+end
+
 local function Entries()
-	local opts = GuildLog._options or EnsureOptions()
+	local opts = GuildLog._options or EnsureOptionsCompat()
 	if type(opts) ~= "table" then return nil end
 	if type(opts.entries) ~= "table" then opts.entries = {} end
 	return opts.entries
 end
 
 local function MemberHistory()
-	local opts = GuildLog._options or EnsureOptions()
+	local opts = GuildLog._options or EnsureOptionsCompat()
 	if type(opts) ~= "table" then return nil end
 	if type(opts.memberHistory) ~= "table" then opts.memberHistory = {} end
 	return opts.memberHistory
@@ -214,7 +168,7 @@ local function FormatNow()
 end
 
 local function PushEntry(kind, msg, data)
-	local opts = GuildLog._options or EnsureOptions()
+	local opts = GuildLog._options or EnsureOptionsCompat()
 	local entries = Entries()
 	if type(entries) ~= "table" then return end
 
@@ -800,7 +754,7 @@ local function RegisterPage()
 		cbChat:SetWidth(260)
 		cbChat:SetValue((GuildLog._options and GuildLog._options.chatEcho) == true)
 		cbChat:SetCallback("OnValueChanged", function(_, _, v)
-			local opts = GuildLog._options or EnsureOptions()
+			local opts = GuildLog._options or EnsureOptionsCompat()
 			if type(opts) == "table" then
 				opts.chatEcho = v and true or false
 			end

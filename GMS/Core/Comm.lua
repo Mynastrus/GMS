@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "COMM",
 	SHORT_NAME   = "Comm",
 	DISPLAY_NAME = "Kommunikation",
-	VERSION      = "1.1.0",
+	VERSION      = "1.2.0",
 }
 
 ---@diagnostic disable: undefined-global
@@ -86,6 +86,12 @@ Comm.SYNC_CFG = Comm.SYNC_CFG or {
 	RELAY_BATCH = 20,
 }
 
+local COMM_SYNC_DEFAULTS = {
+	records = {},
+	state = { seq = {} },
+}
+Comm._syncOptionsRegistered = Comm._syncOptionsRegistered or false
+
 local function NormalizeName(name)
 	if type(name) ~= "string" or name == "" then return "" end
 	return string.lower(name:gsub("%s+", ""))
@@ -120,24 +126,25 @@ local function ResolveSenderGUIDFromGuildRoster(sender)
 end
 
 local function GetGuildRoot()
-	if type(GMS.InitializeStandardDatabases) ~= "function" then return nil end
-	GMS:InitializeStandardDatabases(false)
-	if type(GMS.GetGuildGUID) ~= "function" then return nil end
-	local guildGuid = GMS:GetGuildGUID()
-	if not guildGuid then return nil end
-	if type(GMS.guild_db) ~= "table" then return nil end
-	GMS.guild_db[guildGuid] = GMS.guild_db[guildGuid] or {}
-	return GMS.guild_db[guildGuid]
+	if not Comm._syncOptionsRegistered and type(GMS.RegisterModuleOptions) == "function" then
+		pcall(function()
+			GMS:RegisterModuleOptions("COMM_SYNC", COMM_SYNC_DEFAULTS, "GUILD")
+		end)
+		Comm._syncOptionsRegistered = true
+	end
+	if type(GMS.GetModuleOptions) ~= "function" then return nil end
+	local ok, root = pcall(GMS.GetModuleOptions, GMS, "COMM_SYNC")
+	if not ok or type(root) ~= "table" then return nil end
+	return root
 end
 
 local function GetSyncStore()
 	local root = GetGuildRoot()
 	if type(root) ~= "table" then return nil end
-	root.COMM_SYNC = root.COMM_SYNC or {
-		records = {},
-		state = { seq = {} },
-	}
-	return root.COMM_SYNC
+	root.records = type(root.records) == "table" and root.records or {}
+	root.state = type(root.state) == "table" and root.state or {}
+	root.state.seq = type(root.state.seq) == "table" and root.state.seq or {}
+	return root
 end
 
 local function ComputeChecksumFromString(s)
