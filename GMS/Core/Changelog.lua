@@ -34,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.2",
+	VERSION      = "1.3.5",
 }
 
 -- ###########################################################################
@@ -95,6 +95,52 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 -- ###########################################################################
 
 local RELEASES = {
+	{
+		version = "1.3.16",
+		date = "2026-02-14",
+		title_en = "Dedicated SavedVariable persistence for auto-open state",
+		title_de = "Dedizierte SavedVariable-Persistenz fuer Auto-Open-Status",
+		notes_en = {
+			"Added standalone SavedVariable storage for changelog seen state.",
+			"Auto-open seen-version check now uses profile, AceDB global, and standalone fallback.",
+			"This prevents repeated opening when AceDB namespaces are delayed or unavailable.",
+		},
+		notes_de = {
+			"Eigenstaendige SavedVariable-Speicherung fuer den Changelog-Status hinzugefuegt.",
+			"Seen-Version-Pruefung nutzt jetzt Profil, AceDB-Global und eigenstaendigen Fallback.",
+			"Damit wird wiederholtes Oeffnen verhindert, auch wenn AceDB-Namespace verzoegert ist.",
+		},
+	},
+	{
+		version = "1.3.15",
+		date = "2026-02-14",
+		title_en = "Persisted seen-version fallback storage",
+		title_de = "Persistenter Fallback fuer gesehene Version",
+		notes_en = {
+			"Added global fallback persistence for last seen changelog version in GMS_DB.",
+			"Auto-open check now reads seen version from profile and global fallback.",
+			"Seen version write now updates both profile options and global fallback.",
+		},
+		notes_de = {
+			"Globalen Fallback fuer persistente lastSeenVersion in GMS_DB hinzugefuegt.",
+			"Auto-Open prueft gesehene Version jetzt aus Profil und globalem Fallback.",
+			"Beim Speichern wird die gesehene Version jetzt in Profil und global geschrieben.",
+		},
+	},
+	{
+		version = "1.3.14",
+		date = "2026-02-14",
+		title_en = "Auto-open repeat prevention",
+		title_de = "Wiederholtes Auto-Open verhindert",
+		notes_en = {
+			"Auto-open now marks the current version as seen immediately after opening the changelog.",
+			"This prevents repeated opening on every reload for the same version.",
+		},
+		notes_de = {
+			"Auto-Open markiert die aktuelle Version jetzt direkt nach dem Oeffnen als gesehen.",
+			"Damit wird wiederholtes Oeffnen bei jedem Reload fuer dieselbe Version verhindert.",
+		},
+	},
 	{
 		version = "1.3.13",
 		date = "2026-02-14",
@@ -262,6 +308,52 @@ local function IsAutoOpenEnabled(opts)
 	return opts.showOnNewVersion ~= false
 end
 
+local function EnsureStandaloneState()
+	if type(_G.GMS_Changelog_DB) ~= "table" then
+		_G.GMS_Changelog_DB = {}
+	end
+	return _G.GMS_Changelog_DB
+end
+
+local function GetGlobalSeenVersion()
+	if not GMS or not GMS.db or type(GMS.db.global) ~= "table" then
+		return ""
+	end
+	local v = GMS.db.global.gmsChangelogLastSeenVersion
+	return tostring(v or "")
+end
+
+local function SetGlobalSeenVersion(version)
+	if not GMS or not GMS.db or type(GMS.db.global) ~= "table" then
+		return
+	end
+	GMS.db.global.gmsChangelogLastSeenVersion = tostring(version or "")
+	GMS.db.global.gmsChangelogLastSeenAt = now() or 0
+end
+
+local function GetStandaloneSeenVersion()
+	local state = EnsureStandaloneState()
+	return tostring(state.lastSeenVersion or "")
+end
+
+local function SetStandaloneSeenVersion(version)
+	local state = EnsureStandaloneState()
+	state.lastSeenVersion = tostring(version or "")
+	state.lastSeenAt = now() or 0
+end
+
+local function GetEffectiveSeenVersion(opts)
+	local profileSeen = (type(opts) == "table") and tostring(opts.lastSeenVersion or "") or ""
+	if profileSeen ~= "" then
+		return profileSeen
+	end
+	local globalSeen = GetGlobalSeenVersion()
+	if globalSeen ~= "" then
+		return globalSeen
+	end
+	return GetStandaloneSeenVersion()
+end
+
 local function EnsureOptions()
 	if not GMS or type(GMS.RegisterModuleOptions) ~= "function" then
 		return nil
@@ -316,13 +408,16 @@ end
 
 local function MarkCurrentVersionSeen(reason)
 	local opts = Changelog._options or EnsureOptions()
-	if type(opts) ~= "table" then return end
 
 	local current = GetCurrentAddonVersion()
 	if current == "" then return end
 
-	opts.lastSeenVersion = current
-	opts.lastSeenAt = now() or 0
+	if type(opts) == "table" then
+		opts.lastSeenVersion = current
+		opts.lastSeenAt = now() or 0
+	end
+	SetGlobalSeenVersion(current)
+	SetStandaloneSeenVersion(current)
 	LOCAL_LOG("INFO", "Marked changelog as seen", current, reason or "unknown")
 end
 
@@ -356,7 +451,7 @@ local function TryAutoOpenOnLogin(attempt)
 		return
 	end
 
-	if tostring(opts.lastSeenVersion or "") == current then
+	if GetEffectiveSeenVersion(opts) == current then
 		Changelog._autoShowDone = true
 		LOCAL_LOG("DEBUG", "Current version already seen", current)
 		return
@@ -377,12 +472,10 @@ local function TryAutoOpenOnLogin(attempt)
 
 			if GMS.UI._pages and GMS.UI._pages[METADATA.INTERN_NAME] then
 				GMS.UI:Open(METADATA.INTERN_NAME)
-				if GMS.UI._page == METADATA.INTERN_NAME then
-					MarkCurrentVersionSeen("auto-login-open")
-					Changelog._autoShowDone = true
-					LOCAL_LOG("INFO", "Auto-opened changelog for new version", current)
-					return
-				end
+				MarkCurrentVersionSeen("auto-login-open")
+				Changelog._autoShowDone = true
+				LOCAL_LOG("INFO", "Auto-opened changelog for new version", current)
+				return
 			end
 		end
 
