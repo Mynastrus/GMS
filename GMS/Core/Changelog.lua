@@ -96,6 +96,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.3.23",
+		date = "2026-02-14",
+		title_en = "Roster UX update: compact tooltips, context menu, and stable layout",
+		title_de = "Roster-UX-Update: kompakte Tooltips, Kontextmenue und stabiles Layout",
+		notes_en = {
+			"Roster now includes new member columns for Last Online, item level, Mythic+ score, raid status, and known GMS version.",
+			"Member context menu on right-click added: whisper, copy full name with realm, and invite to group.",
+			"Tooltip was reworked into a compact table layout with class-colored name and guild notes.",
+			"Header/content alignment was stabilized and column/header width mismatches were fixed.",
+			"NEW/NEU marker logic was fixed so seen releases are no longer marked as new.",
+		},
+		notes_de = {
+			"Das Roster enthaelt jetzt neue Mitgliederspalten fuer Zuletzt online, Itemlevel, Mythic+-Wertung, Raidstatus und bekannte GMS-Version.",
+			"Kontextmenue per Rechtsklick auf Spieler hinzugefuegt: Anfluestern, Vollnamen mit Realm kopieren und in Gruppe einladen.",
+			"Tooltip auf kompaktes Tabellenlayout umgestellt, inkl. Klassenfarbe beim Namen und Gildennotizen.",
+			"Header-/Content-Ausrichtung stabilisiert und Breitenabweichungen zwischen Titelzeile und Spalten behoben.",
+			"NEW/NEU-Markierungslogik korrigiert, sodass gesehene Releases nicht mehr als neu markiert werden.",
+		},
+	},
+	{
 		version = "1.3.22",
 		date = "2026-02-14",
 		title_en = "Roster hotfix: visibility filter function initialization",
