@@ -47,6 +47,7 @@ local UnitExists                 = UnitExists
 local UnitIsPlayer               = UnitIsPlayer
 local C_Timer                    = C_Timer
 local GameFontNormalSmallOutline = GameFontNormalSmallOutline
+local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
 ---@diagnostic enable: undefined-global
 
 local AceGUI = LibStub("AceGUI-3.0", true)
@@ -173,7 +174,7 @@ end
 
 local function GetPlayerSnapshot()
 	local name, realm = UnitFullName("player")
-	local className = UnitClass("player") -- localized
+	local className, classFile = UnitClass("player") -- localized + token
 	local raceName = UnitRace("player") -- localized
 	local level = UnitLevel("player")
 
@@ -201,6 +202,7 @@ local function GetPlayerSnapshot()
 		realm        = realm,
 		name_full    = FormatNameRealm(name, realm),
 		class        = className or "-",
+		classFile    = classFile or "",
 		spec         = specName,
 		race         = raceName or "-",
 		level        = level or "-",
@@ -216,7 +218,7 @@ local function GetTargetSnapshot()
 	if not (UnitIsPlayer and UnitIsPlayer("target")) then return nil end
 
 	local name, realm = UnitFullName("target")
-	local className = UnitClass("target")
+	local className, classFile = UnitClass("target")
 	local raceName = UnitRace("target")
 	local level = UnitLevel("target")
 	local guid = (UnitGUID and UnitGUID("target")) or nil
@@ -227,6 +229,7 @@ local function GetTargetSnapshot()
 		realm        = realm,
 		name_full    = FormatNameRealm(name, realm),
 		class        = className or "-",
+		classFile    = classFile or "",
 		spec         = "-",
 		race         = raceName or "-",
 		level        = level or "-",
@@ -257,28 +260,44 @@ local function AddInfoLine(parent, key, value)
 	parent:AddChild(lbl)
 end
 
-local function BuildSnapshotCard(parent, titleText, snap)
-	if not parent or type(parent.AddChild) ~= "function" then return end
+local function GetClassHex(classFile)
+	local c = (type(RAID_CLASS_COLORS) == "table" and classFile ~= "" and RAID_CLASS_COLORS[classFile]) or nil
+	if not c then return "FFFFFFFF" end
+	return c.colorStr or "FFFFFFFF"
+end
 
-	local box = AceGUI:Create("InlineGroup")
-	box:SetTitle(tostring(titleText or "Info"))
-	box:SetFullWidth(true)
-	box:SetLayout("List")
-	parent:AddChild(box)
+local function AddCardTitle(parent, text)
+	local title = AceGUI:Create("Label")
+	title:SetFullWidth(true)
+	title:SetText("|cffffd200" .. tostring(text or "") .. "|r")
+	parent:AddChild(title)
+end
 
-	if type(snap) ~= "table" then
-		AddInfoLine(box, "Status", "Keine Daten")
-		return
+local function AddMutedLine(parent, text)
+	local line = AceGUI:Create("Label")
+	line:SetFullWidth(true)
+	line:SetText("|cffb8b8b8" .. tostring(text or "") .. "|r")
+	if line.label then
+		line.label:SetFontObject(GameFontNormalSmallOutline)
 	end
+	parent:AddChild(line)
+end
 
-	AddInfoLine(box, "Name", snap.name_full or "-")
-	AddInfoLine(box, "Level", snap.level or "-")
-	AddInfoLine(box, "Rasse", snap.race or "-")
-	AddInfoLine(box, "Klasse", snap.class or "-")
-	AddInfoLine(box, "Spezialisierung", snap.spec or "-")
-	AddInfoLine(box, "Itemlevel", string.format("%s (overall %s)", tostring(snap.ilvl or "-"), tostring(snap.ilvl_overall or "-")))
-	AddInfoLine(box, "Gilde", snap.guild or "-")
-	AddInfoLine(box, "GUID", snap.guid or "-")
+local function AddValueLine(parent, leftText, rightText)
+	local row = AceGUI:Create("SimpleGroup")
+	row:SetFullWidth(true)
+	row:SetLayout("Flow")
+	parent:AddChild(row)
+
+	local left = AceGUI:Create("Label")
+	left:SetWidth(140)
+	left:SetText("|cff9d9d9d" .. tostring(leftText or "-") .. "|r")
+	row:AddChild(left)
+
+	local right = AceGUI:Create("Label")
+	right:SetWidth(280)
+	right:SetText("|cffffffff" .. tostring(rightText or "-") .. "|r")
+	row:AddChild(right)
 end
 
 -- ###########################################################################
@@ -306,11 +325,11 @@ function CHARINFO:TryRegisterPage()
 			ui2:Header_BuildIconText({
 				icon = ICON,
 				text = "|cff03A9F4" .. METADATA.DISPLAY_NAME .. "|r",
-				subtext = ctxName and ("Context aktiv: |cffCCCCCC" .. tostring(ctxName) .. "|r") or "Kein Context gesetzt",
+				subtext = ctxName and ("Context: |cffCCCCCC" .. tostring(ctxName) .. "|r") or "Context: -",
 			})
 		end
 		if ui2 and type(ui2.SetStatusText) == "function" then
-			ui2:SetStatusText(ctxName and "CHARINFO: ctx aktiv" or "CHARINFO: nur player")
+			ui2:SetStatusText(ctxName and "CHARINFO: context active" or "CHARINFO: player only")
 		end
 
 		if isCached then return end
@@ -321,15 +340,90 @@ function CHARINFO:TryRegisterPage()
 		wrapper:SetLayout("List")
 		root:AddChild(wrapper)
 
-		local actions = AceGUI:Create("InlineGroup")
-		actions:SetTitle("Aktionen")
-		actions:SetFullWidth(true)
-		actions:SetLayout("Flow")
-		wrapper:AddChild(actions)
+		local profile = AceGUI:Create("InlineGroup")
+		profile:SetTitle("")
+		profile:SetFullWidth(true)
+		profile:SetLayout("Flow")
+		wrapper:AddChild(profile)
+
+		local portrait = AceGUI:Create("Icon")
+		portrait:SetImage(ICON)
+		portrait:SetImageSize(36, 36)
+		portrait:SetWidth(44)
+		profile:AddChild(portrait)
+
+		local identity = AceGUI:Create("SimpleGroup")
+		identity:SetLayout("List")
+		identity:SetWidth(420)
+		profile:AddChild(identity)
+
+		local classHex = GetClassHex(player.classFile or "")
+		local title = AceGUI:Create("Label")
+		title:SetFullWidth(true)
+		title:SetText(string.format("|cff%s%s|r", classHex, tostring(player.name or "-")))
+		identity:AddChild(title)
+
+		AddMutedLine(identity, string.format(
+			"Level %s   %s   %s   %s",
+			tostring(player.level or "-"),
+			tostring(player.race or "-"),
+			tostring(player.class or "-"),
+			tostring(player.spec or "-")
+		))
+
+		AddMutedLine(identity, string.format(
+			"%s",
+			tostring(player.guild or "-")
+		))
+
+		local contextSummary = AceGUI:Create("SimpleGroup")
+		contextSummary:SetLayout("List")
+		contextSummary:SetWidth(260)
+		profile:AddChild(contextSummary)
+		AddMutedLine(contextSummary, "Context")
+		AddValueLine(contextSummary, "Name", ctxName or "-")
+		AddValueLine(contextSummary, "Source", ctxFrom or "-")
+
+		local contentRow = AceGUI:Create("SimpleGroup")
+		contentRow:SetFullWidth(true)
+		contentRow:SetLayout("Flow")
+		wrapper:AddChild(contentRow)
+
+		local leftCol = AceGUI:Create("SimpleGroup")
+		leftCol:SetLayout("List")
+		leftCol:SetWidth(520)
+		contentRow:AddChild(leftCol)
+
+		local rightCol = AceGUI:Create("SimpleGroup")
+		rightCol:SetLayout("List")
+		rightCol:SetWidth(520)
+		contentRow:AddChild(rightCol)
+
+		local cardOverview = AceGUI:Create("InlineGroup")
+		cardOverview:SetTitle("")
+		cardOverview:SetFullWidth(true)
+		cardOverview:SetLayout("List")
+		leftCol:AddChild(cardOverview)
+		AddCardTitle(cardOverview, "Character")
+		AddValueLine(cardOverview, "Full Name", player.name_full or "-")
+		AddValueLine(cardOverview, "Class", player.class or "-")
+		AddValueLine(cardOverview, "Spec", player.spec or "-")
+		AddValueLine(cardOverview, "Itemlevel", string.format("%s (overall %s)", tostring(player.ilvl or "-"), tostring(player.ilvl_overall or "-")))
+		AddValueLine(cardOverview, "GUID", player.guid or "-")
+
+		local cardContext = AceGUI:Create("InlineGroup")
+		cardContext:SetTitle("")
+		cardContext:SetFullWidth(true)
+		cardContext:SetLayout("List")
+		leftCol:AddChild(cardContext)
+		AddCardTitle(cardContext, "Context")
+		AddValueLine(cardContext, "Name", ctxName or "-")
+		AddValueLine(cardContext, "GUID", ctxGuid or "-")
+		AddValueLine(cardContext, "Source", ctxFrom or "-")
 
 		local btnSelf = AceGUI:Create("Button")
-		btnSelf:SetText("Spieler selbst auswaehlen")
-		btnSelf:SetWidth(190)
+		btnSelf:SetText("Use Player")
+		btnSelf:SetWidth(150)
 		btnSelf:SetCallback("OnClick", function()
 			SetNavContext({
 				from = "charinfo",
@@ -338,20 +432,20 @@ function CHARINFO:TryRegisterPage()
 				unit = "player",
 			})
 			if ui2 and type(ui2.SetStatusText) == "function" then
-				ui2:SetStatusText("CHARINFO: ctx = player gesetzt")
+				ui2:SetStatusText("CHARINFO: context = player")
 			end
 			OpenSelf()
 		end)
-		actions:AddChild(btnSelf)
+		rightCol:AddChild(btnSelf)
 
 		local btnTarget = AceGUI:Create("Button")
-		btnTarget:SetText("Target auswaehlen")
-		btnTarget:SetWidth(160)
+		btnTarget:SetText("Use Target")
+		btnTarget:SetWidth(150)
 		btnTarget:SetCallback("OnClick", function()
 			local t = GetTargetSnapshot()
 			if not t then
 				if ui2 and type(ui2.SetStatusText) == "function" then
-					ui2:SetStatusText("CHARINFO: kein Spieler-Target")
+					ui2:SetStatusText("CHARINFO: no player target")
 				end
 				return
 			end
@@ -362,46 +456,42 @@ function CHARINFO:TryRegisterPage()
 				unit = "target",
 			})
 			if ui2 and type(ui2.SetStatusText) == "function" then
-				ui2:SetStatusText("CHARINFO: ctx = target gesetzt")
+				ui2:SetStatusText("CHARINFO: context = target")
 			end
 			OpenSelf()
 		end)
-		actions:AddChild(btnTarget)
+		rightCol:AddChild(btnTarget)
 
 		local btnClear = AceGUI:Create("Button")
-		btnClear:SetText("Context loeschen")
-		btnClear:SetWidth(145)
+		btnClear:SetText("Clear Context")
+		btnClear:SetWidth(150)
 		btnClear:SetCallback("OnClick", function()
 			SetNavContext(nil)
 			if ui2 and type(ui2.SetStatusText) == "function" then
-				ui2:SetStatusText("CHARINFO: ctx geloescht")
+				ui2:SetStatusText("CHARINFO: context cleared")
 			end
 			OpenSelf()
 		end)
-		actions:AddChild(btnClear)
+		rightCol:AddChild(btnClear)
 
 		local btnRefresh = AceGUI:Create("Button")
-		btnRefresh:SetText("Aktualisieren")
-		btnRefresh:SetWidth(130)
+		btnRefresh:SetText("Refresh")
+		btnRefresh:SetWidth(150)
 		btnRefresh:SetCallback("OnClick", function()
 			OpenSelf()
 		end)
-		actions:AddChild(btnRefresh)
-
-		BuildSnapshotCard(wrapper, "Spieler", player)
-
-		local ctxCard = AceGUI:Create("InlineGroup")
-		ctxCard:SetTitle("Context")
-		ctxCard:SetFullWidth(true)
-		ctxCard:SetLayout("List")
-		wrapper:AddChild(ctxCard)
-		AddInfoLine(ctxCard, "Quelle", ctxFrom or "-")
-		AddInfoLine(ctxCard, "Name", ctxName or "-")
-		AddInfoLine(ctxCard, "GUID", ctxGuid or "-")
+		rightCol:AddChild(btnRefresh)
 
 		local opts = (type(CHARINFO._options) == "table") and CHARINFO._options or nil
 		local lastUpdate = (opts and tonumber(opts.lastUpdate)) or 0
-		AddInfoLine(wrapper, "Letztes Update", (lastUpdate > 0 and tostring(lastUpdate) or "-"))
+		local cardMeta = AceGUI:Create("InlineGroup")
+		cardMeta:SetTitle("")
+		cardMeta:SetFullWidth(true)
+		cardMeta:SetLayout("List")
+		rightCol:AddChild(cardMeta)
+		AddCardTitle(cardMeta, "Meta")
+		AddValueLine(cardMeta, "Last Update", (lastUpdate > 0 and tostring(lastUpdate) or "-"))
+		AddValueLine(cardMeta, "Module Version", METADATA.VERSION)
 	end)
 
 	self._pageRegistered = true
