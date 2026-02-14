@@ -50,6 +50,7 @@ local GetAverageItemLevel        = GetAverageItemLevel
 local GameTooltip                = GameTooltip
 local CLASS_ICON_TCOORDS         = CLASS_ICON_TCOORDS
 local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
+local GameFontNormalSmall        = GameFontNormalSmall
 local GameFontNormalSmallOutline = GameFontNormalSmallOutline
 local GameFontNormalLarge        = GameFontNormalLarge
 local GameFontNormal             = GameFontNormal
@@ -302,10 +303,16 @@ local function GetAllGuildMembers(sortSpec, skipRequest)
 				local va, vb = a[key], b[key]
 
 				if va ~= vb then
+					-- Keep unknown values stable at the end for both sort directions.
+					if va == nil then return false end
+					if vb == nil then return true end
+
 					if type(va) == "boolean" then
 						va, vb = (va and 1 or 0), (vb and 1 or 0)
 					elseif type(va) == "string" then
 						va, vb = va:lower(), vb:lower()
+					elseif type(va) ~= type(vb) then
+						va, vb = tostring(va), tostring(vb)
 					end
 
 					if desc then return va > vb else return va < vb end
@@ -814,9 +821,13 @@ local function BuildCell_PresenceDot(row, member, ctx)
 
 	local icon = AceGUI:Create("Icon")
 	icon:SetImage(iconPath)
-	icon:SetImageSize(12, 12)
+	icon:SetImageSize(10, 10)
 	icon:SetWidth(14)
-	icon:SetHeight(12)
+	icon:SetHeight(10)
+	if icon.image then
+		icon.image:ClearAllPoints()
+		icon.image:SetPoint("CENTER", icon.frame, "CENTER", 0, 0)
+	end
 	if icon.frame then
 		icon.frame:EnableMouse(true)
 		icon.frame:SetScript("OnEnter", function(self)
@@ -834,33 +845,41 @@ end
 
 local function BuildCell_FactionIcon(row, member, ctx)
 	local faction = tostring(member and member.faction or "")
-	local iconPath = "Interface\\Icons\\INV_Misc_QuestionMark"
-	local tooltip = (faction ~= "" and faction) or "Unknown"
+	local letter = "N"
+	local color = "AAD372" -- hunter-like green for neutral
+	local tooltip = "Neutral"
 	if faction == "Alliance" then
-		iconPath = "Interface\\TargetingFrame\\UI-PVP-Alliance"
+		letter = "A"
+		color = "3FC7FF" -- alliance blue
+		tooltip = "Alliance"
 	elseif faction == "Horde" then
-		iconPath = "Interface\\TargetingFrame\\UI-PVP-Horde"
+		letter = "H"
+		color = "FF4D4D" -- horde red
+		tooltip = "Horde"
 	end
 
-	local icon = AceGUI:Create("Icon")
-	icon:SetImage(iconPath)
-	icon:SetImageSize(12, 12)
-	icon:SetWidth(14)
-	icon:SetHeight(12)
-	if icon.frame then
-		icon.frame:EnableMouse(true)
-		icon.frame:SetScript("OnEnter", function(self)
+	local lbl = AceGUI:Create("Label")
+	lbl:SetText("|cff" .. color .. letter .. "|r")
+	lbl:SetWidth(16)
+	if lbl.label then
+		lbl.label:SetFontObject(GameFontNormalSmallOutline)
+		lbl.label:SetJustifyH("CENTER")
+		lbl.label:SetJustifyV("MIDDLE")
+	end
+	if lbl.frame then
+		lbl.frame:EnableMouse(true)
+		lbl.frame:SetScript("OnEnter", function(self)
 			if not GameTooltip then return end
 			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 			GameTooltip:SetText("Faction", 1, 1, 1)
 			GameTooltip:AddLine(tooltip, 0.8, 0.8, 0.8)
 			GameTooltip:Show()
 		end)
-		icon.frame:SetScript("OnLeave", function()
+		lbl.frame:SetScript("OnLeave", function()
 			if GameTooltip then GameTooltip:Hide() end
 		end)
 	end
-	row:AddChild(icon)
+	row:AddChild(lbl)
 end
 
 -- ---------------------------------------------------------------------------
@@ -889,52 +908,10 @@ end
 local function BuildCell_Name(row, member, ctx)
 	local _, _, _, hex = GetClassColor(member.classFileName)
 
-	local guid = member.guid
-	local name_full = member.name_full
-
-	local MEMBER_NAME = AceGUI:Create("InteractiveLabel")
+	local MEMBER_NAME = AceGUI:Create("Label")
 	MEMBER_NAME:SetText("|c" .. hex .. tostring(member.name or "") .. "|r")
 	MEMBER_NAME.label:SetFontObject(GameFontNormalSmallOutline)
 	MEMBER_NAME:SetWidth(150)
-
-	local bg = MEMBER_NAME.frame:CreateTexture(nil, "BACKGROUND")
-	bg:SetAllPoints(MEMBER_NAME.frame)
-	bg:SetColorTexture(1, 1, 1, 0.10)
-	bg:Hide()
-
-	MEMBER_NAME:SetCallback("OnEnter", function(widget)
-		bg:Show()
-		if widget and widget.label then
-			widget.label:SetAlpha(0.95)
-		end
-	end)
-
-	MEMBER_NAME:SetCallback("OnLeave", function(widget)
-		bg:Hide()
-		if widget and widget.label then
-			widget.label:SetAlpha(1.0)
-		end
-	end)
-
-	MEMBER_NAME:SetCallback("OnClick", function(_, _, mouseButton)
-		if mouseButton ~= "LeftButton" then return end
-
-		local ui = (GMS and (GMS.UI or GMS:GetModule("UI", true))) or nil
-		if not ui or type(ui.Open) ~= "function" then
-			return
-		end
-
-		if type(ui.SetNavigationContext) == "function" then
-			ui:SetNavigationContext({
-				source = "ROSTER",
-				guid = guid,
-				name_full = name_full,
-			})
-		end
-
-		ui:Open("CHARINFO")
-	end)
-
 	row:AddChild(MEMBER_NAME)
 end
 
@@ -973,6 +950,7 @@ local function BuildCell_LastOnline(row, member, ctx)
 	local lbl = AceGUI:Create("Label")
 	lbl:SetText(txt)
 	lbl.label:SetFontObject(GameFontNormalSmallOutline)
+	lbl.label:SetJustifyH("RIGHT")
 	lbl:SetWidth(80)
 	row:AddChild(lbl)
 end
@@ -983,6 +961,7 @@ local function BuildCell_iLvl(row, member, ctx)
 	local lbl = AceGUI:Create("Label")
 	lbl:SetText(txt)
 	lbl.label:SetFontObject(GameFontNormalSmallOutline)
+	lbl.label:SetJustifyH("RIGHT")
 	lbl:SetWidth(45)
 	row:AddChild(lbl)
 end
@@ -993,6 +972,7 @@ local function BuildCell_MPlus(row, member, ctx)
 	local lbl = AceGUI:Create("Label")
 	lbl:SetText(txt)
 	lbl.label:SetFontObject(GameFontNormalSmallOutline)
+	lbl.label:SetJustifyH("RIGHT")
 	lbl:SetWidth(45)
 	row:AddChild(lbl)
 end
@@ -1002,6 +982,7 @@ local function BuildCell_RaidStatus(row, member, ctx)
 	local lbl = AceGUI:Create("Label")
 	lbl:SetText(txt)
 	lbl.label:SetFontObject(GameFontNormalSmallOutline)
+	lbl.label:SetJustifyH("RIGHT")
 	lbl:SetWidth(70)
 	row:AddChild(lbl)
 end
@@ -1016,6 +997,7 @@ local function BuildCell_GmsVersion(row, member, ctx)
 		lbl:SetText("|cff8a8a8a-|r")
 	end
 	lbl.label:SetFontObject(GameFontNormalSmallOutline)
+	lbl.label:SetJustifyH("RIGHT")
 	lbl:SetWidth(60)
 	row:AddChild(lbl)
 end
@@ -1051,19 +1033,10 @@ local function EnsureDefaultRosterColumnsRegistered()
 	})
 
 	Roster:API_RegisterRosterColumnDefinition({
-		id = "faction",
-		title = "",
-		width = 14,
-		order = 15,
-		sortable = false,
-		buildCellFn = BuildCell_FactionIcon,
-	})
-
-	Roster:API_RegisterRosterColumnDefinition({
 		id = "level",
 		title = "Lvl",
 		width = 24,
-		order = 20,
+		order = 15,
 		sortable = true,
 		sortKey = "level",
 		buildCellFn = BuildCell_Level,
@@ -1073,7 +1046,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 		id = "name",
 		title = "Name",
 		width = 125,
-		order = 30,
+		order = 20,
 		sortable = true,
 		sortKey = "name",
 		buildCellFn = BuildCell_Name,
@@ -1083,27 +1056,17 @@ local function EnsureDefaultRosterColumnsRegistered()
 		id = "realm",
 		title = "Realm",
 		width = 90,
-		order = 40,
+		order = 30,
 		sortable = true,
 		sortKey = "realm",
 		buildCellFn = BuildCell_Realm,
 	})
 
 	Roster:API_RegisterRosterColumnDefinition({
-		id = "zone",
-		title = "Zone",
-		width = 100,
-		order = 50,
-		sortable = true,
-		sortKey = "zone",
-		buildCellFn = BuildCell_Zone,
-	})
-
-	Roster:API_RegisterRosterColumnDefinition({
 		id = "lastOnline",
 		title = "Zuletzt online",
 		width = 80,
-		order = 60,
+		order = 40,
 		sortable = true,
 		sortKey = "lastOnlineHours",
 		buildCellFn = BuildCell_LastOnline,
@@ -1113,7 +1076,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 		id = "ilvl",
 		title = "iLvl",
 		width = 45,
-		order = 70,
+		order = 50,
 		sortable = true,
 		sortKey = "ilvl",
 		buildCellFn = BuildCell_iLvl,
@@ -1123,7 +1086,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 		id = "mplus",
 		title = "M+",
 		width = 45,
-		order = 80,
+		order = 60,
 		sortable = true,
 		sortKey = "mplusScore",
 		buildCellFn = BuildCell_MPlus,
@@ -1133,7 +1096,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 		id = "raidStatus",
 		title = "Raid",
 		width = 70,
-		order = 90,
+		order = 70,
 		sortable = true,
 		sortKey = "raidStatus",
 		buildCellFn = BuildCell_RaidStatus,
@@ -1143,7 +1106,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 		id = "gmsVersion",
 		title = "GMS",
 		width = 60,
-		order = 100,
+		order = 80,
 		sortable = true,
 		sortKey = "gmsVersion",
 		buildCellFn = BuildCell_GmsVersion,
@@ -1165,6 +1128,13 @@ local function BuildRosterHeaderRow(parent, rebuildFn)
 	if not Roster._columns or not Roster._columns.order then return end
 
 	EnsureRosterSortState()
+	local function IsRightAlignedColumn(colId)
+		return colId == "lastOnline"
+			or colId == "ilvl"
+			or colId == "mplus"
+			or colId == "raidStatus"
+			or colId == "gmsVersion"
+	end
 
 	local header = AceGUI:Create("SimpleGroup")
 	header:SetFullWidth(true)
@@ -1187,8 +1157,8 @@ local function BuildRosterHeaderRow(parent, rebuildFn)
 
 				lbl:SetText("|cffc8c8c8" .. title .. "|r" .. arrow)
 				lbl.label:SetFontObject(GameFontNormalSmallOutline)
-				lbl.label:SetJustifyH("LEFT")
-				lbl:SetWidth(w + 18)
+				lbl.label:SetJustifyH(IsRightAlignedColumn(colId) and "RIGHT" or "LEFT")
+				lbl:SetWidth(w)
 
 				local bg = lbl.frame:CreateTexture(nil, "BACKGROUND")
 				bg:SetAllPoints(lbl.frame)
@@ -1210,6 +1180,7 @@ local function BuildRosterHeaderRow(parent, rebuildFn)
 				local lbl = AceGUI:Create("Label")
 				lbl:SetText("|cffc8c8c8" .. title .. "|r")
 				lbl.label:SetFontObject(GameFontNormalSmallOutline)
+				lbl.label:SetJustifyH(IsRightAlignedColumn(colId) and "RIGHT" or "LEFT")
 				lbl:SetWidth(w)
 				header:AddChild(lbl)
 			end
@@ -1252,13 +1223,6 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 	-- Clear GUID mapping on full rebuild
 	wipe(Roster._guidToRow)
 
-	local function Rebuild()
-		BuildGuildRosterLabelsAsync(parent, perFrame, delay)
-		parent:DoLayout()
-	end
-
-	BuildRosterHeaderRow(parent, Rebuild)
-
 	local allMembers = GetAllGuildMembers(BuildRosterSortSpec())
 	local totalMembers = #allMembers
 	local members = FilterMembersByVisibility(allMembers)
@@ -1280,6 +1244,20 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 		ui = (GMS and (GMS.UI or GMS:GetModule("UI", true))) or nil,
 	}
 
+	local function ForceFinalLayoutPass()
+		if parent and type(parent.DoLayout) == "function" then
+			parent:DoLayout()
+		end
+		local p1 = parent and parent.parent or nil
+		if p1 and type(p1.DoLayout) == "function" then
+			p1:DoLayout()
+		end
+		local p2 = p1 and p1.parent or nil
+		if p2 and type(p2.DoLayout) == "function" then
+			p2:DoLayout()
+		end
+	end
+
 	local function Step()
 		if myToken ~= Roster._buildToken then
 			return
@@ -1298,6 +1276,66 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 				row:SetFullWidth(true)
 				row:SetLayout("Flow")
 				parent:AddChild(row)
+
+				if row.frame then
+					local rowGuid = m.guid
+					local rowNameFull = m.name_full
+					local rowName = m.name or "-"
+					local rowLevel = m.level or "-"
+					local rowClass = m.class or "-"
+					local rowRealm = m.realm or "-"
+					local rowLastOnline = m.lastOnlineText or "-"
+					local rowILvl = m.ilvl and string.format("%.1f", m.ilvl) or "-"
+					local rowMPlus = m.mplusScore and tostring(math.floor((m.mplusScore or 0) + 0.5)) or "-"
+					local rowRaid = m.raidStatus or "-"
+					local rowGms = m.gmsVersion or "-"
+					local rowOnline = m.online and "Online" or "Offline"
+					local rowStatus = GetPresenceState(m)
+					row.frame:EnableMouse(true)
+
+					local hover = row.frame:CreateTexture(nil, "BACKGROUND")
+					hover:SetAllPoints(row.frame)
+					hover:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+					hover:SetBlendMode("ADD")
+					hover:SetAlpha(0.35)
+					hover:Hide()
+
+					row.frame:SetScript("OnEnter", function(self)
+						hover:Show()
+						if GameTooltip then
+							GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+							GameTooltip:SetText(string.format("%s (Lvl %s %s)", tostring(rowName), tostring(rowLevel), tostring(rowClass)), 1, 1, 1)
+							GameTooltip:AddLine(string.format("Realm: %s", tostring(rowRealm)), 0.8, 0.8, 0.8)
+							GameTooltip:AddLine(string.format("Status: %s (%s)", tostring(rowOnline), tostring(rowStatus)), 0.8, 0.8, 0.8)
+							GameTooltip:AddLine(string.format("Zuletzt online: %s", tostring(rowLastOnline)), 0.8, 0.8, 0.8)
+							GameTooltip:AddLine(string.format("iLvl: %s   M+: %s   Raid: %s", tostring(rowILvl), tostring(rowMPlus), tostring(rowRaid)), 0.8, 0.8, 0.8)
+							GameTooltip:AddLine(string.format("GMS: %s", tostring(rowGms)), 0.8, 0.8, 0.8)
+							if rowGuid and rowGuid ~= "" then
+								GameTooltip:AddLine(string.format("|cff888888GUID: %s|r", tostring(rowGuid)), 1, 1, 1)
+							end
+							GameTooltip:Show()
+						end
+					end)
+					row.frame:SetScript("OnLeave", function()
+						hover:Hide()
+						if GameTooltip then GameTooltip:Hide() end
+					end)
+					row.frame:SetScript("OnMouseUp", function(_, mouseButton)
+						if mouseButton ~= "LeftButton" then return end
+						local ui = (GMS and (GMS.UI or GMS:GetModule("UI", true))) or nil
+						if not ui or type(ui.Open) ~= "function" then
+							return
+						end
+						if type(ui.SetNavigationContext) == "function" then
+							ui:SetNavigationContext({
+								source = "ROSTER",
+								guid = rowGuid,
+								name_full = rowNameFull,
+							})
+						end
+						ui:Open("CHARINFO")
+					end)
+				end
 
 				-- Map GUID to row container and store fingerprint
 				if m.guid then
@@ -1322,6 +1360,13 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 
 		if index <= total then
 			C_Timer.After(delay, Step)
+		else
+			if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+				C_Timer.After(0, ForceFinalLayoutPass)
+				C_Timer.After(0.05, ForceFinalLayoutPass)
+			else
+				ForceFinalLayoutPass()
+			end
 		end
 	end
 
@@ -1544,6 +1589,8 @@ local function BuildRosterHeaderUI()
 	if not header then return end
 	if header.SetLayout then header:SetLayout("List") end
 	if header.ReleaseChildren then header:ReleaseChildren() end
+	EnsureDefaultRosterColumnsRegistered()
+	EnsureRosterSortState()
 
 	Roster._options = Roster._options or {}
 	local opts = Roster._options
@@ -1574,22 +1621,19 @@ local function BuildRosterHeaderUI()
 
 	local title = AceGUI:Create("Label")
 	title:SetText("|cff03A9F4" .. guildName .. "|r")
-	title:SetHeight(16)
+	title:SetHeight(20)
 	if title.label then
-		title.label:SetFontObject(GameFontNormal)
-		title.label:SetJustifyV("TOP")
-		title.label:ClearAllPoints()
-		title.label:SetPoint("TOPLEFT", title.frame, "TOPLEFT", 0, 11)
-		title.label:SetPoint("RIGHT", title.frame, "RIGHT", 0, 0)
+		title.label:SetFontObject(GameFontNormalLarge)
+		title.label:SetJustifyV("MIDDLE")
 	end
 	leftCol:AddChild(title)
 
 	local meta = AceGUI:Create("Label")
 	meta:SetFullWidth(true)
 	meta:SetHeight(14)
-	meta:SetText(string.upper(tostring(realm)) .. " - " .. string.upper(tostring(faction)))
+	meta:SetText(tostring(realm) .. " - " .. tostring(faction))
 	if meta.label then
-		meta.label:SetFontObject(GameFontNormalSmallOutline)
+		meta.label:SetFontObject(GameFontNormalSmall or GameFontNormalSmallOutline)
 		meta.label:SetJustifyV("TOP")
 	end
 	leftCol:AddChild(meta)
@@ -1609,11 +1653,6 @@ local function BuildRosterHeaderUI()
 	searchBox:DisableButton(true)
 	searchBox:SetText(tostring(opts.searchQuery or ""))
 	searchCol:AddChild(searchBox)
-
-	local clearBtn = AceGUI:Create("Button")
-	clearBtn:SetText("X")
-	clearBtn:SetWidth(28)
-	searchCol:AddChild(clearBtn)
 
 	local filterCol = AceGUI:Create("SimpleGroup")
 	filterCol:SetLayout("Flow")
@@ -1657,10 +1696,6 @@ local function BuildRosterHeaderUI()
 	searchBox:SetCallback("OnEnterPressed", function(_, _, val)
 		ApplySearch(val)
 	end)
-	clearBtn:SetCallback("OnClick", function()
-		searchBox:SetText("")
-		ApplySearch("")
-	end)
 
 	local function UpdateHeaderWidths()
 		local totalW = (row.frame and row.frame.GetWidth and row.frame:GetWidth()) or 760
@@ -1676,9 +1711,18 @@ local function BuildRosterHeaderUI()
 		searchCol:SetWidth(middleW)
 		filterCol:SetWidth(rightW)
 
-		local searchW = middleW - 45 - 28 - 14
+		local searchW = middleW - 45 - 8
 		if searchW < 120 then searchW = 120 end
 		searchBox:SetWidth(searchW)
+
+		-- AceGUI flow places the search widgets slightly low in this row; nudge up for visual alignment.
+		if searchCol.frame and searchCol.frame.GetPoint and searchCol.frame.SetPoint then
+			local p, rel, rp, x, y = searchCol.frame:GetPoint(1)
+			if p then
+				searchCol.frame:ClearAllPoints()
+				searchCol.frame:SetPoint(p, rel, rp, x, (y or 0) + 3)
+			end
+		end
 	end
 
 	UpdateHeaderWidths()
@@ -1688,8 +1732,42 @@ local function BuildRosterHeaderUI()
 		end)
 	end
 	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-		C_Timer.After(0, UpdateHeaderWidths)
+		local function RefreshHeaderLayout()
+			UpdateHeaderWidths()
+			if header and type(header.DoLayout) == "function" then
+				header:DoLayout()
+			end
+			if row and type(row.DoLayout) == "function" then
+				row:DoLayout()
+			end
+		end
+		C_Timer.After(0, RefreshHeaderLayout)
+		C_Timer.After(0.05, RefreshHeaderLayout)
+		C_Timer.After(0.15, RefreshHeaderLayout)
 	end
+
+	local tableHeaderHost = AceGUI:Create("SimpleGroup")
+	tableHeaderHost:SetFullWidth(true)
+	tableHeaderHost:SetLayout("List")
+	header:AddChild(tableHeaderHost)
+
+	local function RebuildStickyTableHeader()
+		if type(tableHeaderHost.ReleaseChildren) == "function" then
+			tableHeaderHost:ReleaseChildren()
+		end
+		BuildRosterHeaderRow(tableHeaderHost, function()
+			RebuildStickyTableHeader()
+			if Roster and type(Roster.API_RefreshRosterView) == "function" then
+				Roster:API_RefreshRosterView()
+			end
+		end)
+		if type(tableHeaderHost.DoLayout) == "function" then
+			tableHeaderHost:DoLayout()
+		end
+	end
+
+	Roster._rebuildStickyTableHeader = RebuildStickyTableHeader
+	RebuildStickyTableHeader()
 end
 
 local function BuildRosterPageUI(root, id, isCached)
