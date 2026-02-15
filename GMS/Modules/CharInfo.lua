@@ -50,6 +50,8 @@ local C_ClassTalents             = C_ClassTalents
 local C_Traits                   = C_Traits
 local C_PvP                      = C_PvP
 local GetPVPLifetimeStats        = GetPVPLifetimeStats
+local GameTooltip                = GameTooltip
+local HandleModifiedItemClick    = HandleModifiedItemClick
 local GameFontNormalSmallOutline = GameFontNormalSmallOutline
 local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
 ---@diagnostic enable: undefined-global
@@ -105,6 +107,8 @@ CHARINFO._pageRegistered = CHARINFO._pageRegistered or false
 CHARINFO._dockRegistered = CHARINFO._dockRegistered or false
 CHARINFO._integrated     = CHARINFO._integrated or false
 CHARINFO._ticker         = CHARINFO._ticker or nil
+CHARINFO._uiDataTicker   = CHARINFO._uiDataTicker or nil
+CHARINFO._uiDataLastSig  = CHARINFO._uiDataLastSig or nil
 
 ---@class GMSTickerHandle
 ---@field Cancel fun(self: GMSTickerHandle)
@@ -115,6 +119,7 @@ CHARINFO._options = CHARINFO._options or nil
 local OPTIONS_DEFAULTS = {
 	autoLog = true, -- Auto-log character on login
 	lastUpdate = 0,
+	cardOrder = { "MYTHIC", "EQUIPMENT", "RAIDS", "OVERVIEW", "ACCOUNT", "TALENTS", "PVP" },
 }
 
 -- Icon: nimm einen, der bei dir existiert (du kannst ihn per /run testen)
@@ -406,103 +411,358 @@ local function GetLatestDomainRecordForGuid(domain, guid)
 	return best
 end
 
-local function BuildCharData(player, ctxGuid)
-	local data = {
-		isContext = false,
-		gmsVersion = tostring((GMS and GMS.VERSION) or "-"),
-		mythicPlus = "-",
-		raidStatus = "-",
-		equipment = "-",
-		equipmentItemLevel = nil,
-		equipmentSlots = 0,
-		talents = "-",
-		pvp = "-",
-	}
+local EQUIP_SLOT_ORDER = { 1, 2, 3, 15, 5, 9, 10, 6, 7, 8, 11, 12, 13, 14, 16, 17 }
+local EQUIP_SLOT_NAMES = {
+	[1] = "Head", [2] = "Neck", [3] = "Shoulder", [5] = "Chest", [6] = "Waist", [7] = "Legs", [8] = "Feet",
+	[9] = "Wrist", [10] = "Hands", [11] = "Ring 1", [12] = "Ring 2", [13] = "Trinket 1", [14] = "Trinket 2",
+	[15] = "Back", [16] = "Main Hand", [17] = "Off Hand",
+}
 
+local function BuildEquipmentRowsFromSnapshot(snapshot)
+	if type(snapshot) ~= "table" or type(snapshot.slots) ~= "table" then
+		return {}, nil, 0
+	end
+
+	local rows = {}
+	for i = 1, #EQUIP_SLOT_ORDER do
+		local slotId = EQUIP_SLOT_ORDER[i]
+		local slot = snapshot.slots[slotId]
+		if type(slot) == "table" then
+			local link = tostring(slot.link or "")
+			local itemId = tonumber(slot.itemId or 0) or 0
+			local ilvl = tonumber(slot.itemLevel or 0) or 0
+			local text = "-"
+			if link ~= "" then
+				text = link
+			elseif itemId > 0 then
+				text = string.format("item:%d", itemId)
+			end
+
+			rows[#rows + 1] = {
+				slotId = slotId,
+				slotName = EQUIP_SLOT_NAMES[slotId] or ("Slot " .. tostring(slotId)),
+				text = text,
+				link = link,
+				itemLevel = (ilvl > 0) and ilvl or nil,
+			}
+		end
+	end
+
+	local ilvl, slots = BuildItemLevelFromEquipmentSnapshot(snapshot)
+	return rows, ilvl, tonumber(slots) or 0
+end
+
+local function BuildMythicRows(dungeons)
+	if type(dungeons) ~= "table" then return {} end
+	local rows = {}
+	for i = 1, #dungeons do
+		local d = dungeons[i]
+		if type(d) == "table" then
+			local name = tostring(d.name or "")
+			if name ~= "" then
+				local level = tonumber(d.level) or 0
+				local score = tonumber(d.score) or 0
+				rows[#rows + 1] = {
+					name = name,
+					level = level,
+					score = score,
+				}
+			end
+		end
+	end
+	table.sort(rows, function(a, b)
+		if a.score ~= b.score then return a.score > b.score end
+		if a.level ~= b.level then return a.level > b.level end
+		return tostring(a.name) < tostring(b.name)
+	end)
+	return rows
+end
+
+local function BuildRaidRows(all)
+	if type(all) ~= "table" then return {} end
+	local rows = {}
+	for key, entry in pairs(all) do
+		if type(entry) == "table" then
+			local name = tostring(entry.name or ("Raid " .. tostring(key)))
+			local short = "-"
+			if type(entry.best) == "table" and tostring(entry.best.short or "") ~= "" then
+				short = tostring(entry.best.short)
+			end
+			rows[#rows + 1] = { name = name, short = short }
+		end
+	end
+	table.sort(rows, function(a, b) return tostring(a.name) < tostring(b.name) end)
+	return rows
+end
+
+local function GetRosterMemberByGuid(guid)
+	local g = tostring(guid or "")
+	if g == "" then return nil end
+	local roster = GMS and (GMS:GetModule("ROSTER", true) or GMS:GetModule("Roster", true)) or nil
+	if type(roster) ~= "table" or type(roster.GetMemberByGUID) ~= "function" then
+		return nil
+	end
+	local ok, member = pcall(roster.GetMemberByGUID, roster, g)
+	if ok and type(member) == "table" then
+		return member
+	end
+	return nil
+end
+
+local function MergeUniqueNames(dest, source)
+	if type(dest) ~= "table" or type(source) ~= "table" then return end
+	local seen = {}
+	for i = 1, #dest do
+		seen[string.lower(tostring(dest[i]))] = true
+	end
+	for i = 1, #source do
+		local n = tostring(source[i] or "")
+		n = n:gsub("^%s+", ""):gsub("%s+$", "")
+		if n ~= "" then
+			local key = string.lower(n)
+			if not seen[key] then
+				seen[key] = true
+				dest[#dest + 1] = n
+			end
+		end
+	end
+end
+
+local function NormalizeNameList(raw)
+	local out = {}
+	if type(raw) == "string" and raw ~= "" then
+		out[#out + 1] = raw
+		return out
+	end
+	if type(raw) ~= "table" then return out end
+
+	for k, v in pairs(raw) do
+		if type(v) == "string" then
+			out[#out + 1] = v
+		elseif type(v) == "table" then
+			local n = tostring(v.name or v.name_full or v.character or v.char or "")
+			if n ~= "" then out[#out + 1] = n end
+		elseif type(k) == "string" and k ~= "" and v == true then
+			out[#out + 1] = k
+		end
+	end
+	return out
+end
+
+local function GetAccountCharactersForGuid(guid)
+	local g = tostring(guid or "")
+	if g == "" then return {}, false, "No character GUID available." end
+
+	local names = {}
+	local roster = GMS and (GMS:GetModule("ROSTER", true) or GMS:GetModule("Roster", true)) or nil
+	if type(roster) == "table" and type(roster.GetMemberMeta) == "function" then
+		local ok, meta = pcall(roster.GetMemberMeta, roster, g)
+		if ok and type(meta) == "table" then
+			MergeUniqueNames(names, NormalizeNameList(meta.accountCharacters))
+			MergeUniqueNames(names, NormalizeNameList(meta.accountChars))
+			MergeUniqueNames(names, NormalizeNameList(meta.sameAccountChars))
+			MergeUniqueNames(names, NormalizeNameList(meta.alts))
+		end
+	end
+
+	local rec = GetLatestDomainRecordForGuid("ACCOUNT_CHARS_V1", g)
+	if rec and type(rec.payload) == "table" then
+		MergeUniqueNames(names, NormalizeNameList(rec.payload.characters))
+		MergeUniqueNames(names, NormalizeNameList(rec.payload.chars))
+	end
+
+	if #names <= 0 then
+		return names, false, "No same-account guild characters recorded yet."
+	end
+	table.sort(names)
+	return names, true, "Synced account-character list"
+end
+
+local function BuildCharData(player, ctxGuid, ctxName)
 	local playerGuid = tostring((player and player.guid) or "")
 	local targetGuid = tostring(ctxGuid or "")
-	if targetGuid == "" or targetGuid == playerGuid then
-		local equip = GMS and GMS:GetModule("Equipment", true)
+	local isContext = (targetGuid ~= "" and targetGuid ~= playerGuid)
+	local selectedGuid = isContext and targetGuid or playerGuid
+	local selectedName = isContext and tostring(ctxName or "-") or tostring(player and player.name_full or "-")
+
+	local data = {
+		isContext = isContext,
+		selectedGuid = selectedGuid,
+		selectedName = selectedName,
+		gmsVersion = tostring((GMS and GMS.VERSION) or "-"),
+		general = {
+			name = selectedName,
+			guid = selectedGuid ~= "" and selectedGuid or "-",
+			class = tostring((player and player.class) or "-"),
+			race = tostring((player and player.race) or "-"),
+			level = tostring((player and player.level) or "-"),
+			spec = tostring((player and player.spec) or "-"),
+			guild = tostring((player and player.guild) or "-"),
+		},
+		mythic = { score = nil, rows = {}, hasData = false, source = "-" },
+		raids = { summary = "-", rows = {}, hasData = false, source = "-" },
+		equipment = { ilvl = nil, slots = 0, rows = {}, hasData = false, source = "-" },
+		pvp = { summary = "-", hasData = false, source = "-" },
+		talents = { summary = "-", hasData = false, source = "-" },
+		accountChars = { rows = {}, hasData = false, source = "-" },
+		hasAnyExternalData = false,
+	}
+
+	if not isContext then
+		data.general.name = tostring((player and player.name_full) or "-")
+		data.general.guid = playerGuid ~= "" and playerGuid or "-"
+		data.general.class = tostring((player and player.class) or "-")
+		data.general.race = tostring((player and player.race) or "-")
+		data.general.level = tostring((player and player.level) or "-")
+		data.general.spec = tostring((player and player.spec) or "-")
+		data.general.guild = tostring((player and player.guild) or "-")
+
+		local mythic = GMS and GMS:GetModule("MythicPlus", true) or nil
+		if type(mythic) == "table" and type(mythic._options) == "table" then
+			local score = tonumber(mythic._options.score)
+			local rows = BuildMythicRows(mythic._options.dungeons)
+			data.mythic.score = score
+			data.mythic.rows = rows
+			data.mythic.hasData = (score and score > 0) or (#rows > 0)
+			data.mythic.source = "Local module data"
+		end
+
+		local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true)) or nil
+		local raidStore = raids and raids._options and raids._options.raids or nil
+		data.raids.summary = BuildRaidStatusFromRaidsStore(raidStore)
+		data.raids.rows = BuildRaidRows(raidStore)
+		data.raids.hasData = #data.raids.rows > 0
+		data.raids.source = "Local module data"
+
+		local equip = GMS and GMS:GetModule("Equipment", true) or nil
 		local eqSnapshot = equip and equip._options and equip._options.equipment and equip._options.equipment.snapshot or nil
-		local ilvl, slots = BuildItemLevelFromEquipmentSnapshot(eqSnapshot)
-		if not ilvl and type(GetAverageItemLevel) == "function" then
+		local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(eqSnapshot)
+		if (not ilvl or ilvl <= 0) and type(GetAverageItemLevel) == "function" then
 			local _, equipped = GetAverageItemLevel()
 			ilvl = tonumber(equipped)
 		end
-		data.equipmentItemLevel = ilvl
-		data.equipmentSlots = tonumber(slots) or 0
-		if ilvl and ilvl > 0 then
-			data.equipment = string.format("%.1f (%d slots)", ilvl, data.equipmentSlots)
-		end
-
-		local mythic = GMS and GMS:GetModule("MythicPlus", true)
-		local score = mythic and mythic._options and tonumber(mythic._options.score) or nil
-		if score and score >= 0 then
-			data.mythicPlus = tostring(score)
-		end
-
-		local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true))
-		local raidStore = raids and raids._options and raids._options.raids or nil
-		data.raidStatus = BuildRaidStatusFromRaidsStore(raidStore)
+		data.equipment.rows = rows
+		data.equipment.ilvl = ilvl
+		data.equipment.slots = slots
+		data.equipment.hasData = (ilvl and ilvl > 0) or (#rows > 0)
+		data.equipment.source = "Local module data"
 
 		local loadout = GetTalentLoadoutName()
 		local specText = tostring((player and player.spec) or "-")
 		if loadout ~= "-" and specText ~= "-" then
-			data.talents = specText .. " | " .. loadout
+			data.talents.summary = specText .. " | " .. loadout
 		else
-			data.talents = (loadout ~= "-" and loadout) or specText
+			data.talents.summary = (loadout ~= "-" and loadout) or specText
 		end
-		data.pvp = GetLocalPvPSummary()
-		return data
+		data.talents.hasData = data.talents.summary ~= "-" and data.talents.summary ~= ""
+		data.talents.source = "Local API"
+
+		data.pvp.summary = GetLocalPvPSummary()
+		data.pvp.hasData = data.pvp.summary ~= "-"
+		data.pvp.source = "Local API"
+	else
+		local member = GetRosterMemberByGuid(targetGuid)
+		if type(member) == "table" then
+			data.general.name = tostring(member.name_full or member.name or selectedName)
+			data.general.class = tostring(member.class or "-")
+			data.general.race = tostring(member.race or "-")
+			data.general.level = tostring(member.level or "-")
+			data.general.spec = tostring(member.spec or "-")
+			data.general.guild = tostring(member.guild or "-")
+		end
+
+		local recMeta = GetLatestDomainRecordForGuid("roster_meta", targetGuid)
+		if recMeta and type(recMeta.payload) == "table" then
+			local p = recMeta.payload
+			local v = tostring(p.version or "")
+			if v ~= "" then data.gmsVersion = v end
+			local score = tonumber(p.mplus)
+			if score and score >= 0 then
+				data.mythic.score = score
+				data.mythic.hasData = true
+				data.mythic.source = "Synced roster_meta"
+			end
+			local raid = tostring(p.raid or "")
+			if raid ~= "" and raid ~= "-" then
+				data.raids.summary = raid
+				data.raids.hasData = true
+				data.raids.source = "Synced roster_meta"
+			end
+			local ilvl = tonumber(p.ilvl)
+			if ilvl and ilvl > 0 then
+				data.equipment.ilvl = ilvl
+				data.equipment.hasData = true
+				data.equipment.source = "Synced roster_meta"
+			end
+			local talentText = tostring(p.talents or "")
+			if talentText ~= "" then
+				data.talents.summary = talentText
+				data.talents.hasData = true
+				data.talents.source = "Synced roster_meta"
+			end
+			local pvpText = tostring(p.pvp or "")
+			if pvpText ~= "" then
+				data.pvp.summary = pvpText
+				data.pvp.hasData = true
+				data.pvp.source = "Synced roster_meta"
+			end
+		end
+
+		local recM = GetLatestDomainRecordForGuid("MYTHICPLUS_V1", targetGuid)
+		if recM and type(recM.payload) == "table" then
+			local rows = BuildMythicRows(recM.payload.dungeons)
+			local score = tonumber(recM.payload.score)
+			data.mythic.rows = rows
+			data.mythic.score = score or data.mythic.score
+			data.mythic.hasData = (score and score > 0) or (#rows > 0) or data.mythic.hasData
+			data.mythic.source = "Synced MYTHICPLUS_V1"
+		end
+
+		local recR = GetLatestDomainRecordForGuid("RAIDS_V1", targetGuid)
+		if recR and type(recR.payload) == "table" then
+			local rows = BuildRaidRows(recR.payload.raids)
+			local summary = BuildRaidStatusFromRaidsStore(recR.payload.raids)
+			if summary ~= "" and summary ~= "-" then
+				data.raids.summary = summary
+			end
+			data.raids.rows = rows
+			data.raids.hasData = (#rows > 0) or (data.raids.summary ~= "-") or data.raids.hasData
+			data.raids.source = "Synced RAIDS_V1"
+		end
+
+		local recEquip = GetLatestDomainRecordForGuid("EQUIPMENT_V1", targetGuid)
+		if recEquip and type(recEquip.payload) == "table" then
+			local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(recEquip.payload.snapshot)
+			if ilvl and ilvl > 0 then
+				data.equipment.ilvl = ilvl
+			end
+			data.equipment.rows = rows
+			data.equipment.slots = slots
+			data.equipment.hasData = (#rows > 0) or (data.equipment.ilvl and data.equipment.ilvl > 0) or data.equipment.hasData
+			data.equipment.source = "Synced EQUIPMENT_V1"
+		end
+
+		if not data.talents.hasData then
+			data.talents.summary = "No synced talents yet (placeholder)."
+			data.talents.source = "Placeholder"
+		end
+		if not data.pvp.hasData then
+			data.pvp.summary = "No synced PvP data yet (placeholder)."
+			data.pvp.source = "Placeholder"
+		end
 	end
 
-	data.isContext = true
-	data.talents = "-"
-	data.pvp = "-"
+	local accountRows, accountHasData, accountSource = GetAccountCharactersForGuid(selectedGuid)
+	data.accountChars.rows = accountRows
+	data.accountChars.hasData = accountHasData
+	data.accountChars.source = accountSource
 
-	local recMeta = GetLatestDomainRecordForGuid("roster_meta", targetGuid)
-	if recMeta and type(recMeta.payload) == "table" then
-		local p = recMeta.payload
-		local v = tostring(p.version or "")
-		if v ~= "" then data.gmsVersion = v end
-		local ilvl = tonumber(p.ilvl)
-		if ilvl and ilvl > 0 then
-			data.equipmentItemLevel = ilvl
-			data.equipment = string.format("%.1f", ilvl)
-		end
-		local mplus = tonumber(p.mplus)
-		if mplus and mplus >= 0 then
-			data.mythicPlus = tostring(mplus)
-		end
-		local raid = tostring(p.raid or "")
-		if raid ~= "" then data.raidStatus = raid end
-	end
-
-	local recEquip = GetLatestDomainRecordForGuid("EQUIPMENT_V1", targetGuid)
-	if recEquip and type(recEquip.payload) == "table" then
-		local ilvl, slots = BuildItemLevelFromEquipmentSnapshot(recEquip.payload.snapshot)
-		if ilvl and ilvl > 0 then
-			data.equipmentItemLevel = ilvl
-			data.equipmentSlots = tonumber(slots) or 0
-			data.equipment = string.format("%.1f (%d slots)", ilvl, data.equipmentSlots)
-		end
-	end
-
-	local recM = GetLatestDomainRecordForGuid("MYTHICPLUS_V1", targetGuid)
-	if recM and type(recM.payload) == "table" then
-		local mplus = tonumber(recM.payload.score)
-		if mplus and mplus >= 0 then
-			data.mythicPlus = tostring(mplus)
-		end
-	end
-
-	local recR = GetLatestDomainRecordForGuid("RAIDS_V1", targetGuid)
-	if recR and type(recR.payload) == "table" then
-		local raid = BuildRaidStatusFromRaidsStore(recR.payload.raids)
-		if raid ~= "" and raid ~= "-" then
-			data.raidStatus = raid
-		end
-	end
+	data.hasAnyExternalData = data.mythic.hasData
+		or data.raids.hasData
+		or data.equipment.hasData
+		or data.talents.hasData
+		or data.pvp.hasData
+		or data.accountChars.hasData
 
 	return data
 end
@@ -550,6 +810,16 @@ local function AddMutedLine(parent, text)
 	parent:AddChild(line)
 end
 
+local function AddNoDataHint(parent, text)
+	local line = AceGUI:Create("Label")
+	line:SetFullWidth(true)
+	line:SetText("|cffffb366" .. tostring(text or "No data available.") .. "|r")
+	if line.label then
+		line.label:SetFontObject(GameFontNormalSmallOutline)
+	end
+	parent:AddChild(line)
+end
+
 local function AddValueLine(parent, leftText, rightText)
 	local row = AceGUI:Create("SimpleGroup")
 	row:SetFullWidth(true)
@@ -567,6 +837,130 @@ local function AddValueLine(parent, leftText, rightText)
 	row:AddChild(right)
 end
 
+local DEFAULT_CARD_ORDER = { "MYTHIC", "EQUIPMENT", "RAIDS", "OVERVIEW", "ACCOUNT", "TALENTS", "PVP" }
+
+local function ResolveCardOrder(opts)
+	local allowed = {
+		MYTHIC = true,
+		EQUIPMENT = true,
+		RAIDS = true,
+		OVERVIEW = true,
+		ACCOUNT = true,
+		TALENTS = true,
+		PVP = true,
+	}
+
+	local out = {}
+	local seen = {}
+	local raw = type(opts) == "table" and opts.cardOrder or nil
+	if type(raw) == "table" then
+		for i = 1, #raw do
+			local id = tostring(raw[i] or ""):upper()
+			if allowed[id] and not seen[id] then
+				seen[id] = true
+				out[#out + 1] = id
+			end
+		end
+	end
+
+	for i = 1, #DEFAULT_CARD_ORDER do
+		local id = DEFAULT_CARD_ORDER[i]
+		if not seen[id] then
+			out[#out + 1] = id
+		end
+	end
+
+	return out
+end
+
+local function BuildDetailsSignature(details)
+	if type(details) ~= "table" then return "" end
+	local out = {
+		tostring(details.general and details.general.guid or ""),
+		tostring(details.general and details.general.name or ""),
+		tostring(details.general and details.general.spec or ""),
+		tostring(details.general and details.general.level or ""),
+		tostring(details.gmsVersion or ""),
+		tostring(details.mythic and details.mythic.score or ""),
+		tostring(details.raids and details.raids.summary or ""),
+		tostring(details.equipment and details.equipment.ilvl or ""),
+		tostring(details.talents and details.talents.summary or ""),
+		tostring(details.pvp and details.pvp.summary or ""),
+	}
+
+	local mythicRows = details.mythic and details.mythic.rows or {}
+	for i = 1, #mythicRows do
+		local r = mythicRows[i]
+		out[#out + 1] = tostring(r.name or "")
+		out[#out + 1] = tostring(r.level or "")
+		out[#out + 1] = tostring(r.score or "")
+	end
+
+	local raidRows = details.raids and details.raids.rows or {}
+	for i = 1, #raidRows do
+		local r = raidRows[i]
+		out[#out + 1] = tostring(r.name or "")
+		out[#out + 1] = tostring(r.short or "")
+	end
+
+	local eqRows = details.equipment and details.equipment.rows or {}
+	for i = 1, #eqRows do
+		local r = eqRows[i]
+		out[#out + 1] = tostring(r.slotId or "")
+		out[#out + 1] = tostring(r.text or "")
+		out[#out + 1] = tostring(r.itemLevel or "")
+	end
+
+	local accountRows = details.accountChars and details.accountChars.rows or {}
+	for i = 1, #accountRows do
+		out[#out + 1] = tostring(accountRows[i] or "")
+	end
+
+	return table.concat(out, "|")
+end
+
+local function StopUIDataTicker()
+	local t = CHARINFO._uiDataTicker
+	if t and type(t.Cancel) == "function" then
+		pcall(function() t:Cancel() end)
+	end
+	CHARINFO._uiDataTicker = nil
+end
+
+function CHARINFO:StartUIDataTicker(ctxState)
+	StopUIDataTicker()
+	if not C_Timer or type(C_Timer.NewTicker) ~= "function" then return end
+
+	local state = type(ctxState) == "table" and ctxState or nil
+	local ctxGuid = state and state.guid or nil
+	local ctxName = state and state.name_full or nil
+
+	local initialPlayer = GetPlayerSnapshot()
+	local initialDetails = BuildCharData(initialPlayer, ctxGuid, ctxName)
+	self._uiDataLastSig = BuildDetailsSignature(initialDetails)
+
+	self._uiDataTicker = C_Timer.NewTicker(1.5, function()
+		local ui = UIRef()
+		if not ui or ui._page ~= "CHARINFO" then
+			StopUIDataTicker()
+			return
+		end
+
+		local playerNow = GetPlayerSnapshot()
+		local detailsNow = BuildCharData(playerNow, ctxGuid, ctxName)
+		local sigNow = BuildDetailsSignature(detailsNow)
+		if sigNow == self._uiDataLastSig then
+			return
+		end
+
+		self._uiDataLastSig = sigNow
+		if state and (state.guid or state.name_full) then
+			SetNavContext(state)
+		end
+		OpenSelf()
+	end)
+end
+
 -- ###########################################################################
 -- #	UI PAGE
 -- ###########################################################################
@@ -581,7 +975,7 @@ function CHARINFO:TryRegisterPage()
 
 	ui:RegisterPage("CHARINFO", 60, DISPLAY_NAME, function(root, id, isCached)
 		local ui2 = UIRef()
-		local ctx = GetNavContext(true) or nil
+		local ctx = GetNavContext(false) or nil
 		local player = GetPlayerSnapshot()
 
 		local ctxName = ctx and ctx.name_full or nil
@@ -603,101 +997,68 @@ function CHARINFO:TryRegisterPage()
 			root:ReleaseChildren()
 		end
 
-		local details = BuildCharData(player, ctxGuid)
+		local details = BuildCharData(player, ctxGuid, ctxName)
+
+		if type(root.SetLayout) == "function" then
+			root:SetLayout("Fill")
+		end
+
+		local outer = AceGUI:Create("SimpleGroup")
+		outer:SetFullWidth(true)
+		outer:SetFullHeight(true)
+		outer:SetLayout("Fill")
+		root:AddChild(outer)
+
+		local scroller = AceGUI:Create("ScrollFrame")
+		scroller:SetFullWidth(true)
+		scroller:SetFullHeight(true)
+		scroller:SetLayout("Flow")
+		outer:AddChild(scroller)
 
 		local wrapper = AceGUI:Create("SimpleGroup")
 		wrapper:SetFullWidth(true)
 		wrapper:SetFullHeight(true)
 		wrapper:SetLayout("List")
-		root:AddChild(wrapper)
+		scroller:AddChild(wrapper)
 
-		local profile = AceGUI:Create("InlineGroup")
-		profile:SetTitle("")
-		profile:SetFullWidth(true)
-		profile:SetLayout("Flow")
-		wrapper:AddChild(profile)
+		local header = AceGUI:Create("InlineGroup")
+		header:SetTitle("")
+		header:SetFullWidth(true)
+		header:SetLayout("Flow")
+		wrapper:AddChild(header)
 
 		local portrait = AceGUI:Create("Icon")
 		portrait:SetImage(ICON)
 		portrait:SetImageSize(36, 36)
 		portrait:SetWidth(44)
-		profile:AddChild(portrait)
+		header:AddChild(portrait)
 
 		local identity = AceGUI:Create("SimpleGroup")
 		identity:SetLayout("List")
-		identity:SetWidth(420)
-		profile:AddChild(identity)
+		identity:SetWidth(520)
+		header:AddChild(identity)
 
 		local classHex = GetClassHex(player.classFile or "")
 		local title = AceGUI:Create("Label")
 		title:SetFullWidth(true)
-		title:SetText(string.format("|cff%s%s|r", classHex, tostring(player.name or "-")))
+		title:SetText(string.format("|cff%s%s|r", classHex, tostring(details.general.name or "-")))
 		identity:AddChild(title)
 
 		AddMutedLine(identity, string.format(
-			"Level %s   %s   %s   %s",
-			tostring(player.level or "-"),
-			tostring(player.race or "-"),
-			tostring(player.class or "-"),
-			tostring(player.spec or "-")
+			"Level %s   %s   %s   %s   GUID: %s",
+			tostring(details.general.level or "-"),
+			tostring(details.general.race or "-"),
+			tostring(details.general.class or "-"),
+			tostring(details.general.spec or "-"),
+			tostring(details.general.guid or "-")
 		))
+		AddMutedLine(identity, tostring(details.general.guild or "-"))
+		AddMutedLine(identity, "Context source: " .. tostring(ctxFrom or "local"))
 
-		AddMutedLine(identity, string.format(
-			"%s",
-			tostring(player.guild or "-")
-		))
-
-		local contextSummary = AceGUI:Create("SimpleGroup")
-		contextSummary:SetLayout("List")
-		contextSummary:SetWidth(260)
-		profile:AddChild(contextSummary)
-		AddMutedLine(contextSummary, "Context")
-		AddValueLine(contextSummary, "Name", ctxName or "-")
-		AddValueLine(contextSummary, "Source", ctxFrom or "-")
-
-		local contentRow = AceGUI:Create("SimpleGroup")
-		contentRow:SetFullWidth(true)
-		contentRow:SetLayout("Flow")
-		wrapper:AddChild(contentRow)
-
-		local leftCol = AceGUI:Create("SimpleGroup")
-		leftCol:SetLayout("List")
-		leftCol:SetWidth(520)
-		contentRow:AddChild(leftCol)
-
-		local rightCol = AceGUI:Create("SimpleGroup")
-		rightCol:SetLayout("List")
-		rightCol:SetWidth(520)
-		contentRow:AddChild(rightCol)
-
-		local cardOverview = AceGUI:Create("InlineGroup")
-		cardOverview:SetTitle("")
-		cardOverview:SetFullWidth(true)
-		cardOverview:SetLayout("List")
-		leftCol:AddChild(cardOverview)
-		AddCardTitle(cardOverview, "Character")
-		AddValueLine(cardOverview, "Full Name", player.name_full or "-")
-		AddValueLine(cardOverview, "Class", player.class or "-")
-		AddValueLine(cardOverview, "Spec", player.spec or "-")
-		AddValueLine(cardOverview, "Itemlevel", string.format("%s (overall %s)", tostring(player.ilvl or "-"), tostring(player.ilvl_overall or "-")))
-		AddValueLine(cardOverview, "Mythic Plus", details.mythicPlus or "-")
-		AddValueLine(cardOverview, "Raidstatus", details.raidStatus or "-")
-		AddValueLine(cardOverview, "Equipment", details.equipment or "-")
-		AddValueLine(cardOverview, "Talents", details.talents or "-")
-		AddValueLine(cardOverview, "PvP", details.pvp or "-")
-		AddValueLine(cardOverview, "GUID", player.guid or "-")
-
-		local cardContext = AceGUI:Create("InlineGroup")
-		cardContext:SetTitle("")
-		cardContext:SetFullWidth(true)
-		cardContext:SetLayout("List")
-		leftCol:AddChild(cardContext)
-		AddCardTitle(cardContext, "Context")
-		AddValueLine(cardContext, "Name", ctxName or "-")
-		AddValueLine(cardContext, "GUID", ctxGuid or "-")
-		AddValueLine(cardContext, "Source", ctxFrom or "-")
-		AddValueLine(cardContext, "GMS Version", details.gmsVersion or "-")
-		AddValueLine(cardContext, "Context Data", details.isContext and "synced guild records" or "local player")
+		local actions = AceGUI:Create("SimpleGroup")
+		actions:SetLayout("Flow")
+		actions:SetWidth(360)
+		header:AddChild(actions)
 
 		local btnSelf = AceGUI:Create("Button")
 		btnSelf:SetText("Use Player")
@@ -714,7 +1075,7 @@ function CHARINFO:TryRegisterPage()
 			end
 			OpenSelf()
 		end)
-		rightCol:AddChild(btnSelf)
+		actions:AddChild(btnSelf)
 
 		local btnTarget = AceGUI:Create("Button")
 		btnTarget:SetText("Use Target")
@@ -738,7 +1099,7 @@ function CHARINFO:TryRegisterPage()
 			end
 			OpenSelf()
 		end)
-		rightCol:AddChild(btnTarget)
+		actions:AddChild(btnTarget)
 
 		local btnClear = AceGUI:Create("Button")
 		btnClear:SetText("Clear Context")
@@ -750,7 +1111,7 @@ function CHARINFO:TryRegisterPage()
 			end
 			OpenSelf()
 		end)
-		rightCol:AddChild(btnClear)
+		actions:AddChild(btnClear)
 
 		local btnRefresh = AceGUI:Create("Button")
 		btnRefresh:SetText("Refresh")
@@ -758,18 +1119,257 @@ function CHARINFO:TryRegisterPage()
 		btnRefresh:SetCallback("OnClick", function()
 			OpenSelf()
 		end)
-		rightCol:AddChild(btnRefresh)
+		actions:AddChild(btnRefresh)
+
+		if details.isContext and not details.hasAnyExternalData then
+			local warn = AceGUI:Create("InlineGroup")
+			warn:SetTitle("")
+			warn:SetFullWidth(true)
+			warn:SetLayout("List")
+			wrapper:AddChild(warn)
+			AddCardTitle(warn, "No Data Found")
+			AddNoDataHint(warn, "No synced data exists for this character yet. Data will appear after sync/module scans.")
+		end
+
+		local contentRow = AceGUI:Create("SimpleGroup")
+		contentRow:SetFullWidth(true)
+		contentRow:SetLayout("List")
+		wrapper:AddChild(contentRow)
+
+		local pageWidth = 1080
+		if root and root.frame and type(root.frame.GetWidth) == "function" then
+			local w = tonumber(root.frame:GetWidth()) or 1080
+			if w > 0 then
+				pageWidth = w
+			end
+		end
+		local innerWidth = pageWidth - 26
+		if innerWidth < 860 then innerWidth = 860 end
+		local colWidth = math.floor((innerWidth - 18) / 2)
+		if colWidth < 420 then colWidth = 420 end
 
 		local opts = (type(CHARINFO._options) == "table") and CHARINFO._options or nil
 		local lastUpdate = (opts and tonumber(opts.lastUpdate)) or 0
-		local cardMeta = AceGUI:Create("InlineGroup")
-		cardMeta:SetTitle("")
-		cardMeta:SetFullWidth(true)
-		cardMeta:SetLayout("List")
-		rightCol:AddChild(cardMeta)
-		AddCardTitle(cardMeta, "Meta")
-		AddValueLine(cardMeta, "Last Update", (lastUpdate > 0 and tostring(lastUpdate) or "-"))
-		AddValueLine(cardMeta, "Module Version", METADATA.VERSION)
+
+		local function NewCardContainer(parent, titleText)
+			local card = AceGUI:Create("InlineGroup")
+			card:SetTitle("")
+			card:SetFullWidth(true)
+			card:SetLayout("List")
+			parent:AddChild(card)
+			AddCardTitle(card, titleText)
+			return card
+		end
+
+		local function BuildCard_Mythic(parent)
+			local card = NewCardContainer(parent, "Mythic Dungeons")
+			AddValueLine(card, "Score", (details.mythic.score and tostring(details.mythic.score)) or "-")
+			AddValueLine(card, "Source", details.mythic.source or "-")
+			if #details.mythic.rows <= 0 then
+				AddNoDataHint(card, "No Mythic+ data available for this character.")
+				return
+			end
+			local maxRows = math.min(#details.mythic.rows, 10)
+			for i = 1, maxRows do
+				local row = details.mythic.rows[i]
+				local levelText = (tonumber(row.level) or 0) > 0 and ("+" .. tostring(row.level)) or "-"
+				local scoreText = (tonumber(row.score) or 0) > 0 and tostring(row.score) or "-"
+				AddMutedLine(card, string.format("%s   key: %s   score: %s", tostring(row.name or "-"), levelText, scoreText))
+			end
+		end
+
+		local function BuildCard_Equipment(parent)
+			local card = NewCardContainer(parent, "Equipment")
+			local ilvlText = (details.equipment.ilvl and string.format("%.1f", details.equipment.ilvl)) or "-"
+			AddValueLine(card, "Item Level", ilvlText)
+			AddValueLine(card, "Captured Slots", tostring(details.equipment.slots or 0))
+			AddValueLine(card, "Source", details.equipment.source or "-")
+			if #details.equipment.rows <= 0 then
+				AddNoDataHint(card, "No equipment snapshot available for this character.")
+				return
+			end
+			local equipSlotWidth = 110
+			local equipLvlWidth = 70
+			local equipItemWidth = colWidth - equipSlotWidth - equipLvlWidth - 40
+			if equipItemWidth < 180 then equipItemWidth = 180 end
+			for i = 1, #details.equipment.rows do
+				local e = details.equipment.rows[i]
+				local row = AceGUI:Create("SimpleGroup")
+				row:SetFullWidth(true)
+				row:SetLayout("Flow")
+				card:AddChild(row)
+
+				local slot = AceGUI:Create("Label")
+				slot:SetWidth(equipSlotWidth)
+				slot:SetText("|cff9d9d9d" .. tostring(e.slotName or "-") .. "|r")
+				row:AddChild(slot)
+
+				local item = AceGUI:Create("InteractiveLabel")
+				item:SetWidth(equipItemWidth)
+				item:SetText(tostring(e.text or "-"))
+				if item.label then
+					item.label:SetJustifyH("LEFT")
+					item.label:SetWordWrap(false)
+				end
+				if tostring(e.link or "") ~= "" then
+					item:SetCallback("OnEnter", function(widget)
+						if GameTooltip and widget and widget.frame then
+							GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
+							GameTooltip:SetHyperlink(tostring(e.link))
+							GameTooltip:Show()
+						end
+					end)
+					item:SetCallback("OnLeave", function()
+						if GameTooltip then GameTooltip:Hide() end
+					end)
+					item:SetCallback("OnClick", function()
+						if type(HandleModifiedItemClick) == "function" then
+							HandleModifiedItemClick(tostring(e.link))
+						end
+					end)
+				end
+				row:AddChild(item)
+
+				local lvl = AceGUI:Create("Label")
+				lvl:SetWidth(equipLvlWidth)
+				local l = tonumber(e.itemLevel)
+				lvl:SetText((l and l > 0) and ("|cff03A9F4" .. tostring(l) .. "|r") or "|cff7f7f7f-|r")
+				row:AddChild(lvl)
+			end
+		end
+
+		local function BuildCard_Raids(parent)
+			local card = NewCardContainer(parent, "Raid Data")
+			AddValueLine(card, "Best", details.raids.summary or "-")
+			AddValueLine(card, "Source", details.raids.source or "-")
+			if #details.raids.rows <= 0 then
+				AddNoDataHint(card, "No raid progress data available for this character.")
+				return
+			end
+			local maxRows = math.min(#details.raids.rows, 8)
+			for i = 1, maxRows do
+				local row = details.raids.rows[i]
+				AddMutedLine(card, string.format("%s: %s", tostring(row.name or "-"), tostring(row.short or "-")))
+			end
+		end
+
+		local function BuildCard_Overview(parent)
+			local card = NewCardContainer(parent, "Character Overview")
+			AddValueLine(card, "Name", details.general.name or "-")
+			AddValueLine(card, "GUID", details.general.guid or "-")
+			AddValueLine(card, "Class", details.general.class or "-")
+			AddValueLine(card, "Race", details.general.race or "-")
+			AddValueLine(card, "Level", details.general.level or "-")
+			AddValueLine(card, "Spec", details.general.spec or "-")
+			AddValueLine(card, "Guild", details.general.guild or "-")
+			AddValueLine(card, "GMS Version", details.gmsVersion or "-")
+			AddValueLine(card, "Last Local Update", (lastUpdate > 0 and tostring(lastUpdate) or "-"))
+		end
+
+		local function BuildCard_Account(parent)
+			local card = NewCardContainer(parent, "Guild Characters on Same Account")
+			AddValueLine(card, "Source", details.accountChars.source or "-")
+			if #details.accountChars.rows <= 0 then
+				AddNoDataHint(card, "No linked account characters recorded yet (placeholder for upcoming account-link tracking).")
+				return
+			end
+			for i = 1, #details.accountChars.rows do
+				AddMutedLine(card, tostring(details.accountChars.rows[i] or "-"))
+			end
+		end
+
+		local function BuildCard_Talents(parent)
+			local card = NewCardContainer(parent, "Talents")
+			AddValueLine(card, "Summary", details.talents.summary or "-")
+			AddValueLine(card, "Source", details.talents.source or "-")
+		end
+
+		local function BuildCard_PvP(parent)
+			local card = NewCardContainer(parent, "PvP")
+			AddValueLine(card, "Summary", details.pvp.summary or "-")
+			AddValueLine(card, "Source", details.pvp.source or "-")
+		end
+
+		local cardBuilders = {
+			MYTHIC = BuildCard_Mythic,
+			EQUIPMENT = BuildCard_Equipment,
+			RAIDS = BuildCard_Raids,
+			OVERVIEW = BuildCard_Overview,
+			ACCOUNT = BuildCard_Account,
+			TALENTS = BuildCard_Talents,
+			PVP = BuildCard_PvP,
+		}
+
+		local function RenderCardInto(parent, cardId)
+			local b = cardBuilders[cardId]
+			if type(b) == "function" then
+				b(parent)
+				return true
+			end
+			return false
+		end
+
+		local leftPinned = { "RAIDS", "MYTHIC", "PVP" }
+		local rightPinned = { "EQUIPMENT", "TALENTS" }
+		local pinned = {}
+		for i = 1, #leftPinned do pinned[leftPinned[i]] = true end
+		for i = 1, #rightPinned do pinned[rightPinned[i]] = true end
+
+		local rowCount = (#leftPinned > #rightPinned) and #leftPinned or #rightPinned
+		for i = 1, rowCount do
+			local row = AceGUI:Create("SimpleGroup")
+			row:SetFullWidth(true)
+			row:SetLayout("Flow")
+			contentRow:AddChild(row)
+
+			local leftCol = AceGUI:Create("SimpleGroup")
+			leftCol:SetLayout("List")
+			leftCol:SetWidth(colWidth)
+			row:AddChild(leftCol)
+
+			local rightCol = AceGUI:Create("SimpleGroup")
+			rightCol:SetLayout("List")
+			rightCol:SetWidth(colWidth)
+			row:AddChild(rightCol)
+
+			local leftId = leftPinned[i]
+			local rightId = rightPinned[i]
+
+			RenderCardInto(leftCol, leftId)
+			RenderCardInto(rightCol, rightId)
+		end
+
+		-- Remaining cards (not pinned) are rendered as free cards below.
+		local order = ResolveCardOrder(opts)
+		for i = 1, #order do
+			local id = order[i]
+			if not pinned[id] then
+				local freeRow = AceGUI:Create("SimpleGroup")
+				freeRow:SetFullWidth(true)
+				freeRow:SetLayout("Flow")
+				contentRow:AddChild(freeRow)
+
+				local freeCol = AceGUI:Create("SimpleGroup")
+				freeCol:SetLayout("List")
+				freeCol:SetFullWidth(true)
+				freeRow:AddChild(freeCol)
+
+				RenderCardInto(freeCol, id)
+			end
+		end
+
+		if C_Timer and type(C_Timer.After) == "function" then
+			C_Timer.After(0, function()
+				if scroller and type(scroller.DoLayout) == "function" then scroller:DoLayout() end
+				if outer and type(outer.DoLayout) == "function" then outer:DoLayout() end
+			end)
+		end
+
+		CHARINFO:StartUIDataTicker({
+			from = ctxFrom or "charinfo",
+			guid = ctxGuid,
+			name_full = ctxName,
+		})
 	end)
 
 	self._pageRegistered = true
@@ -909,6 +1509,7 @@ function CHARINFO:OnEnable()
 end
 
 function CHARINFO:OnDisable()
+	StopUIDataTicker()
 	if self._ticker then
 		local ticker = self._ticker
 		---@cast ticker GMSTickerHandle

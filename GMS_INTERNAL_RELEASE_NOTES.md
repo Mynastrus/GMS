@@ -21,6 +21,10 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] `Database_ResetAll` erweitert: leert jetzt zusätzlich `GMS_UIDB` und `GMS_Changelog_DB` für wirklich sauberen Reset.
 - [x] One-Time-Release-Reset in `Core/Database.lua` ergänzt (versionsgesteuert über `ONE_TIME_RESET_TARGET_VERSION`, aktuell `1.4.6`).
 - [x] One-Time-Reset hinterlegt Marker in `GMS_DB.global` (`oneTimeHardResetAppliedVersion`, `oneTimeHardResetAppliedAt`) zur sicheren Einmal-Ausführung.
+- [x] CharInfo-Seite auf kartenbasiertes Grid-Layout umgebaut: feste 2-Spalten-Verteilung (links Raid/M+/PvP, rechts Equipment/Talente) plus freie Karten darunter.
+- [x] CharInfo nutzt jetzt ScrollFrame, dynamische Breiten und Auto-Refresh bei Datenänderungen (Ticker mit Signaturvergleich).
+- [x] Equipment-Liste in CharInfo zeigt anklickbare Itemlinks mit Tooltip (`InteractiveLabel`, `GameTooltip:SetHyperlink`, `HandleModifiedItemClick`).
+- [x] CharInfo-Datenbindung erweitert: klare No-Data-Hinweise, Placeholder für PvP/Talente/Account-Charaktere und vorbereitete `cardOrder`-Basis für spätere individuelle Anordnung.
 
 ### Fixed
 - [x] Lua-Diagnostics (`undefined-field`) in `Core/Database.lua` beseitigt, indem `_G`-Zugriffe auf optionale SVs via `rawget(_G, "...")` erfolgen.
