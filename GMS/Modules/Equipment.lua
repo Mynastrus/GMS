@@ -184,10 +184,62 @@ local OPTIONS_DEFAULTS = {
 }
 
 -- Equipment data storage (managed via new API)
+local function _getDirectCharOptionsStore()
+	if GMS and type(GMS.InitializeStandardDatabases) == "function" then
+		GMS:InitializeStandardDatabases(false)
+	end
+
+	if not GMS or type(GMS.db) ~= "table" or type(GMS.db.global) ~= "table" then
+		return nil
+	end
+
+	local charKey = _getCharKey()
+	if type(charKey) ~= "string" or charKey == "" then
+		if type(GMS.GetCharacterGUID) == "function" then
+			charKey = GMS:GetCharacterGUID()
+		end
+	end
+	if type(charKey) ~= "string" or charKey == "" then
+		return nil
+	end
+
+	local global = GMS.db.global
+	global.characters = type(global.characters) == "table" and global.characters or {}
+	local charStore = global.characters[charKey]
+	if type(charStore) ~= "table" then
+		charStore = {}
+		global.characters[charKey] = charStore
+	end
+
+	local optStore = charStore.EQUIPMENT
+	if type(optStore) ~= "table" then
+		optStore = {}
+		charStore.EQUIPMENT = optStore
+	end
+
+	if optStore.autoScan == nil then
+		optStore.autoScan = OPTIONS_DEFAULTS.autoScan
+	end
+	optStore.lastScanTs = tonumber(optStore.lastScanTs) or tonumber(OPTIONS_DEFAULTS.lastScanTs) or 0
+	optStore.equipment = type(optStore.equipment) == "table" and optStore.equipment or {}
+
+	return optStore
+end
+
+local function _getOptionsStore()
+	local direct = _getDirectCharOptionsStore()
+	if type(direct) == "table" then
+		EQUIP._options = direct
+		return direct
+	end
+	return EQUIP._options
+end
+
 local function _getEquipmentStore()
-	if not EQUIP._options then return nil end
-	EQUIP._options.equipment = EQUIP._options.equipment or {}
-	return EQUIP._options.equipment
+	local opts = _getOptionsStore()
+	if type(opts) ~= "table" then return nil end
+	opts.equipment = opts.equipment or {}
+	return opts.equipment
 end
 
 function EQUIP:InitializeOptions()
@@ -203,14 +255,30 @@ function EQUIP:InitializeOptions()
 		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "Equipment")
 		if ok and opts then
 			self._options = opts
-			if type(self._mem) == "table" and type(self._mem.snapshot) == "table" then
-				local memSnap = self._mem.snapshot
-				self._mem.snapshot = nil
-				self:SaveSnapshot(memSnap, "mem-flush")
-			end
-			LOCAL_LOG("INFO", "Equipment options initialized")
 		else
 			LOCAL_LOG("WARN", "Failed to retrieve Equipment options")
+		end
+	end
+
+	local direct = _getDirectCharOptionsStore()
+	if type(direct) == "table" then
+		self._options = direct
+		if type(self._mem) == "table" and type(self._mem.snapshot) == "table" then
+			local memSnap = self._mem.snapshot
+			self._mem.snapshot = nil
+			self:SaveSnapshot(memSnap, "mem-flush")
+		end
+		LOCAL_LOG("INFO", "Equipment options initialized (direct CHAR store)")
+	else
+		if self._options and type(self._mem) == "table" and type(self._mem.snapshot) == "table" then
+			local memSnap = self._mem.snapshot
+			self._mem.snapshot = nil
+			self:SaveSnapshot(memSnap, "mem-flush")
+		end
+		if self._options then
+			LOCAL_LOG("INFO", "Equipment options initialized")
+		else
+			LOCAL_LOG("WARN", "Equipment options unavailable after initialization")
 		end
 	end
 end
@@ -378,8 +446,9 @@ function EQUIP:SaveSnapshot(snapshot, reason)
 	local previousDigest = tostring(store.lastDigest or "")
 	store.snapshot = snapshot
 	store.lastDigest = digest
-	if self._options then
-		self._options.lastScanTs = snapshot.ts or 0
+	local opts = _getOptionsStore()
+	if opts then
+		opts.lastScanTs = snapshot.ts or 0
 	end
 
 	if digest ~= "" and digest ~= previousDigest then

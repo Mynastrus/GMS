@@ -157,10 +157,41 @@ function RAIDS:InitializeOptions()
 	end
 end
 
+local function getDirectCharStore(charKey)
+	if not GMS or type(GMS.db) ~= "table" or type(GMS.db.global) ~= "table" then
+		return nil
+	end
+	local global = GMS.db.global
+	global.characters = type(global.characters) == "table" and global.characters or {}
+	local fallbackKey = UnitGUID and UnitGUID("player") or nil
+	local key = tostring(charKey or fallbackKey or "")
+	if key == "" then
+		return nil
+	end
+	local charStore = global.characters[key]
+	if type(charStore) ~= "table" then
+		charStore = {}
+		global.characters[key] = charStore
+	end
+	local raidsStore = charStore.RAIDS
+	if type(raidsStore) ~= "table" then
+		raidsStore = {}
+		charStore.RAIDS = raidsStore
+	end
+	if raidsStore.scanLegacy == nil then raidsStore.scanLegacy = false end
+	if type(raidsStore.rebuild) ~= "table" then
+		raidsStore.rebuild = { type = "execute", name = "Katalog neu aufbauen" }
+	end
+	raidsStore.raids = type(raidsStore.raids) == "table" and raidsStore.raids or {}
+	raidsStore.lastScan = tonumber(raidsStore.lastScan) or 0
+	return raidsStore
+end
+
 local function getRaidsStore()
-	if not RAIDS._options then return nil end
-	RAIDS._options.raids = RAIDS._options.raids or {}
-	return RAIDS._options.raids
+	local store = getDirectCharStore()
+	if not store then return nil end
+	store.raids = store.raids or {}
+	return store.raids
 end
 
 RAIDS.METADATA = METADATA
@@ -182,25 +213,32 @@ local function hasDB()
 end
 
 local function ensureStore()
-	-- The new options system handles the persistence and default values.
-	-- We just need to ensure RAIDS._options is set and return it.
-	if not RAIDS._options then
-		RAIDS:InitializeOptions() -- Attempt to initialize if not already
-		if not RAIDS._options then
-			LOCAL_LOG("ERROR", "RAIDS._options could not be initialized.")
-			return nil, nil
-		end
-	end
-
 	local charKey = getPlayerKey()
 	if not charKey then return nil, nil end
+	local directStore = getDirectCharStore(charKey)
+	if type(directStore) ~= "table" then
+		LOCAL_LOG("ERROR", "RAIDS direct char store unavailable")
+		return nil, nil
+	end
+
+	-- Keep options registration for UI compatibility, but always bind runtime
+	-- writes to the direct character store to guarantee persistence.
+	if not RAIDS._options then
+		RAIDS:InitializeOptions()
+	end
+	if type(RAIDS._options) == "table" and RAIDS._options ~= directStore then
+		if directStore.scanLegacy == nil and RAIDS._options.scanLegacy ~= nil then
+			directStore.scanLegacy = RAIDS._options.scanLegacy
+		end
+	end
+	RAIDS._options = directStore
 
 	-- Catalog is now local to the module session, not persisted in the options
 	if not RAIDS._catalog then
 		RAIDS:_EnsureCatalogReady()
 	end
 
-	return RAIDS._options, charKey
+	return directStore, charKey
 end
 
 local function RegisterRaidsSlash()
@@ -958,11 +996,13 @@ function RAIDS:OnUpdateInstanceInfo()
 		local diffID = info[4]
 		local locked = info[5]
 		local extended = info[6]
-		local isRaid = info[9]
-		local maxPlayers = info[8]
-		local difficultyName = tostring(info[11] or "")
-		local numEncounters = info[12]
-		local encounterProgress = info[13]
+		-- WoW 12.x return layout:
+		-- 8=isRaid, 9=maxPlayers, 10=difficultyName, 11=numEncounters, 12=encounterProgress
+		local isRaid = info[8]
+		local maxPlayers = info[9]
+		local difficultyName = tostring(info[10] or "")
+		local numEncounters = info[11]
+		local encounterProgress = info[12]
 
 		if type(name) == "string" and name ~= "" then
 			local encCount = tonumber(numEncounters) or 0

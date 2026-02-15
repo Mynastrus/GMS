@@ -402,11 +402,23 @@ GMS.DB._registrations = {}
 
 local function ApplyDefaults(target, defaults)
 	if type(target) ~= "table" or type(defaults) ~= "table" then return end
+
+	local function CloneValue(value)
+		if type(value) ~= "table" then
+			return value
+		end
+		local out = {}
+		for k, v in pairs(value) do
+			out[k] = CloneValue(v)
+		end
+		return out
+	end
+
 	for k, v in pairs(defaults) do
 		if type(v) == "table" and v.default ~= nil then
-			if target[k] == nil then target[k] = v.default end
+			if target[k] == nil then target[k] = CloneValue(v.default) end
 		elseif target[k] == nil then
-			target[k] = v
+			target[k] = CloneValue(v)
 		end
 	end
 end

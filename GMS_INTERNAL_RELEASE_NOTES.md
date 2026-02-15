@@ -32,12 +32,15 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] CharInfo-Header und Seitenlayout weiter bereinigt: Aktions-/Kontext-Buttons in der Content-Fläche entfernt, Header-Metadaten verdichtet (nur Werte), Header-Aktionsmenü gestrafft.
 - [x] Raids-Modul auf robusten Fallback-Betrieb für 12.x/API-Änderungen erweitert: SavedInstances-first Ingest auch ohne vollständige EJ-Verfügbarkeit, inkl. Name-/Encounter-Fallback-Mapping und Difficulty-Fallback aus `difficultyName`.
 - [x] Neuer Slash-Befehl `/gms raids scan` ergänzt, um Scans manuell sofort auszulösen (optional `/gms raids rebuild`).
+- [x] Persistenzpfade für `RAIDS` und `EQUIPMENT` gehärtet: Laufzeitdaten werden jetzt direkt im Char-Store (`GMS_DB.global.characters[GUID]`) geschrieben statt nur über modulinterne Options-Referenzen.
 
 ### Fixed
 - [x] Lua-Diagnostics (`undefined-field`) in `Core/Database.lua` beseitigt, indem `_G`-Zugriffe auf optionale SVs via `rawget(_G, "...")` erfolgen.
 - [x] `ADDON_ACTION_FORBIDDEN` beim CharInfo-Menüpunkt "Anvisieren" behoben (kein direkter Protected-Call mehr aus Dropdown-Callback).
 - [x] `.toc`-Ladefehler korrigiert (`Couldn't open GMS/23`) durch Entfernen einer fehlerhaften Eintragszeile in `GMS/GMS.toc`.
 - [x] Syntaxfehler in `Modules/Raids.lua` behoben (`Unexpected symbol 'end'`).
+- [x] `ApplyDefaults` in `Core/Database.lua` auf Deep-Copy umgestellt, damit Tabellen-Defaults nicht mehr per Referenz geteilt werden.
+- [x] Lua-Laufzeitfehler in `Modules/Raids.lua` beseitigt (`attempt to call a nil value`), verursacht durch Vorwärtsreferenz auf `getPlayerKey`.
 
 ### Rules/Infra
 - [ ] (leer)
