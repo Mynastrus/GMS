@@ -96,6 +96,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.4.6",
+		date = "2026-02-15",
+		title_en = "Unified persistence reset and resilient character data pipelines",
+		title_de = "Einheitlicher Persistenz-Reset und robuste Charakterdaten-Pipelines",
+		notes_en = {
+			"Added a one-time database reset gate for 1.4.6 plus /gms dbwipe aliases to rebuild a clean data baseline when needed.",
+			"Reworked CharInfo into a structured, scrollable card layout with localized faction text, interactive equipment item links/tooltips, and streamlined context actions.",
+			"Added /gms raids scan and expanded 12.x raid ingest fallbacks (SavedInstances mapping, name/difficulty fallback keys, digest-based publish triggers).",
+			"Hardened RAIDS and EQUIPMENT persistence by writing directly into GMS_DB.global.characters[GUID] and eliminating shared table defaults via deep-copy initialization.",
+			"Fixed protected-action/UI regressions including target taint paths, a TOC load-entry issue, raid init nil-call edge cases, and remaining syntax diagnostics.",
+		},
+		notes_de = {
+			"Ein versionsgesteuerter One-Time-Datenbankreset fuer 1.4.6 wurde ergaenzt; inklusive /gms dbwipe und Aliasen fuer einen sauberen Daten-Neustart bei Bedarf.",
+			"CharInfo wurde als strukturierte, scrollbare Kartenansicht ueberarbeitet (lokalisierte Fraktionsanzeige, klickbare Equipment-Itemlinks mit Tooltip, gestraffte Kontextaktionen).",
+			"/gms raids scan wurde hinzugefuegt und die 12.x-Raid-Ingest-Fallbacks erweitert (SavedInstances-Mapping, Name-/Schwierigkeits-Fallback-Keys, Digest-basierte Publish-Trigger).",
+			"Die Persistenz von RAIDS und EQUIPMENT wurde gehaertet: direkte Speicherung in GMS_DB.global.characters[GUID] plus Deep-Copy-Initialisierung gegen geteilte Tabellen-Defaults.",
+			"Protected-Action-/UI-Regressions behoben, u. a. Target-Taint-Pfade, TOC-Ladeeintrag, nil-Call-Randfaelle bei Raid-Init sowie verbleibende Syntax-Diagnostics.",
+		},
+	},
+	{
 		version = "1.4.5",
 		date = "2026-02-15",
 		title_en = "Stability fixes, CharInfo expansion, and release automation polish",
