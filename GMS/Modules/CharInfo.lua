@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.9",
+	VERSION      = "1.0.10",
 }
 
 local LibStub = LibStub
@@ -323,7 +323,10 @@ local function GetLocalPvPSummary()
 
 	local hk = nil
 	if type(GetPVPLifetimeStats) == "function" then
-		hk = tonumber(select(1, GetPVPLifetimeStats()))
+		local ok, a = pcall(GetPVPLifetimeStats)
+		if ok then
+			hk = tonumber(a)
+		end
 	end
 	if hk and hk > 0 then
 		parts[#parts + 1] = string.format("HK %d", hk)
@@ -331,7 +334,10 @@ local function GetLocalPvPSummary()
 
 	local honorLevel = nil
 	if type(C_PvP) == "table" and type(C_PvP.GetHonorLevel) == "function" then
-		honorLevel = tonumber(C_PvP.GetHonorLevel())
+		local ok, v = pcall(C_PvP.GetHonorLevel)
+		if ok then
+			honorLevel = tonumber(v)
+		end
 	end
 	if honorLevel and honorLevel > 0 then
 		parts[#parts + 1] = string.format("Honor %d", honorLevel)

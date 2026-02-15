@@ -25,6 +25,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] Permissions-UI stabilisiert: Tab-Rendering auf `Fill`-Layout verankert, gueltige Tab-Selektion erzwungen und Tab-Inhalt ueber `SelectTab`/Callback initialisiert; Scroll-Container im Tab-Content auf `List` umgestellt, damit Inhalte nicht gequetscht dargestellt werden (`GMS/Core/Permissions.lua`).
 - [x] Logs-UI Initial-Layout stabilisiert: erste Render-Pass nutzt jetzt zusaetzlich Root-Breite als Fallback und fuehrt einen verzoegerten Reflow/Re-Render nach dem Seitenaufbau aus, damit die Spaltenbreiten bereits ohne manuelles Resize korrekt sind (`GMS/Core/Logs.lua`).
 - [x] CharInfo-Datenprofil erweitert: Felder fuer Mythic+, Raidstatus, Equipment, Talente und PvP hinzugefuegt; bei Context-GUIDs werden vorhandene Guild-Sync-Records (`roster_meta`, `EQUIPMENT_V1`, `MYTHICPLUS_V1`, `RAIDS_V1`) priorisiert ausgewertet (`GMS/Modules/CharInfo.lua`).
+- [x] CharInfo-PvP-API gehaertet: `GetPVPLifetimeStats()` und `C_PvP.GetHonorLevel()` laufen jetzt abgesichert per `pcall`, damit der Seitenaufbau nicht mehr mit `bad argument` fehlschlaegt (`GMS/Modules/CharInfo.lua`).
 
 ### Rules/Infra
 - [ ] (leer)
