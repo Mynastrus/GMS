@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.0.22",
+	VERSION      = "1.0.23",
 }
 
 local LibStub = LibStub
@@ -134,6 +134,8 @@ Roster._nameCacheCount = Roster._nameCacheCount or 0
 Roster._memberMetaCache = Roster._memberMetaCache or {}
 Roster._commInited = Roster._commInited or false
 Roster._commTicker = Roster._commTicker or nil
+Roster._lastMetaHeartbeat = Roster._lastMetaHeartbeat or 0
+Roster._selfRosterOnline = Roster._selfRosterOnline or false
 
 -- ###########################################################################
 -- #	NAME NORMALIZATION
@@ -682,6 +684,8 @@ function Roster:SetMemberGmsVersion(guid, version, seenAt)
 	return self:SetMemberMeta(guid, { version = v }, seenAt)
 end
 
+local BuildRaidStatusFromRaidsStore
+
 local function BuildRaidStatusFromRaidsModule()
 	local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true))
 	if not raids or type(raids.GetAllRaids) ~= "function" then
@@ -689,6 +693,11 @@ local function BuildRaidStatusFromRaidsModule()
 	end
 
 	local all = raids:GetAllRaids()
+	if type(all) ~= "table" then return "-" end
+	return BuildRaidStatusFromRaidsStore(all)
+end
+
+BuildRaidStatusFromRaidsStore = function(all)
 	if type(all) ~= "table" then return "-" end
 
 	local bestDiff = -1
@@ -712,15 +721,37 @@ local function BuildRaidStatusFromRaidsModule()
 	return bestShort
 end
 
+local function BuildItemLevelFromEquipmentSnapshot(snapshot)
+	if type(snapshot) ~= "table" or type(snapshot.slots) ~= "table" then return nil end
+	local total = 0
+	local count = 0
+	for _, item in pairs(snapshot.slots) do
+		if type(item) == "table" then
+			local ilvl = tonumber(item.itemLevel)
+			if ilvl and ilvl > 0 then
+				total = total + ilvl
+				count = count + 1
+			end
+		end
+	end
+	if count <= 0 then return nil end
+	return total / count
+end
+
 local function CollectLocalMetaPayload()
 	local version = tostring((GMS and GMS.VERSION) or "")
-	local ilvl = nil
-	if type(GetAverageItemLevel) == "function" then
+	local ilvl, mplus = nil, nil
+	local raid = "-"
+
+	local equip = GMS and GMS:GetModule("Equipment", true)
+	if equip and type(equip._options) == "table" and type(equip._options.equipment) == "table" then
+		ilvl = BuildItemLevelFromEquipmentSnapshot(equip._options.equipment.snapshot)
+	end
+	if not ilvl and type(GetAverageItemLevel) == "function" then
 		local _, equipped = GetAverageItemLevel()
 		ilvl = tonumber(equipped)
 	end
 
-	local mplus = nil
 	local mythic = GMS and GMS:GetModule("MythicPlus", true)
 	if mythic and type(mythic._options) == "table" then
 		mplus = tonumber(mythic._options.score)
@@ -732,15 +763,27 @@ local function CollectLocalMetaPayload()
 		end
 	end
 
+	local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true))
+	if raids and type(raids._options) == "table" and type(raids._options.raids) == "table" then
+		raid = BuildRaidStatusFromRaidsStore(raids._options.raids)
+	else
+		raid = BuildRaidStatusFromRaidsModule()
+	end
+
 	return {
 		version = (version ~= "" and version) or nil,
 		ilvl = ilvl,
 		mplus = mplus,
-		raid = BuildRaidStatusFromRaidsModule(),
+		raid = raid,
 	}
 end
 
-function Roster:BroadcastMetaHeartbeat()
+function Roster:BroadcastMetaHeartbeat(force)
+	local nowTs = (GetTime and GetTime()) or 0
+	if not force and (nowTs - (self._lastMetaHeartbeat or 0)) < 10 then
+		return false
+	end
+
 	local comm = GMS and GMS.Comm
 	if not comm or type(comm.SendData) ~= "function" then return end
 
@@ -771,6 +814,9 @@ function Roster:BroadcastMetaHeartbeat()
 		raid = payload.raid,
 		ts = (GetTime and GetTime()) or 0,
 	}, "BULK", "GUILD")
+
+	self._lastMetaHeartbeat = nowTs
+	return true
 end
 
 function Roster:InitCommMetaSync()
@@ -798,6 +844,12 @@ function Roster:InitCommMetaSync()
 	end)
 
 	if type(comm.RegisterRecordListener) == "function" then
+		local function RefreshRosterIfVisible()
+			if GMS.UI and GMS.UI._page == METADATA.INTERN_NAME and Roster._lastListParent then
+				Roster:API_RefreshRosterView()
+			end
+		end
+
 		comm:RegisterRecordListener("roster_meta", function(record)
 			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
 			local payload = record.payload
@@ -808,9 +860,94 @@ function Roster:InitCommMetaSync()
 				mplus = payload.mplus,
 				raid = payload.raid,
 			}, record.updatedAt or ((GetTime and GetTime()) or 0)) then
-				if GMS.UI and GMS.UI._page == METADATA.INTERN_NAME and Roster._lastListParent then
-					Roster:API_RefreshRosterView()
+				RefreshRosterIfVisible()
+			end
+		end)
+
+		comm:RegisterRecordListener("EQUIPMENT_V1", function(record)
+			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
+			local payload = record.payload
+			if type(payload) ~= "table" or type(payload.snapshot) ~= "table" then return end
+			local ilvl = BuildItemLevelFromEquipmentSnapshot(payload.snapshot)
+			if ilvl and Roster:SetMemberMeta(record.originGUID, {
+				ilvl = ilvl,
+			}, record.updatedAt or ((GetTime and GetTime()) or 0)) then
+				RefreshRosterIfVisible()
+			end
+		end)
+
+		comm:RegisterRecordListener("MYTHICPLUS_V1", function(record)
+			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
+			local payload = record.payload
+			if type(payload) ~= "table" then return end
+			local mplus = tonumber(payload.score)
+			if mplus and Roster:SetMemberMeta(record.originGUID, {
+				mplus = mplus,
+			}, record.updatedAt or ((GetTime and GetTime()) or 0)) then
+				RefreshRosterIfVisible()
+			end
+		end)
+
+		comm:RegisterRecordListener("RAIDS_V1", function(record)
+			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
+			local payload = record.payload
+			if type(payload) ~= "table" or type(payload.raids) ~= "table" then return end
+			local raid = BuildRaidStatusFromRaidsStore(payload.raids)
+			if raid ~= "" and raid ~= "-" and Roster:SetMemberMeta(record.originGUID, {
+				raid = raid,
+			}, record.updatedAt or ((GetTime and GetTime()) or 0)) then
+				RefreshRosterIfVisible()
+			end
+		end)
+	end
+
+	if type(comm.GetRecordsByDomain) == "function" then
+		local function HydrateDomain(domain, fn)
+			local records = comm:GetRecordsByDomain(domain)
+			if type(records) ~= "table" then return end
+			for i = 1, #records do
+				local rec = records[i]
+				if type(rec) == "table" then
+					pcall(fn, rec)
 				end
+			end
+		end
+
+		HydrateDomain("roster_meta", function(record)
+			local payload = record.payload
+			if type(payload) ~= "table" then return end
+			Roster:SetMemberMeta(record.originGUID, {
+				version = payload.version,
+				ilvl = payload.ilvl,
+				mplus = payload.mplus,
+				raid = payload.raid,
+			}, record.updatedAt or ((GetTime and GetTime()) or 0))
+		end)
+
+		HydrateDomain("EQUIPMENT_V1", function(record)
+			local payload = record.payload
+			if type(payload) ~= "table" or type(payload.snapshot) ~= "table" then return end
+			local ilvl = BuildItemLevelFromEquipmentSnapshot(payload.snapshot)
+			if ilvl then
+				Roster:SetMemberMeta(record.originGUID, { ilvl = ilvl }, record.updatedAt or ((GetTime and GetTime()) or 0))
+			end
+		end)
+
+		HydrateDomain("MYTHICPLUS_V1", function(record)
+			local payload = record.payload
+			if type(payload) ~= "table" then return end
+			local mplus = tonumber(payload.score)
+			if mplus then
+				Roster:SetMemberMeta(record.originGUID, { mplus = mplus }, record.updatedAt or ((GetTime and GetTime()) or 0))
+			end
+		end)
+
+		HydrateDomain("RAIDS_V1", function(record)
+			local payload = record.payload
+			if type(payload) ~= "table" or type(payload.raids) ~= "table" then return end
+			local raid = BuildRaidStatusFromRaidsStore(payload.raids)
+			if raid ~= "" and raid ~= "-" then
+				Roster:SetMemberMeta(record.originGUID, { raid = raid }, record.updatedAt or ((GetTime and GetTime()) or 0))
 			end
 		end)
 	end
@@ -1762,6 +1899,25 @@ end
 -- ###########################################################################
 
 function Roster:OnGuildRosterUpdate(canScan)
+	local selfGuid = (type(UnitGUID) == "function") and UnitGUID("player") or nil
+	if type(selfGuid) == "string" and selfGuid ~= "" and type(GetNumGuildMembers) == "function" and type(GetGuildRosterInfo) == "function" then
+		local total = tonumber(GetNumGuildMembers() or 0) or 0
+		local foundOnline = false
+		for i = 1, total do
+			local _, _, _, _, _, _, _, _, online, _, _, _, _, _, _, _, guid = GetGuildRosterInfo(i)
+			if guid == selfGuid then
+				foundOnline = (online == true)
+				break
+			end
+		end
+		if foundOnline and not self._selfRosterOnline then
+			self._selfRosterOnline = true
+			self:BroadcastMetaHeartbeat(true)
+		elseif not foundOnline then
+			self._selfRosterOnline = false
+		end
+	end
+
 	-- Skip if UI is not on Roster page
 	if not GMS.UI or GMS.UI._page ~= "ROSTER" then return end
 	if not self._lastListParent then return end
@@ -2179,6 +2335,9 @@ function Roster:OnEnable()
 
 	-- Register for live updates
 	self:RegisterEvent("GUILD_ROSTER_UPDATE", "OnGuildRosterUpdate")
+	self:RegisterEvent("PLAYER_LOGIN", "OnPlayerLogin")
+	self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnPlayerEnteringWorld")
+	self:RegisterEvent("PLAYER_GUILD_UPDATE", "OnPlayerGuildUpdate")
 
 	-- Listen for config changes to sync _options and update view
 	self:RegisterMessage("GMS_CONFIG_CHANGED", function(_, targetKey, key, value)
@@ -2198,6 +2357,7 @@ function Roster:OnEnable()
 
 	if self._pageRegistered and self._dockRegistered then
 		GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
+		self:BroadcastMetaHeartbeat(true)
 		return
 	end
 
@@ -2215,6 +2375,7 @@ function Roster:OnEnable()
 			frame:SetScript("OnEvent", nil)
 			Roster._integrateWaitFrame = nil
 			GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
+			Roster:BroadcastMetaHeartbeat(true)
 		end
 	end)
 end
@@ -2231,6 +2392,30 @@ function Roster:OnDisable()
 	self._commTicker = nil
 	self._commInited = false
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
+end
+
+function Roster:OnPlayerLogin()
+	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+		C_Timer.After(2.0, function()
+			Roster:BroadcastMetaHeartbeat(true)
+		end)
+	else
+		self:BroadcastMetaHeartbeat(true)
+	end
+end
+
+function Roster:OnPlayerEnteringWorld()
+	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+		C_Timer.After(1.0, function()
+			Roster:BroadcastMetaHeartbeat(false)
+		end)
+	else
+		self:BroadcastMetaHeartbeat(false)
+	end
+end
+
+function Roster:OnPlayerGuildUpdate()
+	self:BroadcastMetaHeartbeat(true)
 end
 
 -- ---------------------------------------------------------------------------
