@@ -170,8 +170,10 @@ local function HardResetAllSavedVariablesNoReload(self)
 	end
 
 	if type(_G.GMS_Guild_DB) == "table" then wipe(_G.GMS_Guild_DB) end
-	if type(_G.GMS_UIDB) == "table" then wipe(_G.GMS_UIDB) end
-	if type(_G.GMS_Changelog_DB) == "table" then wipe(_G.GMS_Changelog_DB) end
+	local uiDB = rawget(_G, "GMS_UIDB")
+	if type(uiDB) == "table" then wipe(uiDB) end
+	local changelogDB = rawget(_G, "GMS_Changelog_DB")
+	if type(changelogDB) == "table" then wipe(changelogDB) end
 end
 
 local function ApplyOneTimeReleaseResetIfNeeded(self)
@@ -518,8 +520,10 @@ function GMS:Database_ResetAll()
 	end
 
 	if type(_G.GMS_Guild_DB) == "table" then wipe(_G.GMS_Guild_DB) end
-	if type(_G.GMS_UIDB) == "table" then wipe(_G.GMS_UIDB) end
-	if type(_G.GMS_Changelog_DB) == "table" then wipe(_G.GMS_Changelog_DB) end
+	local uiDB = rawget(_G, "GMS_UIDB")
+	if type(uiDB) == "table" then wipe(uiDB) end
+	local changelogDB = rawget(_G, "GMS_Changelog_DB")
+	if type(changelogDB) == "table" then wipe(changelogDB) end
 
 	LOCAL_LOG("INFO", "All databases reset to defaults")
 

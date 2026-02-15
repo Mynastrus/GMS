@@ -15,13 +15,15 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 ## Unreleased
 
 ### Added
-- [ ] (leer)
+- [x] Neuer Slash-Subcommand für Hard-Reset: `/gms dbwipe` (Alias: `dbreset`, `resetdb`, `wipe`).
 
 ### Changed
-- [ ] (leer)
+- [x] `Database_ResetAll` erweitert: leert jetzt zusätzlich `GMS_UIDB` und `GMS_Changelog_DB` für wirklich sauberen Reset.
+- [x] One-Time-Release-Reset in `Core/Database.lua` ergänzt (versionsgesteuert über `ONE_TIME_RESET_TARGET_VERSION`, aktuell `1.4.6`).
+- [x] One-Time-Reset hinterlegt Marker in `GMS_DB.global` (`oneTimeHardResetAppliedVersion`, `oneTimeHardResetAppliedAt`) zur sicheren Einmal-Ausführung.
 
 ### Fixed
-- [ ] (leer)
+- [x] Lua-Diagnostics (`undefined-field`) in `Core/Database.lua` beseitigt, indem `_G`-Zugriffe auf optionale SVs via `rawget(_G, "...")` erfolgen.
 
 ### Rules/Infra
 - [ ] (leer)
