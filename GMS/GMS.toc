@@ -59,6 +59,15 @@ Core\Core.lua
 Locales\Locale.lua
 Locales\enUS.lua
 Locales\deDE.lua
+Locales\frFR.lua
+Locales\esES.lua
+Locales\itIT.lua
+Locales\ptBR.lua
+Locales\ruRU.lua
+Locales\koKR.lua
+Locales\zhCN.lua
+Locales\zhTW.lua
+Locales\FallbackLocales.lua
 Core\ModuleStates.lua
 Core\Database.lua
 Core\Permissions.lua

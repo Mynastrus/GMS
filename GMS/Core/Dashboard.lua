@@ -128,7 +128,7 @@ local function RenderDashboard(root, id, isCached)
 	local lblInfo = AceGUI:Create("Label")
 	lblInfo:SetFullWidth(true)
 	lblInfo:SetText(string.format(
-		"Willkommen bei |cff03A9F4GMS – Guild Management Suite|r.\n" ..
+		"Willkommen bei |cff03A9F4GMS – Guild Management System|r.\n" ..
 		"Version: |cffffcc00%s|r\n\n" ..
 		"Dieses Dashboard gibt eine Übersicht über alle aktiven Komponenten des Systems.",
 		GMS.VERSION or "?.?.?"

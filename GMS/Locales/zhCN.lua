@@ -1,0 +1,89 @@
+-- ============================================================================
+--	GMS/Locales/zhCN.lua
+--	Chinese (Simplified) locale
+-- ============================================================================
+
+local LibStub = LibStub
+if not LibStub then return end
+
+local AceAddon = LibStub("AceAddon-3.0", true)
+if not AceAddon then return end
+
+local GMS = AceAddon:GetAddon("GMS", true)
+if not GMS then return end
+
+if type(GMS.RegisterLocale) ~= "function" then return end
+
+GMS:RegisterLocale("zhCN", {
+	CORE_STARTUP_LOADED = "插件已加载: Guild Management System v%s",
+	CORE_STARTUP_HINT = "使用 %s 打开主窗口，使用 %s 查看帮助。",
+
+	SLASH_DISPLAY_NAME = "聊天输入",
+	SLASH_HELP_USAGE = "用法: /gms <subcommand> [args]",
+	SLASH_HELP_EXAMPLE = "示例: /gms help",
+	SLASH_HELP_NONE = "没有已注册的子命令。",
+	SLASH_UNKNOWN_SUBCOMMAND = "未知子命令: %s",
+	SLASH_HELP_RELOAD = "重载界面。",
+
+	UI_STATUS_READY = "状态: 就绪",
+	UI_HEADER_SUB_VERSION = "版本: |cffCCCCCC%s|r",
+	UI_HEADER_SUB_ACTIVE = "UI 扩展已启用",
+	UI_FALLBACK_TITLE = "|cff03A9F4GMS|r - UI 已加载。",
+	UI_FALLBACK_HINT_PAGES_INACTIVE = "页面系统未启用（或已移除）。",
+	UI_RESET_WINDOW = "重置窗口（位置/大小）",
+	UI_FALLBACK_HINT_NAV_MISSING = "Navigate() 已启用，但缺少 PAGES 区域。",
+	UI_FALLBACK_HINT_UI_PAGES_MISSING = "缺少 UI_Pages 扩展。",
+	UI_CMD_OPEN_HELP = "打开 GMS UI (/gms ui [page])",
+
+	LOGS_HEADER_TITLE = "日志控制台",
+	LOGS_LEVELS = "级别:",
+	LOGS_SELECT_FMT = "选择 (%d/5)",
+	LOGS_SELECT_ALL = "全选",
+	LOGS_SELECT_NONE = "全不选",
+	LOGS_REFRESH = "刷新",
+	LOGS_CLEAR = "清空",
+	LOGS_COPY = "复制 (2000)",
+	LOGS_DOCK_TOOLTIP = "打开日志",
+	LOGS_SLASH_HELP = "/gms logs - 打开日志 UI",
+	LOGS_SUB_FALLBACK_DESC = "打开日志 UI",
+
+	ROSTER_SEARCH = "搜索:",
+	ROSTER_SHOW_OFFLINE = "显示离线成员",
+	ROSTER_EMPTY = "未找到公会成员。",
+	ROSTER_STATUS_SEARCH = "|cffb8b8b8Roster:|r 显示 %d / %d (搜索: %s)",
+	ROSTER_STATUS_FILTERED = "|cffb8b8b8Roster:|r 显示 %d / %d",
+	ROSTER_STATUS_TOTAL = "|cffb8b8b8Roster:|r %d 名成员",
+	ROSTER_DOCK_TOOLTIP = "打开成员页",
+	ROSTER_CTX_WHISPER = "密语",
+	ROSTER_CTX_COPY_NAME = "复制名字（含服务器）",
+	ROSTER_CTX_INVITE = "邀请进队伍",
+
+	GA_PAGE_TITLE = "公会日志",
+	GA_HEADER_TITLE = "公会日志",
+	GA_HEADER_SUB = "在独立模块日志中跟踪公会成员变动。",
+	GA_CHAT_ECHO = "在聊天中输出新条目",
+	GA_REFRESH = "刷新",
+	GA_CLEAR = "清空",
+	GA_EMPTY = "暂无公会活动记录。",
+	GA_STATUS_FMT = "公会日志: %d 条记录",
+	GA_BASELINE = "已捕获初始公会快照（%d 名成员）。",
+	GA_DOCK_TOOLTIP = "打开公会活动日志",
+	GA_SLASH_HELP = "/gms guildlog - 打开公会活动日志",
+
+	GA_JOIN = "%s 加入了公会。",
+	GA_REJOIN = "%s 重新加入了公会。",
+	GA_LEAVE = "%s 离开了公会。",
+	GA_PROMOTE = "%s 被提升 (%s -> %s)。",
+	GA_DEMOTE = "%s 被降级 (%s -> %s)。",
+	GA_NAME_CHANGED = "%s 将角色名改为 %s。",
+	GA_REALM_CHANGED = "%s 将服务器从 %s 改为 %s。",
+	GA_FACTION_CHANGED = "%s 将阵营从 %s 改为 %s。",
+	GA_RACE_CHANGED = "%s 将种族从 %s 改为 %s。",
+	GA_LEVEL_CHANGED = "%s 的等级从 %d 变为 %d。",
+	GA_ONLINE = "%s 现在在线。",
+	GA_OFFLINE = "%s 已离线。",
+	GA_NOTE_CHANGED = "%s 更新了公开备注。",
+	GA_OFFICER_NOTE_CHANGED = "%s 更新了官员备注。",
+	GA_NOTE_CHANGED_DETAIL = "%s 更新了公开备注 (%s -> %s)。",
+	GA_OFFICER_NOTE_CHANGED_DETAIL = "%s 更新了官员备注 (%s -> %s)。",
+})
