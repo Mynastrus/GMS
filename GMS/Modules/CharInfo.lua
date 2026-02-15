@@ -39,6 +39,7 @@ local UnitClass                  = UnitClass
 local UnitRace                   = UnitRace
 local UnitLevel                  = UnitLevel
 local GetGuildInfo               = GetGuildInfo
+local UnitFactionGroup           = UnitFactionGroup
 local GetSpecialization          = GetSpecialization
 local GetSpecializationInfo      = GetSpecializationInfo
 local GetAverageItemLevel        = GetAverageItemLevel
@@ -109,6 +110,7 @@ CHARINFO._integrated     = CHARINFO._integrated or false
 CHARINFO._ticker         = CHARINFO._ticker or nil
 CHARINFO._uiDataTicker   = CHARINFO._uiDataTicker or nil
 CHARINFO._uiDataLastSig  = CHARINFO._uiDataLastSig or nil
+CHARINFO._resizeRefreshPending = CHARINFO._resizeRefreshPending or false
 
 ---@class GMSTickerHandle
 ---@field Cancel fun(self: GMSTickerHandle)
@@ -164,7 +166,17 @@ end
 
 local function OpenSelf()
 	local ui = UIRef()
-	if ui and type(ui.Open) == "function" then
+	if not ui then return false end
+
+	-- Avoid forcing ApplyWindowState() while already open:
+	-- use Navigate for in-place refresh to preserve current resize state.
+	local isShown = ui._frame and type(ui._frame.IsShown) == "function" and ui._frame:IsShown()
+	if isShown and ui._page == "CHARINFO" and type(ui.Navigate) == "function" then
+		ui:Navigate("CHARINFO")
+		return true
+	end
+
+	if type(ui.Open) == "function" then
 		ui:Open("CHARINFO")
 		return true
 	end
@@ -509,6 +521,32 @@ local function GetRosterMemberByGuid(guid)
 	return nil
 end
 
+local function GetCharScopedModuleBucket(guid, moduleKey)
+	if not GMS or not GMS.db or type(GMS.db.global) ~= "table" then
+		return nil
+	end
+	local chars = GMS.db.global.characters
+	if type(chars) ~= "table" then
+		return nil
+	end
+	local g = tostring(guid or "")
+	if g == "" and type(GMS.GetCharacterGUID) == "function" then
+		g = tostring(GMS:GetCharacterGUID() or "")
+	end
+	if g == "" then
+		return nil
+	end
+	local c = chars[g]
+	if type(c) ~= "table" then
+		return nil
+	end
+	local mod = c[tostring(moduleKey or "")]
+	if type(mod) ~= "table" then
+		return nil
+	end
+	return mod
+end
+
 local function MergeUniqueNames(dest, source)
 	if type(dest) ~= "table" or type(source) ~= "table" then return end
 	local seen = {}
@@ -594,7 +632,9 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			name = selectedName,
 			guid = selectedGuid ~= "" and selectedGuid or "-",
 			class = tostring((player and player.class) or "-"),
+			classFile = tostring((player and player.classFile) or ""),
 			race = tostring((player and player.race) or "-"),
+			faction = tostring((UnitFactionGroup and UnitFactionGroup("player")) or "-"),
 			level = tostring((player and player.level) or "-"),
 			spec = tostring((player and player.spec) or "-"),
 			guild = tostring((player and player.guild) or "-"),
@@ -612,7 +652,9 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		data.general.name = tostring((player and player.name_full) or "-")
 		data.general.guid = playerGuid ~= "" and playerGuid or "-"
 		data.general.class = tostring((player and player.class) or "-")
+		data.general.classFile = tostring((player and player.classFile) or "")
 		data.general.race = tostring((player and player.race) or "-")
+		data.general.faction = tostring((UnitFactionGroup and UnitFactionGroup("player")) or "-")
 		data.general.level = tostring((player and player.level) or "-")
 		data.general.spec = tostring((player and player.spec) or "-")
 		data.general.guild = tostring((player and player.guild) or "-")
@@ -636,6 +678,20 @@ local function BuildCharData(player, ctxGuid, ctxName)
 
 		local equip = GMS and GMS:GetModule("Equipment", true) or nil
 		local eqSnapshot = equip and equip._options and equip._options.equipment and equip._options.equipment.snapshot or nil
+		if type(eqSnapshot) ~= "table" then
+			local eqBucket = GetCharScopedModuleBucket(playerGuid, "EQUIPMENT")
+			if type(eqBucket) == "table" and type(eqBucket.equipment) == "table" and type(eqBucket.equipment.snapshot) == "table" then
+				eqSnapshot = eqBucket.equipment.snapshot
+				data.equipment.source = "Saved character DB"
+			end
+		end
+		if type(eqSnapshot) ~= "table" then
+			local recEquipLocal = GetLatestDomainRecordForGuid("EQUIPMENT_V1", playerGuid)
+			if recEquipLocal and type(recEquipLocal.payload) == "table" and type(recEquipLocal.payload.snapshot) == "table" then
+				eqSnapshot = recEquipLocal.payload.snapshot
+				data.equipment.source = "Synced EQUIPMENT_V1"
+			end
+		end
 		local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(eqSnapshot)
 		if (not ilvl or ilvl <= 0) and type(GetAverageItemLevel) == "function" then
 			local _, equipped = GetAverageItemLevel()
@@ -645,7 +701,9 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		data.equipment.ilvl = ilvl
 		data.equipment.slots = slots
 		data.equipment.hasData = (ilvl and ilvl > 0) or (#rows > 0)
-		data.equipment.source = "Local module data"
+		if data.equipment.source == "-" then
+			data.equipment.source = "Local module data"
+		end
 
 		local loadout = GetTalentLoadoutName()
 		local specText = tostring((player and player.spec) or "-")
@@ -665,6 +723,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		if type(member) == "table" then
 			data.general.name = tostring(member.name_full or member.name or selectedName)
 			data.general.class = tostring(member.class or "-")
+			data.general.classFile = tostring(member.classFileName or "")
 			data.general.race = tostring(member.race or "-")
 			data.general.level = tostring(member.level or "-")
 			data.general.spec = tostring(member.spec or "-")
@@ -837,6 +896,50 @@ local function AddValueLine(parent, leftText, rightText)
 	row:AddChild(right)
 end
 
+local function GetClassIconCoords(classFile)
+	---@diagnostic disable-next-line: undefined-global
+	local coords = (type(CLASS_ICON_TCOORDS) == "table" and CLASS_ICON_TCOORDS[tostring(classFile or "")]) or nil
+	if type(coords) == "table" then
+		return coords[1], coords[2], coords[3], coords[4]
+	end
+	return 0, 1, 0, 1
+end
+
+local function AddHeaderMetaRow(parent, colWidth, lk, lv, rk, rv)
+	local row = AceGUI:Create("SimpleGroup")
+	row:SetFullWidth(true)
+	row:SetLayout("Flow")
+	parent:AddChild(row)
+
+	local keyW = 56
+	local valW = math.floor((colWidth - (keyW * 2) - 8) / 2)
+	if valW < 90 then valW = 90 end
+
+	local lKey = AceGUI:Create("Label")
+	lKey:SetWidth(keyW)
+	lKey:SetText("|cff9d9d9d" .. tostring(lk or "-") .. "|r")
+	if lKey.label then lKey.label:SetFontObject(GameFontNormalSmallOutline) end
+	row:AddChild(lKey)
+
+	local lVal = AceGUI:Create("Label")
+	lVal:SetWidth(valW)
+	lVal:SetText("|cffffffff" .. tostring(lv or "-") .. "|r")
+	if lVal.label then lVal.label:SetFontObject(GameFontNormalSmallOutline) end
+	row:AddChild(lVal)
+
+	local rKey = AceGUI:Create("Label")
+	rKey:SetWidth(keyW)
+	rKey:SetText("|cff9d9d9d" .. tostring(rk or "-") .. "|r")
+	if rKey.label then rKey.label:SetFontObject(GameFontNormalSmallOutline) end
+	row:AddChild(rKey)
+
+	local rVal = AceGUI:Create("Label")
+	rVal:SetWidth(valW)
+	rVal:SetText("|cffffffff" .. tostring(rv or "-") .. "|r")
+	if rVal.label then rVal.label:SetFontObject(GameFontNormalSmallOutline) end
+	row:AddChild(rVal)
+end
+
 local DEFAULT_CARD_ORDER = { "MYTHIC", "EQUIPMENT", "RAIDS", "OVERVIEW", "ACCOUNT", "TALENTS", "PVP" }
 
 local function ResolveCardOrder(opts)
@@ -961,6 +1064,40 @@ function CHARINFO:StartUIDataTicker(ctxState)
 	end)
 end
 
+local function EnsureResizeHook(root)
+	if not root or not root.frame or type(root.frame.HookScript) ~= "function" then
+		return
+	end
+	if root.frame._gmsCharInfoResizeHooked then
+		return
+	end
+
+	root.frame._gmsCharInfoResizeHooked = true
+	root.frame:HookScript("OnSizeChanged", function()
+		if CHARINFO._resizeRefreshPending then
+			return
+		end
+		CHARINFO._resizeRefreshPending = true
+
+		if C_Timer and type(C_Timer.After) == "function" then
+			C_Timer.After(0.12, function()
+				CHARINFO._resizeRefreshPending = false
+				local ui = UIRef()
+				if not ui or ui._page ~= "CHARINFO" then
+					return
+				end
+				OpenSelf()
+			end)
+		else
+			CHARINFO._resizeRefreshPending = false
+			local ui = UIRef()
+			if ui and ui._page == "CHARINFO" then
+				OpenSelf()
+			end
+		end
+	end)
+end
+
 -- ###########################################################################
 -- #	UI PAGE
 -- ###########################################################################
@@ -982,22 +1119,36 @@ function CHARINFO:TryRegisterPage()
 		local ctxGuid = ctx and ctx.guid or nil
 		local ctxFrom = ctx and (ctx.from or ctx.source) or nil
 
-		if ui2 and type(ui2.Header_BuildIconText) == "function" then
-			ui2:Header_BuildIconText({
-				icon = ICON,
-				text = "|cff03A9F4" .. METADATA.DISPLAY_NAME .. "|r",
-				subtext = ctxName and ("Context: |cffCCCCCC" .. tostring(ctxName) .. "|r") or "Context: -",
-			})
-		end
-		if ui2 and type(ui2.SetStatusText) == "function" then
-			ui2:SetStatusText(ctxName and "CHARINFO: context active" or "CHARINFO: player only")
-		end
-
 		if isCached and root and type(root.ReleaseChildren) == "function" then
 			root:ReleaseChildren()
 		end
 
 		local details = BuildCharData(player, ctxGuid, ctxName)
+		EnsureResizeHook(root)
+
+		local headerName = tostring((details and details.general and details.general.name) or ctxName or player.name_full or "-")
+		local headerClassFile = tostring((details and details.general and details.general.classFile) or player.classFile or "")
+		local headerClassHex = GetClassHex(headerClassFile)
+		local headerColor = tostring(headerClassHex or "FFFFFFFF")
+		if #headerColor == 6 then
+			headerColor = "FF" .. headerColor
+		end
+
+		if ui2 and type(ui2.Header_BuildIconText) == "function" then
+			ui2:Header_BuildIconText({
+				icon = ICON,
+				text = "|cff03A9F4" .. METADATA.DISPLAY_NAME .. "|r",
+				subtext = string.format(
+					"Character: |c%s%s|r  |cff9d9d9dContext:%s|r",
+					headerColor,
+					headerName,
+					details.isContext and (" " .. tostring(ctxFrom or "external")) or " local"
+				),
+			})
+		end
+		if ui2 and type(ui2.SetStatusText) == "function" then
+			ui2:SetStatusText(details.isContext and "CHARINFO: context active" or "CHARINFO: player only")
+		end
 
 		if type(root.SetLayout) == "function" then
 			root:SetLayout("Fill")
@@ -1028,9 +1179,13 @@ function CHARINFO:TryRegisterPage()
 		wrapper:AddChild(header)
 
 		local portrait = AceGUI:Create("Icon")
-		portrait:SetImage(ICON)
+		portrait:SetImage("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
 		portrait:SetImageSize(36, 36)
 		portrait:SetWidth(44)
+		local cl, cr, ct, cb = GetClassIconCoords(details.general.classFile)
+		if portrait.image and type(portrait.image.SetTexCoord) == "function" then
+			portrait.image:SetTexCoord(cl, cr, ct, cb)
+		end
 		header:AddChild(portrait)
 
 		local identity = AceGUI:Create("SimpleGroup")
@@ -1038,22 +1193,29 @@ function CHARINFO:TryRegisterPage()
 		identity:SetWidth(520)
 		header:AddChild(identity)
 
-		local classHex = GetClassHex(player.classFile or "")
+		local classHex = GetClassHex(details.general.classFile or "")
 		local title = AceGUI:Create("Label")
 		title:SetFullWidth(true)
-		title:SetText(string.format("|cff%s%s|r", classHex, tostring(details.general.name or "-")))
+		local colorCode = tostring(classHex or "FFFFFFFF")
+		if #colorCode == 6 then
+			colorCode = "FF" .. colorCode
+		end
+		title:SetText(string.format("|c%s%s|r", colorCode, tostring(details.general.name or "-")))
 		identity:AddChild(title)
 
-		AddMutedLine(identity, string.format(
-			"Level %s   %s   %s   %s   GUID: %s",
-			tostring(details.general.level or "-"),
-			tostring(details.general.race or "-"),
-			tostring(details.general.class or "-"),
-			tostring(details.general.spec or "-"),
-			tostring(details.general.guid or "-")
-		))
-		AddMutedLine(identity, tostring(details.general.guild or "-"))
-		AddMutedLine(identity, "Context source: " .. tostring(ctxFrom or "local"))
+		local metaGrid = AceGUI:Create("SimpleGroup")
+		metaGrid:SetFullWidth(true)
+		metaGrid:SetLayout("List")
+		identity:AddChild(metaGrid)
+		local metaWidth = 500
+		if identity.frame and type(identity.frame.GetWidth) == "function" then
+			local w = tonumber(identity.frame:GetWidth()) or metaWidth
+			if w > 0 then metaWidth = w end
+		end
+		AddHeaderMetaRow(metaGrid, metaWidth, "Level", details.general.level, "Class", details.general.class)
+		AddHeaderMetaRow(metaGrid, metaWidth, "Race", details.general.race, "Spec", details.general.spec)
+		AddHeaderMetaRow(metaGrid, metaWidth, "Faction", details.general.faction, "Guild", details.general.guild)
+		AddHeaderMetaRow(metaGrid, metaWidth, "GUID", details.general.guid, "Source", ctxFrom or "local")
 
 		local actions = AceGUI:Create("SimpleGroup")
 		actions:SetLayout("Flow")
@@ -1315,28 +1477,33 @@ function CHARINFO:TryRegisterPage()
 		for i = 1, #leftPinned do pinned[leftPinned[i]] = true end
 		for i = 1, #rightPinned do pinned[rightPinned[i]] = true end
 
-		local rowCount = (#leftPinned > #rightPinned) and #leftPinned or #rightPinned
-		for i = 1, rowCount do
-			local row = AceGUI:Create("SimpleGroup")
-			row:SetFullWidth(true)
-			row:SetLayout("Flow")
-			contentRow:AddChild(row)
+		local pinnedRow = AceGUI:Create("SimpleGroup")
+		pinnedRow:SetFullWidth(true)
+		pinnedRow:SetLayout("Table")
+		pinnedRow:SetUserData("table", {
+			columns = { colWidth, colWidth },
+			spaceH = 10,
+			alignV = "TOP",
+		})
+		contentRow:AddChild(pinnedRow)
 
-			local leftCol = AceGUI:Create("SimpleGroup")
-			leftCol:SetLayout("List")
-			leftCol:SetWidth(colWidth)
-			row:AddChild(leftCol)
+		local leftStack = AceGUI:Create("SimpleGroup")
+		leftStack:SetLayout("List")
+		leftStack:SetWidth(colWidth)
+		leftStack:SetUserData("cell", { alignV = "TOP" })
+		pinnedRow:AddChild(leftStack)
 
-			local rightCol = AceGUI:Create("SimpleGroup")
-			rightCol:SetLayout("List")
-			rightCol:SetWidth(colWidth)
-			row:AddChild(rightCol)
+		local rightStack = AceGUI:Create("SimpleGroup")
+		rightStack:SetLayout("List")
+		rightStack:SetWidth(colWidth)
+		rightStack:SetUserData("cell", { alignV = "TOP" })
+		pinnedRow:AddChild(rightStack)
 
-			local leftId = leftPinned[i]
-			local rightId = rightPinned[i]
-
-			RenderCardInto(leftCol, leftId)
-			RenderCardInto(rightCol, rightId)
+		for i = 1, #leftPinned do
+			RenderCardInto(leftStack, leftPinned[i])
+		end
+		for i = 1, #rightPinned do
+			RenderCardInto(rightStack, rightPinned[i])
 		end
 
 		-- Remaining cards (not pinned) are rendered as free cards below.

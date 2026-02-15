@@ -25,6 +25,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] CharInfo nutzt jetzt ScrollFrame, dynamische Breiten und Auto-Refresh bei Datenänderungen (Ticker mit Signaturvergleich).
 - [x] Equipment-Liste in CharInfo zeigt anklickbare Itemlinks mit Tooltip (`InteractiveLabel`, `GameTooltip:SetHyperlink`, `HandleModifiedItemClick`).
 - [x] CharInfo-Datenbindung erweitert: klare No-Data-Hinweise, Placeholder für PvP/Talente/Account-Charaktere und vorbereitete `cardOrder`-Basis für spätere individuelle Anordnung.
+- [x] CharInfo-Layout weiter verfeinert: Header-Meta in kompakter 2-Spalten-Darstellung, Top-Alignment der Hauptspalten, resize-stabile Breitenaktualisierung ohne automatisches Zurücksetzen der Fenstergröße, sowie robuster Equipment-Fallback direkt nach Reload.
 
 ### Fixed
 - [x] Lua-Diagnostics (`undefined-field`) in `Core/Database.lua` beseitigt, indem `_G`-Zugriffe auf optionale SVs via `rawget(_G, "...")` erfolgen.
