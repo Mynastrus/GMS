@@ -96,6 +96,24 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.4.3",
+		date = "2026-02-15",
+		title_en = "GuildLog persistence hardening and comm loopback guard",
+		title_de = "GuildLog-Persistenz gehaertet und Comm-Loopback-Schutz",
+		notes_en = {
+			"Hardened GuildLog persistence so roster change events and member history remain intact even when guild-scoped DB binding becomes available late.",
+			"Stabilized settings persistence for GuildLog options (including chat echo) across reloads and module lifecycle transitions.",
+			"Improved GuildLog UI rendering for large datasets by limiting visible rows and rendering in chunks.",
+			"Added comm loopback protection so self-originated packets are ignored and no longer trigger local processing noise.",
+		},
+		notes_de = {
+			"GuildLog-Persistenz gehaertet: Roster-Aenderungen und Member-History bleiben erhalten, auch wenn guild-scoped DB-Binding erst spaet verfuegbar ist.",
+			"Persistenz der GuildLog-Einstellungen (inkl. Chat-Echo) ueber Reloads und Modul-Lebenszyklus stabilisiert.",
+			"GuildLog-UI-Rendering fuer grosse Datenmengen verbessert: sichtbare Zeilen begrenzt und in Chunks aufgebaut.",
+			"Comm-Loopback-Schutz ergaenzt: eigene Pakete werden ignoriert und erzeugen keine lokale Verarbeitungsgeraeusche mehr.",
+		},
+	},
+	{
 		version = "1.4.2",
 		date = "2026-02-15",
 		title_en = "Expanded locale coverage and branding consistency",

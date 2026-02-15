@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "GUILDLOG",
 	SHORT_NAME   = "GuildLog",
 	DISPLAY_NAME = "Guild Log",
-	VERSION      = "1.1.7",
+	VERSION      = "1.1.15",
 }
 
 local LibStub = LibStub
@@ -84,11 +84,20 @@ GuildLog._baselineLogged = GuildLog._baselineLogged or false
 GuildLog._pollTicker = GuildLog._pollTicker or nil
 GuildLog._scanToken = GuildLog._scanToken or 0
 GuildLog._recentEventSigs = GuildLog._recentEventSigs or {}
+GuildLog._pendingPersist = GuildLog._pendingPersist or {
+	chatEcho = false,
+	maxEntries = false,
+	entries = false,
+	memberHistory = false,
+}
 
 local OPTIONS_DEFAULTS = {
 	chatEcho = false,
 	maxEntries = 1000,
 }
+
+local UI_RENDER_LIMIT = 300
+local UI_RENDER_CHUNK_SIZE = 40
 
 local function GetScopedOptions()
 	if type(GMS.InitializeStandardDatabases) == "function" then
@@ -226,6 +235,188 @@ local function ClampMaxEntries(v)
 	return n
 end
 
+local function NewPendingPersistFlags()
+	return {
+		chatEcho = false,
+		maxEntries = false,
+		entries = false,
+		memberHistory = false,
+	}
+end
+
+local function ResetPendingPersist()
+	GuildLog._pendingPersist = NewPendingPersistFlags()
+end
+
+local function EnsurePendingPersist()
+	local p = GuildLog._pendingPersist
+	if type(p) ~= "table" then
+		p = NewPendingPersistFlags()
+		GuildLog._pendingPersist = p
+	end
+	if p.chatEcho ~= true then p.chatEcho = false end
+	if p.maxEntries ~= true then p.maxEntries = false end
+	if p.entries ~= true then p.entries = false end
+	if p.memberHistory ~= true then p.memberHistory = false end
+	return p
+end
+
+local function EntryMergeSignature(e)
+	if type(e) ~= "table" then return "" end
+	local d = type(e.data) == "table" and e.data or nil
+	return table.concat({
+		tostring(e.ts or ""),
+		tostring(e.kind or ""),
+		tostring(e.msg or ""),
+		d and tostring(d.guid or d.memberKey or d.oldName or "") or "",
+		d and tostring(d.newName or d.oldRealm or d.newRealm or "") or "",
+	}, "|")
+end
+
+local function MergeEntries(runtimeEntries, scopedEntries, maxEntries)
+	if type(runtimeEntries) ~= "table" then
+		return type(scopedEntries) == "table" and scopedEntries or {}
+	end
+	if type(scopedEntries) ~= "table" then
+		return runtimeEntries
+	end
+	if runtimeEntries == scopedEntries then
+		return scopedEntries
+	end
+
+	local merged = {}
+	local seen = {}
+	local function append(list)
+		for i = 1, #list do
+			local e = list[i]
+			if type(e) == "table" then
+				local sig = EntryMergeSignature(e)
+				if not seen[sig] then
+					seen[sig] = true
+					merged[#merged + 1] = e
+				end
+			end
+		end
+	end
+
+	append(scopedEntries)
+	append(runtimeEntries)
+
+	table.sort(merged, function(a, b)
+		return (tonumber(a.ts) or 0) < (tonumber(b.ts) or 0)
+	end)
+
+	local limit = ClampMaxEntries(maxEntries)
+	while #merged > limit do
+		table.remove(merged, 1)
+	end
+	return merged
+end
+
+local function CloneMapEntry(src)
+	local out = {}
+	for k, v in pairs(src) do
+		out[k] = v
+	end
+	return out
+end
+
+local function MergeMemberHistory(runtimeHistory, scopedHistory)
+	if type(runtimeHistory) ~= "table" then
+		return type(scopedHistory) == "table" and scopedHistory or {}
+	end
+	if type(scopedHistory) ~= "table" then
+		return runtimeHistory
+	end
+	if runtimeHistory == scopedHistory then
+		return scopedHistory
+	end
+
+	local merged = {}
+	for guid, entry in pairs(scopedHistory) do
+		if type(entry) == "table" then
+			merged[guid] = CloneMapEntry(entry)
+		end
+	end
+
+	for guid, entry in pairs(runtimeHistory) do
+		if type(entry) == "table" then
+			local dest = merged[guid]
+			if type(dest) ~= "table" then
+				merged[guid] = CloneMapEntry(entry)
+			else
+				dest.guid = tostring(entry.guid or dest.guid or guid)
+				if tostring(entry.name or "") ~= "" then
+					dest.name = tostring(entry.name)
+				end
+				dest.everMember = (dest.everMember == true) or (entry.everMember == true)
+				if entry.currentMember ~= nil then
+					dest.currentMember = entry.currentMember == true
+				end
+				local destFirstTracked = tonumber(dest.firstTrackedAt) or 0
+				local srcFirstTracked = tonumber(entry.firstTrackedAt) or 0
+				if destFirstTracked <= 0 or (srcFirstTracked > 0 and srcFirstTracked < destFirstTracked) then
+					dest.firstTrackedAt = srcFirstTracked
+					if tostring(entry.firstTrackedTime or "") ~= "" then
+						dest.firstTrackedTime = tostring(entry.firstTrackedTime)
+					end
+				end
+				local destFirstJoin = tonumber(dest.firstJoinAt) or 0
+				local srcFirstJoin = tonumber(entry.firstJoinAt) or 0
+				if destFirstJoin <= 0 or (srcFirstJoin > 0 and srcFirstJoin < destFirstJoin) then
+					dest.firstJoinAt = srcFirstJoin
+					if tostring(entry.firstJoinTime or "") ~= "" then
+						dest.firstJoinTime = tostring(entry.firstJoinTime)
+					end
+				end
+				dest.lastJoinAt = math.max(tonumber(dest.lastJoinAt) or 0, tonumber(entry.lastJoinAt) or 0)
+				dest.lastLeaveAt = math.max(tonumber(dest.lastLeaveAt) or 0, tonumber(entry.lastLeaveAt) or 0)
+				dest.joinCount = math.max(tonumber(dest.joinCount) or 0, tonumber(entry.joinCount) or 0)
+				dest.leftCount = math.max(tonumber(dest.leftCount) or 0, tonumber(entry.leftCount) or 0)
+				dest.rejoinCount = math.max(tonumber(dest.rejoinCount) or 0, tonumber(entry.rejoinCount) or 0)
+				if tostring(entry.lastJoinTime or "") ~= "" then
+					dest.lastJoinTime = tostring(entry.lastJoinTime)
+				end
+				if tostring(entry.lastLeaveTime or "") ~= "" then
+					dest.lastLeaveTime = tostring(entry.lastLeaveTime)
+				end
+			end
+		end
+	end
+	return merged
+end
+
+local function MergeRuntimeIntoScoped(scoped, runtime)
+	if type(scoped) ~= "table" or type(runtime) ~= "table" then
+		return
+	end
+	local pending = EnsurePendingPersist()
+
+	if pending.entries and type(runtime.entries) == "table" then
+		scoped.entries = MergeEntries(runtime.entries, scoped.entries, runtime.maxEntries or scoped.maxEntries)
+	elseif (type(scoped.entries) ~= "table" or #scoped.entries == 0) and type(runtime.entries) == "table" and #runtime.entries > 0 then
+		scoped.entries = runtime.entries
+	end
+
+	if pending.memberHistory and type(runtime.memberHistory) == "table" then
+		scoped.memberHistory = MergeMemberHistory(runtime.memberHistory, scoped.memberHistory)
+	elseif (type(scoped.memberHistory) ~= "table" or next(scoped.memberHistory) == nil) and type(runtime.memberHistory) == "table" then
+		scoped.memberHistory = runtime.memberHistory
+	end
+
+	if pending.chatEcho and runtime.chatEcho ~= nil then
+		scoped.chatEcho = runtime.chatEcho and true or false
+	elseif scoped.chatEcho == nil and runtime.chatEcho ~= nil then
+		scoped.chatEcho = runtime.chatEcho and true or false
+	end
+
+	if pending.maxEntries and runtime.maxEntries ~= nil then
+		scoped.maxEntries = ClampMaxEntries(runtime.maxEntries)
+	elseif scoped.maxEntries == nil and runtime.maxEntries ~= nil then
+		scoped.maxEntries = ClampMaxEntries(runtime.maxEntries)
+	end
+end
+
 local function EnsureOptions()
 	local current = GuildLog._options
 	local scoped = GetScopedOptions()
@@ -238,18 +429,8 @@ local function EnsureOptions()
 		-- If we started in RAM fallback before guild key was available,
 		-- merge runtime data into the real persistent table once bound.
 		if type(current) == "table" and current ~= opts then
-			if (type(opts.entries) ~= "table" or #opts.entries == 0) and type(current.entries) == "table" and #current.entries > 0 then
-				opts.entries = current.entries
-			end
-			if (type(opts.memberHistory) ~= "table" or next(opts.memberHistory) == nil) and type(current.memberHistory) == "table" then
-				opts.memberHistory = current.memberHistory
-			end
-			if opts.chatEcho == nil and current.chatEcho ~= nil then
-				opts.chatEcho = current.chatEcho and true or false
-			end
-			if opts.maxEntries == nil and current.maxEntries ~= nil then
-				opts.maxEntries = tonumber(current.maxEntries) or opts.maxEntries
-			end
+			MergeRuntimeIntoScoped(opts, current)
+			ResetPendingPersist()
 		end
 	else
 		opts = current or {}
@@ -269,20 +450,73 @@ local function EnsureOptionsCompat()
 	return EnsureOptions()
 end
 
+local function MarkPendingPersist(field)
+	local p = EnsurePendingPersist()
+	if type(field) == "string" and field ~= "" then
+		p[field] = true
+	end
+end
+
 local function SyncOptionsToScoped()
 	local opts = EnsureOptionsCompat()
 	if type(opts) ~= "table" then return opts end
 	local scoped = GetScopedOptions()
 	if type(scoped) ~= "table" then return opts end
 
-	-- Persist current runtime state immediately into the guild-scoped DB table.
-	scoped.chatEcho = opts.chatEcho and true or false
-	scoped.maxEntries = ClampMaxEntries(opts.maxEntries)
-	scoped.entries = type(opts.entries) == "table" and opts.entries or {}
-	scoped.memberHistory = type(opts.memberHistory) == "table" and opts.memberHistory or {}
+	-- If runtime started in RAM fallback and guild-scoped storage becomes available
+	-- later, merge pending runtime mutations explicitly into persistent scoped data.
+	if opts ~= scoped then
+		MergeRuntimeIntoScoped(scoped, opts)
+	end
+
+	if scoped.chatEcho == nil then scoped.chatEcho = false end
+	scoped.maxEntries = ClampMaxEntries(scoped.maxEntries)
+	if type(scoped.entries) ~= "table" then scoped.entries = {} end
+	if type(scoped.memberHistory) ~= "table" then scoped.memberHistory = {} end
+
 	GuildLog._options = scoped
 	GuildLog._optionsBound = true
+	ResetPendingPersist()
 	return scoped
+end
+
+local function GetEffectiveChatEcho()
+	local scoped = GetScopedOptions()
+	if type(scoped) == "table" and scoped.chatEcho ~= nil then
+		return scoped.chatEcho and true or false
+	end
+	local opts = EnsureOptionsCompat()
+	if type(opts) == "table" and opts.chatEcho ~= nil then
+		return opts.chatEcho and true or false
+	end
+	return false
+end
+
+local function GetCurrentGuildKeySafe()
+	if type(GMS.GetGuildStorageKey) == "function" then
+		return tostring(GMS:GetGuildStorageKey() or "")
+	end
+	return ""
+end
+
+local function SetChatEchoPersist(value, sourceTag)
+	local newValue = value and true or false
+	local scoped = GetScopedOptions()
+	if type(scoped) == "table" then
+		scoped.chatEcho = newValue
+		GuildLog._options = scoped
+		GuildLog._optionsBound = true
+	end
+	local opts = EnsureOptionsCompat()
+	if type(opts) == "table" then
+		opts.chatEcho = newValue
+	end
+	if not GuildLog._optionsBound then
+		MarkPendingPersist("chatEcho")
+	end
+	SyncOptionsToScoped()
+	LOCAL_LOG("INFO", "GuildLog chatEcho set", tostring(sourceTag or "unknown"), tostring(newValue), GetCurrentGuildKeySafe())
+	return newValue
 end
 
 local function Entries()
@@ -322,6 +556,10 @@ local function PushEntry(kind, msg, data)
 	local maxEntries = ClampMaxEntries(opts and opts.maxEntries or 1000)
 	while #entries > maxEntries do
 		table.remove(entries, 1)
+	end
+
+	if not GuildLog._optionsBound then
+		MarkPendingPersist("entries")
 	end
 
 	-- Hard persist mirror to avoid any runtime ref ambiguity.
@@ -396,6 +634,41 @@ local function NormalizeName(name)
 	return n
 end
 
+local function NormalizeRealmChain(realm)
+	local r = NormalizeName(realm)
+	if r == "" then return r end
+	if not r:find("%-") then return r end
+
+	local parts = {}
+	for p in r:gmatch("[^%-]+") do
+		parts[#parts + 1] = p
+	end
+	local count = #parts
+	if count < 2 then return r end
+
+	for patternLen = 1, math.floor(count / 2) do
+		if (count % patternLen) == 0 then
+			local repeated = true
+			for i = patternLen + 1, count do
+				local baseIdx = ((i - 1) % patternLen) + 1
+				if parts[i] ~= parts[baseIdx] then
+					repeated = false
+					break
+				end
+			end
+			if repeated then
+				local normalized = {}
+				for i = 1, patternLen do
+					normalized[#normalized + 1] = parts[i]
+				end
+				return table.concat(normalized, "-")
+			end
+		end
+	end
+
+	return r
+end
+
 local function SplitNameRealm(rawName)
 	local full = tostring(rawName or "")
 	local name, realm = full:match("^([^%-]+)%-(.+)$")
@@ -403,7 +676,7 @@ local function SplitNameRealm(rawName)
 		name = full
 		realm = tostring((type(GetRealmName) == "function" and GetRealmName()) or "")
 	end
-	return NormalizeName(name), NormalizeName(realm), NormalizeName(full)
+	return NormalizeName(name), NormalizeRealmChain(realm), NormalizeName(full)
 end
 
 local function GetRosterFactionByIndex(index)
@@ -465,6 +738,9 @@ local function EnsureHistoryEntry(guid, name)
 	if (tonumber(e.firstTrackedAt) or 0) <= 0 then
 		e.firstTrackedAt = (GetTime and GetTime()) or 0
 		e.firstTrackedTime = FormatNow()
+	end
+	if not GuildLog._optionsBound then
+		MarkPendingPersist("memberHistory")
 	end
 	return e
 end
@@ -789,7 +1065,10 @@ function GuildLog:ScanGuildChanges()
 		SeedHistoryFromSnapshot(curr)
 		if not self._baselineLogged then
 			self._baselineLogged = true
-			PushEntry("BASELINE", T("GA_BASELINE", "Initial guild snapshot captured (%d members).", tonumber(GetNumGuildMembers and GetNumGuildMembers() or 0)))
+			local entries = Entries() or {}
+			if #entries == 0 then
+				PushEntry("BASELINE", T("GA_BASELINE", "Initial guild snapshot captured (%d members).", tonumber(GetNumGuildMembers and GetNumGuildMembers() or 0)))
+			end
 		end
 		LOCAL_LOG("DEBUG", "GuildLog baseline snapshot initialized", tostring(#(Entries() or {})))
 		return
@@ -887,20 +1166,22 @@ local function RegisterPage()
 		controls:SetLayout("Flow")
 		controls:SetFullWidth(true)
 		wrapper:AddChild(controls)
+		local updateStatusLine
 
 		local cbChat = AceGUI:Create("CheckBox")
 		cbChat:SetLabel(T("GA_CHAT_ECHO", "Post new entries in chat"))
 		cbChat:SetWidth(260)
+		local applyingChatState = false
 		do
-			local opts = EnsureOptionsCompat()
-			cbChat:SetValue((type(opts) == "table" and opts.chatEcho) == true)
+			applyingChatState = true
+			cbChat:SetValue(GetEffectiveChatEcho())
+			applyingChatState = false
 		end
 		cbChat:SetCallback("OnValueChanged", function(_, _, v)
-			local opts = EnsureOptionsCompat()
-			if type(opts) == "table" then
-				opts.chatEcho = v and true or false
-				SyncOptionsToScoped()
-			end
+			if applyingChatState then return end
+			local newValue = SetChatEchoPersist(v and true or false, "UI")
+			LOCAL_LOG("INFO", "GuildLog chatEcho effective", tostring(GetEffectiveChatEcho()), tostring(newValue))
+			updateStatusLine(#(Entries() or {}))
 		end)
 		controls:AddChild(cbChat)
 
@@ -920,7 +1201,11 @@ local function RegisterPage()
 			local entries = Entries()
 			if type(entries) == "table" then
 				wipe(entries)
+				if not GuildLog._optionsBound then
+					MarkPendingPersist("entries")
+				end
 			end
+			SyncOptionsToScoped()
 			if GuildLog._ui and type(GuildLog._ui.render) == "function" then
 				GuildLog._ui.render()
 			end
@@ -938,7 +1223,7 @@ local function RegisterPage()
 		scroller:SetFullHeight(true)
 		wrapper:AddChild(scroller)
 
-		local function updateStatusLine(entriesCount)
+		updateStatusLine = function(entriesCount)
 			local opts = EnsureOptionsCompat()
 			local guildKey = type(GMS.GetGuildStorageKey) == "function" and tostring(GMS:GetGuildStorageKey() or "-") or "-"
 			local hist = type(opts) == "table" and opts.memberHistory or nil
@@ -946,7 +1231,7 @@ local function RegisterPage()
 			if type(hist) == "table" then
 				for _ in pairs(hist) do histCount = histCount + 1 end
 			end
-			local chatEcho = (type(opts) == "table" and opts.chatEcho) and "|cff00ff00ON|r" or "|cffff4040OFF|r"
+			local chatEcho = GetEffectiveChatEcho() and "|cff00ff00ON|r" or "|cffff4040OFF|r"
 			statusLine:SetText(string.format(
 				"|cffb0b0b0DB:|r %s  |cffb0b0b0Entries:|r %d  |cffb0b0b0History:|r %d  |cffb0b0b0Chat:|r %s",
 				guildKey, tonumber(entriesCount) or 0, histCount, chatEcho
@@ -956,18 +1241,24 @@ local function RegisterPage()
 		local function render()
 			EnsureOptionsCompat()
 			local entries = Entries() or {}
-			local opts = EnsureOptionsCompat() or {}
+			local opts = SyncOptionsToScoped() or EnsureOptionsCompat() or {}
+			applyingChatState = true
+			cbChat:SetValue(GetEffectiveChatEcho())
+			applyingChatState = false
+			GuildLog._uiRefreshToken = GuildLog._uiRefreshToken + 1
+			local token = GuildLog._uiRefreshToken
 			scroller:ReleaseChildren()
 			updateStatusLine(#entries)
 
 			local display = {}
-			for i = 1, #entries do
-				display[i] = entries[i]
+			local startIdx = math.max(1, (#entries - UI_RENDER_LIMIT) + 1)
+			for i = startIdx, #entries do
+				display[#display + 1] = entries[i]
 			end
 
 			-- Fallback: reconstruct readable history rows when legacy installs have
 			-- member history but no persisted activity entries yet.
-			if #display <= 1 and type(opts.memberHistory) == "table" and next(opts.memberHistory) ~= nil then
+			if #display == 0 and type(opts.memberHistory) == "table" and next(opts.memberHistory) ~= nil then
 				local synth = {}
 				for guid, h in pairs(opts.memberHistory) do
 					if type(h) == "table" then
@@ -1002,29 +1293,40 @@ local function RegisterPage()
 				return
 			end
 
-			for i = #display, 1, -1 do
-				local e = display[i]
-				local row = AceGUI:Create("SimpleGroup")
-				row:SetFullWidth(true)
-				row:SetLayout("Flow")
+			local idx = #display
+			local function addChunk()
+				if token ~= GuildLog._uiRefreshToken then return end
+				local added = 0
+				while idx >= 1 and added < UI_RENDER_CHUNK_SIZE do
+					local e = display[idx]
+					local row = AceGUI:Create("SimpleGroup")
+					row:SetFullWidth(true)
+					row:SetLayout("Flow")
 
-				local ts = AceGUI:Create("Label")
-				ts:SetWidth(155)
-				ts:SetText("|cffb0b0b0" .. tostring(e.time or "-") .. "|r")
-				row:AddChild(ts)
+					local ts = AceGUI:Create("Label")
+					ts:SetWidth(155)
+					ts:SetText("|cffb0b0b0" .. tostring(e.time or "-") .. "|r")
+					row:AddChild(ts)
 
-				local kind = AceGUI:Create("Label")
-				kind:SetWidth(110)
-				kind:SetText("|cff03A9F4" .. tostring(e.kind or "INFO") .. "|r")
-				row:AddChild(kind)
+					local kind = AceGUI:Create("Label")
+					kind:SetWidth(110)
+					kind:SetText("|cff03A9F4" .. tostring(e.kind or "INFO") .. "|r")
+					row:AddChild(kind)
 
-				local msg = AceGUI:Create("Label")
-				msg:SetWidth(760)
-				msg:SetText("|cffffffff" .. tostring(e.msg or "") .. "|r")
-				row:AddChild(msg)
+					local msg = AceGUI:Create("Label")
+					msg:SetWidth(760)
+					msg:SetText("|cffffffff" .. tostring(e.msg or "") .. "|r")
+					row:AddChild(msg)
 
-				scroller:AddChild(row)
+					scroller:AddChild(row)
+					idx = idx - 1
+					added = added + 1
+				end
+				if idx >= 1 and type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+					C_Timer.After(0, addChunk)
+				end
 			end
+			addChunk()
 
 			if ui and type(ui.SetStatusText) == "function" then
 				ui:SetStatusText(T("GA_STATUS_FMT", "Guild Activity: %d entries", #display))
@@ -1087,8 +1389,23 @@ function GuildLog:InitializeOptions()
 	SyncOptionsToScoped()
 end
 
+function GuildLog:LogOptionsState(tag)
+	local entries = Entries() or {}
+	LOCAL_LOG(
+		"INFO",
+		"GuildLog options state",
+		tostring(tag or "state"),
+		"v=" .. tostring(METADATA.VERSION),
+		"guildKey=" .. GetCurrentGuildKeySafe(),
+		"chatEcho=" .. tostring(GetEffectiveChatEcho()),
+		"bound=" .. tostring(self._optionsBound),
+		"entries=" .. tostring(#entries)
+	)
+end
+
 function GuildLog:OnEnable()
 	self:InitializeOptions()
+	self:LogOptionsState("OnEnable")
 	self:TryIntegrateUI()
 	RegisterSlash()
 
@@ -1117,6 +1434,24 @@ function GuildLog:OnEnable()
 	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
 		C_Timer.After(1.0, function()
 			GuildLog:InitializeOptions()
+			GuildLog:LogOptionsState("Rebind+1s")
+			if GuildLog._ui and type(GuildLog._ui.render) == "function" then
+				GuildLog._ui.render()
+			end
+		end)
+		C_Timer.After(3.0, function()
+			GuildLog:InitializeOptions()
+			GuildLog:LogOptionsState("Rebind+3s")
+			if GuildLog._ui and type(GuildLog._ui.render) == "function" then
+				GuildLog._ui.render()
+			end
+		end)
+		C_Timer.After(8.0, function()
+			GuildLog:InitializeOptions()
+			GuildLog:LogOptionsState("Rebind+8s")
+			if GuildLog._ui and type(GuildLog._ui.render) == "function" then
+				GuildLog._ui.render()
+			end
 		end)
 	end
 
@@ -1132,6 +1467,8 @@ function GuildLog:OnEnable()
 end
 
 function GuildLog:OnDisable()
+	SyncOptionsToScoped()
+	self:LogOptionsState("OnDisable")
 	self._scanScheduled = false
 	self._scanToken = (tonumber(self._scanToken) or 0) + 1
 	local ticker = self._pollTicker

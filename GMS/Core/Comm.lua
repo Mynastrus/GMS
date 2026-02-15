@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "COMM",
 	SHORT_NAME   = "Comm",
 	DISPLAY_NAME = "Kommunikation",
-	VERSION      = "1.2.0",
+	VERSION      = "1.2.1",
 }
 
 ---@diagnostic disable: undefined-global
@@ -638,6 +638,14 @@ function Comm:OnCommReceive(prefix, msg, channel, sender)
 
 	local subPrefix = packet.pfx
 	local senderGUID = ResolveSenderGUIDFromGuildRoster(sender) or packet.src
+	local playerGUID = (type(UnitGUID) == "function") and UnitGUID("player") or nil
+
+	-- Ignore loopback packets from self to avoid processing local guild broadcasts.
+	if type(playerGUID) == "string" and playerGUID ~= "" then
+		if senderGUID == playerGUID or packet.src == playerGUID then
+			return
+		end
+	end
 
 	if packet.src and senderGUID and packet.src ~= senderGUID then
 		LOCAL_LOG("WARN", "Source GUID mismatch", subPrefix, sender, packet.src, senderGUID)

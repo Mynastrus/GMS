@@ -28,6 +28,6 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 
 ## Last Release Snapshot
 
-- Version: `1.4.2`
+- Version: `1.4.3`
 - Date: `2026-02-15`
 - Source: `GMS/Core/Changelog.lua` -> `RELEASES[1]`
