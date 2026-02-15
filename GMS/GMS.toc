@@ -6,8 +6,6 @@
 ## Category: Guild Management System
 ## IconTexture: Interface\AddOns\GMS\Media\GMS_Logo_Text_Rectangle
 
-## X-Curse-Project-ID: 863660
-
 ## SavedVariables: GMS_DB, GMS_Logging_DB, GMS_Guild_DB, GMS_UIDB, GMS_Changelog_DB
 
 ## Notes-enUS: GMS – A modular guild management system with multiple modules and an intuitive UI. Type /gms to open the menu.

@@ -44,6 +44,8 @@ local GetNumSavedInstances          = GetNumSavedInstances
 local GetSavedInstanceInfo          = GetSavedInstanceInfo
 local GetSavedInstanceEncounterInfo = GetSavedInstanceEncounterInfo
 local LoadAddOn                     = LoadAddOn
+local IsAddOnLoaded                 = IsAddOnLoaded
+local C_AddOns                      = C_AddOns
 local GetExpansionLevel             = GetExpansionLevel
 local GetExpansionDisplayInfo       = GetExpansionDisplayInfo
 local C_EncounterJournal            = C_EncounterJournal
@@ -162,6 +164,7 @@ local function getRaidsStore()
 end
 
 RAIDS.METADATA = METADATA
+RAIDS._slashRegistered = RAIDS._slashRegistered or false
 
 -- ###########################################################################
 -- # INTERNAL HELPERS (DB + PlayerKey)
@@ -198,6 +201,48 @@ local function ensureStore()
 	end
 
 	return RAIDS._options, charKey
+end
+
+local function RegisterRaidsSlash()
+	if RAIDS._slashRegistered then return true end
+	if type(GMS.Slash_RegisterSubCommand) ~= "function" then
+		return false
+	end
+
+	GMS:Slash_RegisterSubCommand("raids", function(args)
+		local input = tostring(args or "")
+		local cmd = input:match("^%s*(%S*)")
+		cmd = string.lower(tostring(cmd or ""))
+
+		if cmd == "" or cmd == "scan" then
+			local ok = RAIDS:ScanNow("slash_scan")
+			if type(GMS.Print) == "function" then
+				if ok then
+					GMS:Print("Raids: scan requested.")
+				else
+					GMS:Print("Raids: scan could not be started.")
+				end
+			end
+			return
+		end
+
+		if cmd == "rebuild" then
+			local ok = RAIDS:RebuildCatalog()
+			if type(GMS.Print) == "function" then
+				GMS:Print(ok and "Raids: catalog rebuild started." or "Raids: catalog rebuild not available.")
+			end
+			return
+		end
+
+		if type(GMS.Print) == "function" then
+			GMS:Print("Usage: /gms raids scan")
+		end
+	end, {
+		help = "/gms raids scan - trigger a raid lockout scan now",
+	})
+
+	RAIDS._slashRegistered = true
+	return true
 end
 
 local function _publishRaidsToGuild(payload, reason)
@@ -420,10 +465,19 @@ local function getExpansionName()
 	return nil
 end
 
+local function normalizeRaidName(name)
+	name = tostring(name or "")
+	if name == "" then return "" end
+	name = string.lower(name)
+	return (name:gsub("[%s%p]+", ""))
+end
+
 local function buildExpansionRaidCatalog()
 	local catalog = {
 		byInstanceID = {},
 		nameToInstanceID = {},
+		nameNormToInstanceID = {},
+		encounterToInstanceID = {},
 		builtAt = now(),
 		source = "EJ",
 	}
@@ -462,14 +516,10 @@ local function buildExpansionRaidCatalog()
 			for t = 1, numTiers do tiersToScan[#tiersToScan + 1] = t end
 			catalog.source = "EJ_ALL_TIERS"
 		else
-			local cur = EJ_GetCurrentTier and EJ_GetCurrentTier() or nil
-			if cur then
-				tiersToScan[1] = cur
-				catalog.source = "EJ_CURRENT_TIER_ONLY"
-			else
-				catalog.source = "EJ_NO_TIER"
-				return catalog
-			end
+			-- Current tier can be user-selected in EJ and may not include current raids.
+			-- Fall back to all tiers to keep name->instance mapping robust.
+			for t = 1, numTiers do tiersToScan[#tiersToScan + 1] = t end
+			catalog.source = "EJ_ALL_TIERS_FALLBACK"
 		end
 	end
 
@@ -505,6 +555,16 @@ local function buildExpansionRaidCatalog()
 					encounters = encounters,
 				}
 				catalog.nameToInstanceID[raidName] = instanceID
+				local normalizedName = normalizeRaidName(raidName)
+				if normalizedName ~= "" then
+					catalog.nameNormToInstanceID[normalizedName] = instanceID
+				end
+				for j = 1, #encounters do
+					local encounterID = tonumber(encounters[j] and encounters[j].id or nil)
+					if encounterID then
+						catalog.encounterToInstanceID[encounterID] = instanceID
+					end
+				end
 			end
 
 			idx = idx + 1
@@ -526,17 +586,39 @@ function RAIDS:_TryLoadEncounterJournal()
 		return true
 	end
 
-	if LoadAddOn then
-		local loaded, reason = LoadAddOn("Blizzard_EncounterJournal")
+	local addonName = "Blizzard_EncounterJournal"
+	local alreadyLoaded = false
+	if type(C_AddOns) == "table" and type(C_AddOns.IsAddOnLoaded) == "function" then
+		alreadyLoaded = C_AddOns.IsAddOnLoaded(addonName) == true
+	elseif type(IsAddOnLoaded) == "function" then
+		alreadyLoaded = IsAddOnLoaded(addonName) == true
+	end
+	if alreadyLoaded then
+		RefreshEJApiBindings()
+		return ejApiPresent()
+	end
+
+	if type(C_AddOns) == "table" and type(C_AddOns.LoadAddOn) == "function" then
+		local ok, reason = C_AddOns.LoadAddOn(addonName)
+		if ok then
+			RefreshEJApiBindings()
+			return true
+		end
+		LOCAL_LOG("WARN", "C_AddOns.LoadAddOn failed", reason)
+		return false
+	end
+
+	if type(LoadAddOn) == "function" then
+		local loaded, reason = LoadAddOn(addonName)
 		if loaded then
 			RefreshEJApiBindings()
 			return true
 		end
-		LOCAL_LOG("WARN", "LoadAddOn(Blizzard_EncounterJournal) failed", reason)
-	else
-		LOCAL_LOG("WARN", "LoadAddOn not available")
+		LOCAL_LOG("WARN", "LoadAddOn failed", reason)
+		return false
 	end
 
+	LOCAL_LOG("WARN", "No API available to load Blizzard_EncounterJournal")
 	return false
 end
 
@@ -572,10 +654,21 @@ function RAIDS:ADDON_LOADED(_, addonName)
 end
 
 function RAIDS:OnEJReady()
+	if self._ejUnsupported then
+		if self.UnregisterEvent then
+			self:UnregisterEvent("EJ_DIFFICULTY_UPDATE")
+		end
+		return
+	end
+
 	-- STRICT: do not accept readiness if APIs are still missing
 	if not ejApiPresent() then
 		self._ejReady = false
-		LOCAL_LOG("WARN", "EJ ready event received but EJ API still missing")
+		self._ejUnsupported = true
+		LOCAL_LOG("INFO", "EJ event received but EJ API missing; switching to fallback mode")
+		if self.UnregisterEvent then
+			self:UnregisterEvent("EJ_DIFFICULTY_UPDATE")
+		end
 		self:_TryLoadEncounterJournal()
 		return
 	end
@@ -609,6 +702,10 @@ end
 function RAIDS:_EnsureCatalogReady()
 	if RAIDS._catalog and catalogIsUsable(RAIDS._catalog) then
 		return true
+	end
+
+	if self._ejUnsupported then
+		return false
 	end
 
 	-- Hard gate
@@ -668,6 +765,7 @@ function RAIDS:OnInitialize()
 	self._pendingScan = false
 	self._scanToken = 0
 	self._ejReady = false
+	self._ejUnsupported = false
 	self._scanWantedAfterCatalog = nil
 end
 
@@ -688,8 +786,18 @@ function RAIDS:OnEnable()
 	self:RegisterEvent("BOSS_KILL", "OnBossKill")
 
 	if not self:_ProbeEJReady() then
-		self:RegisterEvent("ADDON_LOADED", "ADDON_LOADED")
-		self:_TryLoadEncounterJournal()
+		local loaded = self:_TryLoadEncounterJournal()
+		if not loaded and not ejApiPresent() then
+			self._ejUnsupported = true
+			LOCAL_LOG("INFO", "EncounterJournal API unavailable; running raids in SavedInstances fallback mode")
+		else
+			self:RegisterEvent("ADDON_LOADED", "ADDON_LOADED")
+		end
+	end
+
+	RegisterRaidsSlash()
+	if type(GMS.OnReady) == "function" then
+		GMS:OnReady("EXT:SLASH", RegisterRaidsSlash)
 	end
 
 	-- Try to build EJ catalog early (gated until EJ is ready)
@@ -746,6 +854,11 @@ end
 -- ###########################################################################
 
 function RAIDS:RebuildCatalog()
+	if self._ejUnsupported then
+		LOCAL_LOG("INFO", "RebuildCatalog skipped: EJ unsupported on this client (fallback mode)")
+		return false
+	end
+
 	-- HARD GATE: never rebuild before EJ is truly ready
 	if not self._ejReady then
 		LOCAL_LOG("WARN", "RebuildCatalog blocked: EJ not ready")
@@ -778,11 +891,7 @@ function RAIDS:ScanNow(reason)
 		return false
 	end
 
-	if not self:_EnsureCatalogReady() then
-		self._scanWantedAfterCatalog = true
-		LOCAL_LOG("WARN", "Scan deferred until catalog ready", reason)
-		return false
-	end
+	self:_EnsureCatalogReady()
 
 	self._pendingScan = true
 	self._pendingReason = tostring(reason or "manual")
@@ -815,10 +924,10 @@ function RAIDS:OnUpdateInstanceInfo()
 		return
 	end
 
-	if not self:_EnsureCatalogReady() then
+	local catalogReady = self:_EnsureCatalogReady()
+	if not catalogReady then
 		self._scanWantedAfterCatalog = true
-		LOCAL_LOG("WARN", "Ingest skipped: catalog not ready")
-		return
+		LOCAL_LOG("WARN", "Catalog not ready; ingest continues with name-based fallback keys")
 	end
 
 	local raidsStore = getRaidsStore()
@@ -838,34 +947,49 @@ function RAIDS:OnUpdateInstanceInfo()
 	local num = GetNumSavedInstances and GetNumSavedInstances() or 0
 	local ingested = 0
 	local unresolved = 0
+	local fallbackMapped = 0
+	local unresolvedDetails = {}
+	local rawDetails = {}
 
 	for i = 1, num do
-		local name,
-		_,
-		reset,
-		diffID,
-		locked,
-		extended,
-		_,
-		_,
-		isRaid,
-		_,
-		_,
-		numEncounters = GetSavedInstanceInfo(i)
+		local info = { GetSavedInstanceInfo(i) }
+		local name = info[1]
+		local reset = info[3]
+		local diffID = info[4]
+		local locked = info[5]
+		local extended = info[6]
+		local isRaid = info[9]
+		local maxPlayers = info[8]
+		local difficultyName = tostring(info[11] or "")
+		local numEncounters = info[12]
+		local encounterProgress = info[13]
 
-		if isRaid == true and type(name) == "string" and name ~= "" then
-			local catalog = RAIDS._catalog
-			local instanceID = catalog and catalog.nameToInstanceID and catalog.nameToInstanceID[name] or nil
-			if not instanceID then
-				unresolved = unresolved + 1
-			else
-				local catRaid = catalog and catalog.byInstanceID and catalog.byInstanceID[instanceID] or nil
-				local total = (catRaid and catRaid.total) or (tonumber(numEncounters) or 0)
-				local encCount = tonumber(numEncounters) or total or 0
+		if type(name) == "string" and name ~= "" then
+			local encCount = tonumber(numEncounters) or 0
+			local progress = tonumber(encounterProgress) or 0
+			if progress > encCount then
+				encCount = progress
+			end
 
+			local looksLikeRaid = (isRaid == true)
+			if not looksLikeRaid then
+				local dn = string.lower(difficultyName or "")
+				local mp = tonumber(maxPlayers) or 0
+				if dn:find("schlachtzugsbrowser", 1, true)
+					or dn:find("raid finder", 1, true)
+					or dn:find("lfr", 1, true)
+					or dn:find("normal", 1, true)
+					or dn:find("heroic", 1, true)
+					or dn:find("heroisch", 1, true)
+					or dn:find("mythic", 1, true)
+					or dn:find("mythisch", 1, true)
+					or (mp > 5 and (encCount > 0 or progress > 0)) then
+					looksLikeRaid = true
+				end
+			end
+			if looksLikeRaid then
 				local killed = 0
 				local bosses = {}
-
 				if GetSavedInstanceEncounterInfo and encCount > 0 then
 					for e = 1, encCount do
 						local _, encID, isKilled = GetSavedInstanceEncounterInfo(i, e)
@@ -877,22 +1001,70 @@ function RAIDS:OnUpdateInstanceInfo()
 						end
 					end
 				end
+				-- Some raid modes expose only aggregate progress.
+				if progress > killed then
+					killed = progress
+				end
 
-				-- Only keep CURRENT if lockout-relevant
-				if locked == true or extended == true or killed > 0 then
-					local raidEntry = raidsStore[instanceID]
-					if type(raidEntry) ~= "table" then
-						raidEntry = {}
-						raidsStore[instanceID] = raidEntry
+				local dID = tonumber(diffID) or diffID
+				if type(dID) ~= "number" then
+					local dn = string.lower(tostring(difficultyName or ""))
+					if dn:find("schlachtzugsbrowser", 1, true) or dn:find("raid finder", 1, true) or dn:find("lfr", 1, true) then
+						dID = 17
+					elseif dn:find("mythisch", 1, true) or dn:find("mythic", 1, true) then
+						dID = 16
+					elseif dn:find("heroisch", 1, true) or dn:find("heroic", 1, true) then
+						dID = 15
+					elseif dn:find("normal", 1, true) then
+						dID = 14
+					else
+						-- API 12.x fallback: if diffID is missing, keep progress by assigning LFR bucket.
+						dID = 17
 					end
+				end
 
-					raidEntry.instanceID = instanceID
-					raidEntry.name = (catRaid and catRaid.name) or name
-					raidEntry.total = total
-					raidEntry.current = raidEntry.current or {}
+				local catalog = RAIDS._catalog
+				local instanceID = catalog and catalog.nameToInstanceID and catalog.nameToInstanceID[name] or nil
+				if not instanceID then
+					local normalizedName = normalizeRaidName(name)
+					instanceID = (normalizedName ~= "" and catalog and catalog.nameNormToInstanceID and catalog.nameNormToInstanceID[normalizedName]) or nil
+				end
+				if not instanceID and catalog and type(catalog.encounterToInstanceID) == "table" then
+					for encID in pairs(bosses) do
+						local iid = catalog.encounterToInstanceID[tonumber(encID) or encID]
+						if iid then
+							instanceID = iid
+							break
+						end
+					end
+				end
+				if not instanceID then
+					local nkey = normalizeRaidName(name)
+					if nkey ~= "" then
+						instanceID = "name:" .. nkey
+						fallbackMapped = fallbackMapped + 1
+					else
+						unresolved = unresolved + 1
+					end
+				end
+				if instanceID then
+					local catRaid = catalog and catalog.byInstanceID and catalog.byInstanceID[instanceID] or nil
+					local total = (catRaid and catRaid.total) or (tonumber(numEncounters) or 0)
+					if total <= 0 then total = encCount end
 
-					local dID = tonumber(diffID) or diffID
-					if type(dID) == "number" then
+					-- Only keep CURRENT if lockout-relevant
+					if locked == true or extended == true or killed > 0 or progress > 0 then
+						local raidEntry = raidsStore[instanceID]
+						if type(raidEntry) ~= "table" then
+							raidEntry = {}
+							raidsStore[instanceID] = raidEntry
+						end
+
+						raidEntry.instanceID = instanceID
+						raidEntry.name = (catRaid and catRaid.name) or name
+						raidEntry.total = total
+						raidEntry.current = raidEntry.current or {}
+
 						local cur = raidEntry.current[dID]
 						if type(cur) ~= "table" then
 							cur = {}
@@ -919,14 +1091,40 @@ function RAIDS:OnUpdateInstanceInfo()
 						raidEntry.lastReason = self._pendingReason
 						ingested = ingested + 1
 					end
+				else
+					unresolved = unresolved + 1
+					if #unresolvedDetails < 10 then
+						unresolvedDetails[#unresolvedDetails + 1] = string.format(
+							"name=%s diff=%s difficulty=%s progress=%s/%s locked=%s extended=%s",
+							tostring(name or "-"),
+							tostring(dID or "-"),
+							tostring(difficultyName or "-"),
+							tostring(killed or 0),
+							tostring(encCount or 0),
+							tostring(locked == true),
+							tostring(extended == true)
+						)
+					end
 				end
+			elseif #rawDetails < 5 then
+				rawDetails[#rawDetails + 1] = string.format(
+					"skip name=%s isRaid=%s maxPlayers=%s diff=%s difficulty=%s progress=%s/%s",
+					tostring(name), tostring(isRaid), tostring(maxPlayers), tostring(diffID), tostring(difficultyName), tostring(progress), tostring(encCount)
+				)
 			end
 		end
+	end
+
+	if ingested == 0 and #rawDetails > 0 then
+		LOCAL_LOG("WARN", "SavedInstances skipped entries", table.concat(rawDetails, " || "))
 	end
 
 	-- If mapping failed, do one forced rebuild + rescan (only if EJ is ready)
 	if unresolved > 0 then
 		LOCAL_LOG("WARN", "Unresolved raid name->instanceID mappings", unresolved)
+		if #unresolvedDetails > 0 then
+			LOCAL_LOG("WARN", "Unresolved raid details", table.concat(unresolvedDetails, " || "))
+		end
 		if self._ejReady then
 			self:RebuildCatalog()
 			self:_ScheduleScan("rescan_after_unresolved", 2.0)
@@ -944,8 +1142,12 @@ function RAIDS:OnUpdateInstanceInfo()
 		else
 			LOCAL_LOG("WARN", "Raids publish failed", tostring(publishReason or "unknown"), self._pendingReason or "?")
 		end
+		local roster = GMS and (GMS:GetModule("ROSTER", true) or GMS:GetModule("Roster", true)) or nil
+		if type(roster) == "table" and type(roster.BroadcastMetaHeartbeat) == "function" then
+			roster:BroadcastMetaHeartbeat(true)
+		end
 	end
 
-	LOCAL_LOG("INFO", "Raid scan ingested", ingested, "reason", self._pendingReason or "?", "unresolved", unresolved)
+	LOCAL_LOG("INFO", "Raid scan ingested", ingested, "reason", self._pendingReason or "?", "unresolved", unresolved, "fallbackMapped", fallbackMapped)
 	self._pendingReason = nil
 end

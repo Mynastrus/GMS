@@ -697,6 +697,31 @@ local function BuildRaidStatusFromRaidsModule()
 	return BuildRaidStatusFromRaidsStore(all)
 end
 
+local function GetBestRaidProgressFromEntry(raidEntry)
+	if type(raidEntry) ~= "table" then return nil end
+
+	local best = nil
+	local function consider(node)
+		if type(node) ~= "table" then return end
+		local short = tostring(node.short or "")
+		if short == "" or short == "-" then return end
+		local diff = tonumber(node.diffID) or 0
+		local killed = tonumber(node.killed) or 0
+		if not best or diff > best.diff or (diff == best.diff and killed > best.killed) then
+			best = { diff = diff, killed = killed, short = short }
+		end
+	end
+
+	consider(raidEntry.best)
+	if type(raidEntry.current) == "table" then
+		for _, cur in pairs(raidEntry.current) do
+			consider(cur)
+		end
+	end
+
+	return best
+end
+
 BuildRaidStatusFromRaidsStore = function(all)
 	if type(all) ~= "table" then return "-" end
 
@@ -704,18 +729,11 @@ BuildRaidStatusFromRaidsStore = function(all)
 	local bestKilled = -1
 	local bestShort = "-"
 	for _, raidEntry in pairs(all) do
-		if type(raidEntry) == "table" and type(raidEntry.best) == "table" then
-			local b = raidEntry.best
-			local diff = tonumber(b.diffID) or 0
-			local killed = tonumber(b.killed) or 0
-			local short = tostring(b.short or "")
-			if short ~= "" then
-				if diff > bestDiff or (diff == bestDiff and killed > bestKilled) then
-					bestDiff = diff
-					bestKilled = killed
-					bestShort = short
-				end
-			end
+		local b = GetBestRaidProgressFromEntry(raidEntry)
+		if b and (b.diff > bestDiff or (b.diff == bestDiff and b.killed > bestKilled)) then
+			bestDiff = b.diff
+			bestKilled = b.killed
+			bestShort = b.short
 		end
 	end
 	return bestShort

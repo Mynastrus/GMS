@@ -336,17 +336,6 @@ local function ShowHeaderActionsMenu(details)
 				OpenChatEditWithText("/invite " .. fullName)
 			end,
 		},
-		{
-			text = LocalMenuText("Target", "Anvisieren"),
-			notCheckable = true,
-			disabled = (shortName == ""),
-			func = function()
-				if shortName ~= "" then
-					-- Avoid protected-call taint from dropdown callbacks.
-					OpenChatEditWithText("/target " .. shortName)
-				end
-			end,
-		},
 	}
 
 	if type(EasyMenu) == "function" then
@@ -453,22 +442,38 @@ end
 
 local function BuildRaidStatusFromRaidsStore(all)
 	if type(all) ~= "table" then return "-" end
+
+	local function GetBestRaidProgressFromEntry(raidEntry)
+		if type(raidEntry) ~= "table" then return nil end
+		local best = nil
+		local function consider(node)
+			if type(node) ~= "table" then return end
+			local short = tostring(node.short or "")
+			if short == "" or short == "-" then return end
+			local diff = tonumber(node.diffID) or 0
+			local killed = tonumber(node.killed) or 0
+			if not best or diff > best.diff or (diff == best.diff and killed > best.killed) then
+				best = { diff = diff, killed = killed, short = short }
+			end
+		end
+		consider(raidEntry.best)
+		if type(raidEntry.current) == "table" then
+			for _, cur in pairs(raidEntry.current) do
+				consider(cur)
+			end
+		end
+		return best
+	end
+
 	local bestDiff = -1
 	local bestKilled = -1
 	local bestShort = "-"
 	for _, raidEntry in pairs(all) do
-		if type(raidEntry) == "table" and type(raidEntry.best) == "table" then
-			local best = raidEntry.best
-			local diff = tonumber(best.diffID) or 0
-			local killed = tonumber(best.killed) or 0
-			local short = tostring(best.short or "")
-			if short ~= "" then
-				if diff > bestDiff or (diff == bestDiff and killed > bestKilled) then
-					bestDiff = diff
-					bestKilled = killed
-					bestShort = short
-				end
-			end
+		local best = GetBestRaidProgressFromEntry(raidEntry)
+		if best and (best.diff > bestDiff or (best.diff == bestDiff and best.killed > bestKilled)) then
+			bestDiff = best.diff
+			bestKilled = best.killed
+			bestShort = best.short
 		end
 	end
 	return bestShort
@@ -665,14 +670,34 @@ end
 
 local function BuildRaidRows(all)
 	if type(all) ~= "table" then return {} end
+
+	local function PickShort(entry)
+		local function consider(node, best)
+			if type(node) ~= "table" then return best end
+			local short = tostring(node.short or "")
+			if short == "" or short == "-" then return best end
+			local diff = tonumber(node.diffID) or 0
+			local killed = tonumber(node.killed) or 0
+			if not best or diff > best.diff or (diff == best.diff and killed > best.killed) then
+				return { diff = diff, killed = killed, short = short }
+			end
+			return best
+		end
+		local best = nil
+		best = consider(entry and entry.best, best)
+		if type(entry) == "table" and type(entry.current) == "table" then
+			for _, cur in pairs(entry.current) do
+				best = consider(cur, best)
+			end
+		end
+		return (best and best.short) or "-"
+	end
+
 	local rows = {}
 	for key, entry in pairs(all) do
 		if type(entry) == "table" then
 			local name = tostring(entry.name or ("Raid " .. tostring(key)))
-			local short = "-"
-			if type(entry.best) == "table" and tostring(entry.best.short or "") ~= "" then
-				short = tostring(entry.best.short)
-			end
+			local short = PickShort(entry)
 			rows[#rows + 1] = { name = name, short = short }
 		end
 	end
@@ -1088,8 +1113,14 @@ local function BuildCharInfoUIHeader(ui, details, ctxFrom)
 	local hc = ui:GetHeaderContent()
 	if not hc then return false end
 	if type(hc.SetLayout) == "function" then
-		hc:SetLayout("Flow")
+		hc:SetLayout("List")
 	end
+
+	local headerRow = AceGUI:Create("SimpleGroup")
+	headerRow:SetFullWidth(true)
+	headerRow:SetLayout("Flow")
+	headerRow:SetHeight(18)
+	hc:AddChild(headerRow)
 
 	local icon = AceGUI:Create("Icon")
 	icon:SetImage("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
@@ -1099,43 +1130,49 @@ local function BuildCharInfoUIHeader(ui, details, ctxFrom)
 	if icon.image and type(icon.image.SetTexCoord) == "function" then
 		icon.image:SetTexCoord(cl, cr, ct, cb)
 	end
-	hc:AddChild(icon)
+	headerRow:AddChild(icon)
 
 	local classHex = GetClassHex(details and details.general and details.general.classFile or "")
 	local colorCode = tostring(classHex or "FFFFFFFF")
 	if #colorCode == 6 then colorCode = "FF" .. colorCode end
 
 	local name = AceGUI:Create("Label")
-	name:SetWidth(240)
+	name:SetWidth(220)
+	name:SetHeight(16)
 	name:SetText(string.format("|c%s%s|r", colorCode, tostring(details and details.general and details.general.name or "-")))
 	if name.label then
 		name.label:SetFontObject(GameFontNormalOutline)
 		name.label:SetJustifyH("LEFT")
-		name.label:SetJustifyV("MIDDLE")
+		name.label:SetJustifyV("TOP")
 	end
-	hc:AddChild(name)
+	headerRow:AddChild(name)
 
-	local totalWidth = 980
-	if ui and ui._frame and type(ui._frame.GetWidth) == "function" then
-		totalWidth = math.max(760, tonumber(ui._frame:GetWidth()) or 980)
+	-- Use actual header content width (not full window width), otherwise widgets can wrap
+	-- into a second row while resizing.
+	local totalWidth = 760
+	if hc and hc.frame and type(hc.frame.GetWidth) == "function" then
+		local hw = tonumber(hc.frame:GetWidth()) or 0
+		if hw > 200 then
+			totalWidth = hw
+		end
 	end
-	local leftMetaWidth = math.max(260, math.floor(totalWidth - 360))
+	local fixedWidth = 26 + 220 + 24 + 32 -- icon + name + action + padding
+	local leftMetaWidth = math.max(180, math.floor(totalWidth - fixedWidth))
 
 	local leftMeta = AceGUI:Create("Label")
 	leftMeta:SetWidth(leftMetaWidth)
 	leftMeta:SetText(string.format(
-		"|cff9d9d9dLevel|r %s  |cff9d9d9dRace|r %s  |cff9d9d9dFaction|r %s  |cff9d9d9dGUID|r %s",
+		"%s   %s   %s",
 		tostring(details and details.general and details.general.level or "-"),
 		tostring(details and details.general and details.general.race or "-"),
-		LocalizeFactionName(details and details.general and details.general.faction or "-"),
-		tostring(details and details.general and details.general.guid or "-")
+		LocalizeFactionName(details and details.general and details.general.faction or "-")
 	))
 	if leftMeta.label then
 		leftMeta.label:SetFontObject(GameFontNormalSmallOutline)
 		leftMeta.label:SetJustifyH("LEFT")
-		leftMeta.label:SetJustifyV("MIDDLE")
+		leftMeta.label:SetJustifyV("TOP")
 	end
-	hc:AddChild(leftMeta)
+	headerRow:AddChild(leftMeta)
 
 	local actions = AceGUI:Create("Icon")
 	actions:SetImage("Interface\\Icons\\INV_Misc_Gear_01")
@@ -1154,7 +1191,17 @@ local function BuildCharInfoUIHeader(ui, details, ctxFrom)
 	if actions.SetLabel then
 		actions:SetLabel("")
 	end
-	hc:AddChild(actions)
+	headerRow:AddChild(actions)
+
+	if C_Timer and type(C_Timer.After) == "function" then
+		C_Timer.After(0, function()
+			if name and name.label and name.frame then
+				name.label:ClearAllPoints()
+				name.label:SetPoint("TOPLEFT", name.frame, "TOPLEFT", 0, 1)
+				name.label:SetPoint("BOTTOMRIGHT", name.frame, "BOTTOMRIGHT", 0, 0)
+			end
+		end)
+	end
 
 	return true
 end
@@ -1372,72 +1419,6 @@ function CHARINFO:TryRegisterPage()
 		wrapper:SetLayout("List")
 		scroller:AddChild(wrapper)
 
-		local actions = AceGUI:Create("SimpleGroup")
-		actions:SetLayout("Flow")
-		actions:SetFullWidth(true)
-		wrapper:AddChild(actions)
-
-		local btnSelf = AceGUI:Create("Button")
-		btnSelf:SetText("Use Player")
-		btnSelf:SetWidth(150)
-		btnSelf:SetCallback("OnClick", function()
-			SetNavContext({
-				from = "charinfo",
-				name_full = player.name_full,
-				guid = player.guid,
-				unit = "player",
-			})
-			if ui2 and type(ui2.SetStatusText) == "function" then
-				ui2:SetStatusText("CHARINFO: context = player")
-			end
-			OpenSelf()
-		end)
-		actions:AddChild(btnSelf)
-
-		local btnTarget = AceGUI:Create("Button")
-		btnTarget:SetText("Use Target")
-		btnTarget:SetWidth(150)
-		btnTarget:SetCallback("OnClick", function()
-			local t = GetTargetSnapshot()
-			if not t then
-				if ui2 and type(ui2.SetStatusText) == "function" then
-					ui2:SetStatusText("CHARINFO: no player target")
-				end
-				return
-			end
-			SetNavContext({
-				from = "charinfo",
-				name_full = t.name_full,
-				guid = t.guid,
-				unit = "target",
-			})
-			if ui2 and type(ui2.SetStatusText) == "function" then
-				ui2:SetStatusText("CHARINFO: context = target")
-			end
-			OpenSelf()
-		end)
-		actions:AddChild(btnTarget)
-
-		local btnClear = AceGUI:Create("Button")
-		btnClear:SetText("Clear Context")
-		btnClear:SetWidth(150)
-		btnClear:SetCallback("OnClick", function()
-			SetNavContext(nil)
-			if ui2 and type(ui2.SetStatusText) == "function" then
-				ui2:SetStatusText("CHARINFO: context cleared")
-			end
-			OpenSelf()
-		end)
-		actions:AddChild(btnClear)
-
-		local btnRefresh = AceGUI:Create("Button")
-		btnRefresh:SetText("Refresh")
-		btnRefresh:SetWidth(150)
-		btnRefresh:SetCallback("OnClick", function()
-			OpenSelf()
-		end)
-		actions:AddChild(btnRefresh)
-
 		if details.isContext and not details.hasAnyExternalData then
 			local warn = AceGUI:Create("SimpleGroup")
 			warn:SetFullWidth(true)
@@ -1453,15 +1434,18 @@ function CHARINFO:TryRegisterPage()
 		wrapper:AddChild(contentRow)
 
 		local pageWidth = 1080
-		if root and root.frame and type(root.frame.GetWidth) == "function" then
+		if scroller and scroller.content and type(scroller.content.GetWidth) == "function" then
+			local sw = tonumber(scroller.content:GetWidth()) or 0
+			if sw > 0 then pageWidth = sw end
+		end
+		if pageWidth <= 0 and root and root.frame and type(root.frame.GetWidth) == "function" then
 			local w = tonumber(root.frame:GetWidth()) or 1080
-			if w > 0 then
-				pageWidth = w
-			end
+			if w > 0 then pageWidth = w end
 		end
 		local innerWidth = pageWidth - 40
 		if innerWidth < 860 then innerWidth = 860 end
-		local colWidth = math.floor((innerWidth - 10) / 2)
+		local colGap = 8
+		local colWidth = math.floor((innerWidth - colGap) / 2)
 		if colWidth < 420 then colWidth = 420 end
 
 		local opts = (type(CHARINFO._options) == "table") and CHARINFO._options or nil
@@ -1633,17 +1617,24 @@ function CHARINFO:TryRegisterPage()
 
 		local pinnedRow = AceGUI:Create("SimpleGroup")
 		pinnedRow:SetFullWidth(true)
-		pinnedRow:SetLayout("Flow")
+		pinnedRow:SetLayout("Table")
+		pinnedRow:SetUserData("table", {
+			columns = { colWidth, colWidth },
+			spaceH = colGap,
+			alignV = "TOP",
+		})
 		contentRow:AddChild(pinnedRow)
 
 		local leftStack = AceGUI:Create("SimpleGroup")
 		leftStack:SetLayout("List")
-		leftStack:SetRelativeWidth(0.495)
+		leftStack:SetWidth(colWidth)
+		leftStack:SetUserData("cell", { alignV = "TOP" })
 		pinnedRow:AddChild(leftStack)
 
 		local rightStack = AceGUI:Create("SimpleGroup")
 		rightStack:SetLayout("List")
-		rightStack:SetRelativeWidth(0.495)
+		rightStack:SetWidth(colWidth)
+		rightStack:SetUserData("cell", { alignV = "TOP" })
 		pinnedRow:AddChild(rightStack)
 
 		for i = 1, #leftPinned do
@@ -1832,4 +1823,3 @@ function CHARINFO:OnDisable()
 	self._ticker = nil
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
-
