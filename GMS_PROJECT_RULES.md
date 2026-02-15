@@ -322,6 +322,12 @@ Dieses Regelwerk ist **verbindlich und dauerhaft gültig** für das Projekt GMS.
   * optional Commit-Hash zur Rückverfolgung
 * Vor einem Release ist `Unreleased` auf Vollständigkeit gegen `git log` seit dem letzten Tag zu prüfen.
 
+### 11.6 CurseForge-Releasepflicht (Pflicht)
+
+* Bei **jedem echten Release** müssen die Addon-Dateien auf CurseForge veröffentlicht/aktualisiert werden.
+* Die Release-Baseline für die Zielversion basiert verbindlich auf der **aktuellen Interface-Version** aus `GMS/GMS.toc`.
+* Das Release-Changelog für die Veröffentlichung ist immer **zweisprachig (EN + DE)** und inhaltlich ansprechend/kuratierend zu formulieren.
+* Der automatisierte GitHub-Workflow für CurseForge-Uploads ist Teil des Standard-Release-Prozesses und soll bei Tag-Releases bzw. manuellen Release-Runs genutzt werden.
 ## AI Interaction & Artifacts
 The following rules apply to the AI assistant's interaction with artifacts:
 - **Auto-Approval**: `implementation_plan.md` and `walkthrough.md` should generally be set to `ShouldAutoProceed = true` unless major breaking changes or critical design decisions require explicit user confirmation.
@@ -356,3 +362,4 @@ local C_Timer          = C_Timer
 * Innerhalb der Logik **DARF NICHT** direkt auf `_G.XYZ` zugegriffen werden, wenn `XYZ` ein Blizzard-Global ist.
 * Stattdessen wird die lokale Variable `XYZ` verwendet.
 * Die Lokalisierung dient als zentrale Stelle zur Absicherung gegen fehlende APIs in verschiedenen WoW-Umgebungen.
+

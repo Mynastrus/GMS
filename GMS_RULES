@@ -1,6 +1,0 @@
-# GMS Rules
-
-## Mandatory Release Workflow
-- For every release update, always publish/update the addon files on CurseForge.
-- Always use the current interface version from `GMS/GMS.toc` as the release baseline.
-- Always provide a clear, polished changelog in both English and German for the release.
