@@ -55,7 +55,7 @@ local METADATA = {
 	INTERN_NAME  = "LOGS",
 	SHORT_NAME   = "Logs",
 	DISPLAY_NAME = "Logging Console",
-	VERSION      = "1.1.19",
+	VERSION      = "1.1.20",
 }
 
 -- ###########################################################################
@@ -974,7 +974,8 @@ local function RegisterLogsUI()
 			scroller:ReleaseChildren()
 			local entries = LOGS._entries or {}
 			local contentWidth = (scroller.content and scroller.content.GetWidth and scroller.content:GetWidth()) or
-				(scroller.frame and scroller.frame.GetWidth and scroller.frame:GetWidth()) or 900
+				(scroller.frame and scroller.frame.GetWidth and scroller.frame:GetWidth()) or
+				(root and root.frame and root.frame.GetWidth and root.frame:GetWidth()) or 900
 			contentWidth = math.max(520, contentWidth - 24)
 			for i = #entries, 1, -1 do
 				local e = entries[i]
@@ -1014,6 +1015,23 @@ local function RegisterLogsUI()
 				RenderAll()
 			end
 		end
+
+		local function ScheduleInitialLayoutPass()
+			if root and root.DoLayout then
+				root:DoLayout()
+			end
+			if scroller and scroller.DoLayout then
+				scroller:DoLayout()
+			end
+			ScheduleRenderAll()
+			if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+				C_Timer.After(0.15, function()
+					if LOGS._ui and type(LOGS._ui.renderAll) == "function" then
+						LOGS._ui.renderAll()
+					end
+				end)
+			end
+		end
 		if scroller.frame and type(scroller.frame.HookScript) == "function" then
 			scroller.frame:HookScript("OnSizeChanged", function()
 				ScheduleRenderAll()
@@ -1026,6 +1044,7 @@ local function RegisterLogsUI()
 		end
 
 		RenderAll()
+		ScheduleInitialLayoutPass()
 	end
 
 	local okPage = UI_RegisterPage_Compat(PAGE_ID, 90, TITLE, BuildPage)
