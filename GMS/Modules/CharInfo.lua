@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.7",
+	VERSION      = "1.0.8",
 }
 
 local LibStub = LibStub
@@ -46,6 +46,11 @@ local UnitGUID                   = UnitGUID
 local UnitExists                 = UnitExists
 local UnitIsPlayer               = UnitIsPlayer
 local C_Timer                    = C_Timer
+local GetProfessions             = GetProfessions
+local GetProfessionInfo          = GetProfessionInfo
+local C_TradeSkillUI             = C_TradeSkillUI
+local C_ClassTalents             = C_ClassTalents
+local C_Traits                   = C_Traits
 local GameFontNormalSmallOutline = GameFontNormalSmallOutline
 local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
 ---@diagnostic enable: undefined-global
@@ -240,6 +245,241 @@ local function GetTargetSnapshot()
 	}
 end
 
+local function BuildItemLevelFromEquipmentSnapshot(snapshot)
+	if type(snapshot) ~= "table" or type(snapshot.slots) ~= "table" then return nil end
+	local total = 0
+	local count = 0
+	for _, item in pairs(snapshot.slots) do
+		if type(item) == "table" then
+			local ilvl = tonumber(item.itemLevel)
+			if ilvl and ilvl > 0 then
+				total = total + ilvl
+				count = count + 1
+			end
+		end
+	end
+	if count <= 0 then return nil, 0 end
+	return (total / count), count
+end
+
+local function BuildRaidStatusFromRaidsStore(all)
+	if type(all) ~= "table" then return "-" end
+	local bestDiff = -1
+	local bestKilled = -1
+	local bestShort = "-"
+	for _, raidEntry in pairs(all) do
+		if type(raidEntry) == "table" and type(raidEntry.best) == "table" then
+			local best = raidEntry.best
+			local diff = tonumber(best.diffID) or 0
+			local killed = tonumber(best.killed) or 0
+			local short = tostring(best.short or "")
+			if short ~= "" then
+				if diff > bestDiff or (diff == bestDiff and killed > bestKilled) then
+					bestDiff = diff
+					bestKilled = killed
+					bestShort = short
+				end
+			end
+		end
+	end
+	return bestShort
+end
+
+local function GetTalentLoadoutName()
+	if type(C_ClassTalents) ~= "table" or type(C_ClassTalents.GetActiveConfigID) ~= "function" then
+		return "-"
+	end
+	local configID = C_ClassTalents.GetActiveConfigID()
+	if not configID then return "-" end
+	if type(C_Traits) ~= "table" or type(C_Traits.GetConfigInfo) ~= "function" then
+		return tostring(configID)
+	end
+	local cfg = C_Traits.GetConfigInfo(configID)
+	if type(cfg) == "table" then
+		local n = tostring(cfg.name or "")
+		if n ~= "" then return n end
+	end
+	return tostring(configID)
+end
+
+local function GetProfessionsSummary()
+	local parts = {}
+	if type(GetProfessions) == "function" and type(GetProfessionInfo) == "function" then
+		local p1, p2, arch, fish, cook = GetProfessions()
+		local indices = { p1, p2, cook, fish, arch }
+		for i = 1, #indices do
+			local idx = indices[i]
+			if idx then
+				local name, _, skillLevel, maxSkillLevel = GetProfessionInfo(idx)
+				if name and name ~= "" then
+					local cur = tonumber(skillLevel) or 0
+					local maxv = tonumber(maxSkillLevel) or 0
+					parts[#parts + 1] = string.format("%s (%d/%d)", tostring(name), cur, maxv)
+				end
+			end
+		end
+	end
+
+	if #parts == 0
+		and type(C_TradeSkillUI) == "table"
+		and type(C_TradeSkillUI.GetAllProfessionTradeSkillLines) == "function"
+		and type(C_TradeSkillUI.GetProfessionInfoBySkillLineID) == "function" then
+		local lines = C_TradeSkillUI.GetAllProfessionTradeSkillLines()
+		if type(lines) == "table" then
+			for i = 1, #lines do
+				local lineID = lines[i]
+				local info = C_TradeSkillUI.GetProfessionInfoBySkillLineID(lineID)
+				if type(info) == "table" then
+					local name = tostring(info.professionName or "")
+					local cur = tonumber(info.skillLevel) or 0
+					local maxv = tonumber(info.maxSkillLevel) or 0
+					if name ~= "" then
+						parts[#parts + 1] = string.format("%s (%d/%d)", name, cur, maxv)
+					end
+				end
+			end
+		end
+	end
+
+	if #parts <= 0 then return "-" end
+	return table.concat(parts, ", ")
+end
+
+local function GetLatestDomainRecordForGuid(domain, guid)
+	if type(domain) ~= "string" or domain == "" then return nil end
+	if type(guid) ~= "string" or guid == "" then return nil end
+	local comm = GMS and GMS.Comm or nil
+	if type(comm) ~= "table" or type(comm.GetRecordsByDomain) ~= "function" then
+		return nil
+	end
+
+	local records = comm:GetRecordsByDomain(domain)
+	if type(records) ~= "table" then return nil end
+
+	local best = nil
+	local bestUpdated = -1
+	local bestSeq = -1
+	for i = 1, #records do
+		local rec = records[i]
+		if type(rec) == "table" then
+			local rOrigin = tostring(rec.originGUID or "")
+			local rChar = tostring(rec.charGUID or "")
+			if rOrigin == guid or rChar == guid then
+				local updated = tonumber(rec.updatedAt) or 0
+				local seq = tonumber(rec.seq) or 0
+				if updated > bestUpdated or (updated == bestUpdated and seq > bestSeq) then
+					best = rec
+					bestUpdated = updated
+					bestSeq = seq
+				end
+			end
+		end
+	end
+
+	return best
+end
+
+local function BuildCharData(player, ctxGuid)
+	local data = {
+		isContext = false,
+		gmsVersion = tostring((GMS and GMS.VERSION) or "-"),
+		mythicPlus = "-",
+		raidStatus = "-",
+		equipment = "-",
+		equipmentItemLevel = nil,
+		equipmentSlots = 0,
+		talents = "-",
+		professions = "-",
+	}
+
+	local playerGuid = tostring((player and player.guid) or "")
+	local targetGuid = tostring(ctxGuid or "")
+	if targetGuid == "" or targetGuid == playerGuid then
+		local equip = GMS and GMS:GetModule("Equipment", true)
+		local eqSnapshot = equip and equip._options and equip._options.equipment and equip._options.equipment.snapshot or nil
+		local ilvl, slots = BuildItemLevelFromEquipmentSnapshot(eqSnapshot)
+		if not ilvl and type(GetAverageItemLevel) == "function" then
+			local _, equipped = GetAverageItemLevel()
+			ilvl = tonumber(equipped)
+		end
+		data.equipmentItemLevel = ilvl
+		data.equipmentSlots = tonumber(slots) or 0
+		if ilvl and ilvl > 0 then
+			data.equipment = string.format("%.1f (%d slots)", ilvl, data.equipmentSlots)
+		end
+
+		local mythic = GMS and GMS:GetModule("MythicPlus", true)
+		local score = mythic and mythic._options and tonumber(mythic._options.score) or nil
+		if score and score >= 0 then
+			data.mythicPlus = tostring(score)
+		end
+
+		local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true))
+		local raidStore = raids and raids._options and raids._options.raids or nil
+		data.raidStatus = BuildRaidStatusFromRaidsStore(raidStore)
+
+		local loadout = GetTalentLoadoutName()
+		local specText = tostring((player and player.spec) or "-")
+		if loadout ~= "-" and specText ~= "-" then
+			data.talents = specText .. " | " .. loadout
+		else
+			data.talents = (loadout ~= "-" and loadout) or specText
+		end
+		data.professions = GetProfessionsSummary()
+		return data
+	end
+
+	data.isContext = true
+	data.talents = "-"
+	data.professions = "-"
+
+	local recMeta = GetLatestDomainRecordForGuid("roster_meta", targetGuid)
+	if recMeta and type(recMeta.payload) == "table" then
+		local p = recMeta.payload
+		local v = tostring(p.version or "")
+		if v ~= "" then data.gmsVersion = v end
+		local ilvl = tonumber(p.ilvl)
+		if ilvl and ilvl > 0 then
+			data.equipmentItemLevel = ilvl
+			data.equipment = string.format("%.1f", ilvl)
+		end
+		local mplus = tonumber(p.mplus)
+		if mplus and mplus >= 0 then
+			data.mythicPlus = tostring(mplus)
+		end
+		local raid = tostring(p.raid or "")
+		if raid ~= "" then data.raidStatus = raid end
+	end
+
+	local recEquip = GetLatestDomainRecordForGuid("EQUIPMENT_V1", targetGuid)
+	if recEquip and type(recEquip.payload) == "table" then
+		local ilvl, slots = BuildItemLevelFromEquipmentSnapshot(recEquip.payload.snapshot)
+		if ilvl and ilvl > 0 then
+			data.equipmentItemLevel = ilvl
+			data.equipmentSlots = tonumber(slots) or 0
+			data.equipment = string.format("%.1f (%d slots)", ilvl, data.equipmentSlots)
+		end
+	end
+
+	local recM = GetLatestDomainRecordForGuid("MYTHICPLUS_V1", targetGuid)
+	if recM and type(recM.payload) == "table" then
+		local mplus = tonumber(recM.payload.score)
+		if mplus and mplus >= 0 then
+			data.mythicPlus = tostring(mplus)
+		end
+	end
+
+	local recR = GetLatestDomainRecordForGuid("RAIDS_V1", targetGuid)
+	if recR and type(recR.payload) == "table" then
+		local raid = BuildRaidStatusFromRaidsStore(recR.payload.raids)
+		if raid ~= "" and raid ~= "-" then
+			data.raidStatus = raid
+		end
+	end
+
+	return data
+end
+
 local function RenderBlock(titleText, lines)
 	local out = {}
 	out[#out + 1] = "|cff03A9F4" .. tostring(titleText or "") .. "|r"
@@ -332,7 +572,11 @@ function CHARINFO:TryRegisterPage()
 			ui2:SetStatusText(ctxName and "CHARINFO: context active" or "CHARINFO: player only")
 		end
 
-		if isCached then return end
+		if isCached and root and type(root.ReleaseChildren) == "function" then
+			root:ReleaseChildren()
+		end
+
+		local details = BuildCharData(player, ctxGuid)
 
 		local wrapper = AceGUI:Create("SimpleGroup")
 		wrapper:SetFullWidth(true)
@@ -409,6 +653,11 @@ function CHARINFO:TryRegisterPage()
 		AddValueLine(cardOverview, "Class", player.class or "-")
 		AddValueLine(cardOverview, "Spec", player.spec or "-")
 		AddValueLine(cardOverview, "Itemlevel", string.format("%s (overall %s)", tostring(player.ilvl or "-"), tostring(player.ilvl_overall or "-")))
+		AddValueLine(cardOverview, "Mythic Plus", details.mythicPlus or "-")
+		AddValueLine(cardOverview, "Raidstatus", details.raidStatus or "-")
+		AddValueLine(cardOverview, "Equipment", details.equipment or "-")
+		AddValueLine(cardOverview, "Talents", details.talents or "-")
+		AddValueLine(cardOverview, "Professions", details.professions or "-")
 		AddValueLine(cardOverview, "GUID", player.guid or "-")
 
 		local cardContext = AceGUI:Create("InlineGroup")
@@ -420,6 +669,8 @@ function CHARINFO:TryRegisterPage()
 		AddValueLine(cardContext, "Name", ctxName or "-")
 		AddValueLine(cardContext, "GUID", ctxGuid or "-")
 		AddValueLine(cardContext, "Source", ctxFrom or "-")
+		AddValueLine(cardContext, "GMS Version", details.gmsVersion or "-")
+		AddValueLine(cardContext, "Context Data", details.isContext and "synced guild records" or "local player")
 
 		local btnSelf = AceGUI:Create("Button")
 		btnSelf:SetText("Use Player")
