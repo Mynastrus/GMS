@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "PERMISSIONS",
 	SHORT_NAME   = "Permissions",
 	DISPLAY_NAME = "Berechtigungen",
-	VERSION      = "1.3.7",
+	VERSION      = "1.3.9",
 }
 
 -- Blizzard Globals
@@ -363,6 +363,9 @@ end
 
 function Permissions:RenderGroupContent(parent, groupID)
 	parent:ReleaseChildren()
+	if parent.SetLayout then
+		parent:SetLayout("Fill")
+	end
 
 	local groupName = self.db.groupNames[groupID] or groupID
 	local isFixed = (groupID == "ADMIN" or groupID == "OFFICER" or groupID == "EVERYONE")
@@ -370,7 +373,7 @@ function Permissions:RenderGroupContent(parent, groupID)
 	local tabGroup = AceGUI:Create("TabGroup")
 	tabGroup:SetFullWidth(true)
 	tabGroup:SetFullHeight(true)
-	tabGroup:SetLayout("Flow")
+	tabGroup:SetLayout("Fill")
 	tabGroup:SetTabs({
 		{ value = "MEMBERS", text = "Mitglieder" },
 		{ value = "RANKS", text = "Ränge & Rollen" },
@@ -378,8 +381,16 @@ function Permissions:RenderGroupContent(parent, groupID)
 		{ value = "SETTINGS", text = "Einstellungen" },
 	})
 
+	local validTabs = {
+		MEMBERS = true,
+		RANKS = true,
+		PERMISSIONS = true,
+		SETTINGS = true,
+	}
 	self._selectedTab = self._selectedTab or "MEMBERS"
-	tabGroup:SelectTab(self._selectedTab)
+	if not validTabs[self._selectedTab] then
+		self._selectedTab = "MEMBERS"
+	end
 
 	tabGroup:SetCallback("OnGroupSelected", function(_, _, value)
 		self._selectedTab = value
@@ -387,14 +398,14 @@ function Permissions:RenderGroupContent(parent, groupID)
 	end)
 
 	parent:AddChild(tabGroup)
-	self:RenderTabContent(tabGroup, groupID, self._selectedTab)
+	tabGroup:SelectTab(self._selectedTab)
 end
 
 function Permissions:RenderTabContent(parent, groupID, tab)
 	parent:ReleaseChildren()
 
 	local scroll = AceGUI:Create("ScrollFrame")
-	scroll:SetLayout("Flow")
+	scroll:SetLayout("List")
 	scroll:SetFullWidth(true)
 	scroll:SetFullHeight(true)
 	parent:AddChild(scroll)

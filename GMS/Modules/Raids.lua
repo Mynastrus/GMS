@@ -70,7 +70,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.6",
+	VERSION      = "1.2.7",
 }
 
 -- ###########################################################################
@@ -378,13 +378,33 @@ end
 -- # EJ BOOTSTRAP + CATALOG (all raids of the current expansion) - READY SAFE
 -- ###########################################################################
 
+local function RefreshEJApiBindings()
+	-- Rebind globals after Blizzard_EncounterJournal load; locals captured at file load
+	-- may still be nil otherwise.
+	C_EncounterJournal         = (_G and _G.C_EncounterJournal) or C_EncounterJournal
+	EJ_GetNumTiers             = (_G and _G.EJ_GetNumTiers) or EJ_GetNumTiers
+	EJ_SelectTier              = (_G and _G.EJ_SelectTier) or EJ_SelectTier
+	EJ_GetInstanceByIndex      = (_G and _G.EJ_GetInstanceByIndex) or EJ_GetInstanceByIndex
+	EJ_SelectInstance          = (_G and _G.EJ_SelectInstance) or EJ_SelectInstance
+	EJ_GetInstanceInfo         = (_G and _G.EJ_GetInstanceInfo) or EJ_GetInstanceInfo
+	EJ_GetNumEncounters        = (_G and _G.EJ_GetNumEncounters) or EJ_GetNumEncounters
+	EJ_GetEncounterInfoByIndex = (_G and _G.EJ_GetEncounterInfoByIndex) or EJ_GetEncounterInfoByIndex
+	EJ_GetTierInfo             = (_G and _G.EJ_GetTierInfo) or EJ_GetTierInfo
+	EJ_GetCurrentTier          = (_G and _G.EJ_GetCurrentTier) or EJ_GetCurrentTier
+end
+
 local function ejApiPresent()
-	-- Retail: C_EncounterJournal is standard now, but some functions might still be global or mixed
-	if C_EncounterJournal then return true end
-	return EJ_GetNumTiers and EJ_SelectTier and EJ_GetInstanceByIndex
-		and EJ_SelectInstance and EJ_GetInstanceInfo
-		and EJ_GetNumEncounters and EJ_GetEncounterInfoByIndex
-		and EJ_GetTierInfo and EJ_GetCurrentTier
+	RefreshEJApiBindings()
+	-- This module uses EJ_* globals; require these callsites explicitly.
+	return type(EJ_GetNumTiers) == "function"
+		and type(EJ_SelectTier) == "function"
+		and type(EJ_GetInstanceByIndex) == "function"
+		and type(EJ_SelectInstance) == "function"
+		and type(EJ_GetInstanceInfo) == "function"
+		and type(EJ_GetNumEncounters) == "function"
+		and type(EJ_GetEncounterInfoByIndex) == "function"
+		and type(EJ_GetTierInfo) == "function"
+		and type(EJ_GetCurrentTier) == "function"
 end
 
 local function getExpansionName()
@@ -509,6 +529,7 @@ function RAIDS:_TryLoadEncounterJournal()
 	if LoadAddOn then
 		local loaded, reason = LoadAddOn("Blizzard_EncounterJournal")
 		if loaded then
+			RefreshEJApiBindings()
 			return true
 		end
 		LOCAL_LOG("WARN", "LoadAddOn(Blizzard_EncounterJournal) failed", reason)
