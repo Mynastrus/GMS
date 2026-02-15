@@ -49,7 +49,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.6",
+	VERSION      = "1.3.7",
 }
 
 -- ###########################################################################
@@ -114,6 +114,7 @@ local CHANGE_DEBOUNCE_SEC   = 0.35
 
 local STORE_POLL_MAX_TRIES = 25
 local STORE_POLL_INTERVAL  = 1.0
+local EQUIP_SYNC_DOMAIN    = "EQUIPMENT_V1"
 
 -- ###########################################################################
 -- #	INTERNAL STATE
@@ -202,6 +203,11 @@ function EQUIP:InitializeOptions()
 		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "Equipment")
 		if ok and opts then
 			self._options = opts
+			if type(self._mem) == "table" and type(self._mem.snapshot) == "table" then
+				local memSnap = self._mem.snapshot
+				self._mem.snapshot = nil
+				self:SaveSnapshot(memSnap, "mem-flush")
+			end
 			LOCAL_LOG("INFO", "Equipment options initialized")
 		else
 			LOCAL_LOG("WARN", "Failed to retrieve Equipment options")
@@ -219,15 +225,106 @@ local function _getPlayerGuid()
 	return UnitGUID and UnitGUID("player") or nil
 end
 
-local function _scanPlayerEquipmentMinimal()
+local function _splitKeepingEmpty(input, sep)
+	local txt = tostring(input or "")
+	local out = {}
+	local start = 1
+	while true do
+		local pos = string.find(txt, sep, start, true)
+		if not pos then
+			out[#out + 1] = string.sub(txt, start)
+			break
+		end
+		out[#out + 1] = string.sub(txt, start, pos - 1)
+		start = pos + 1
+	end
+	return out
+end
+
+local function _extractItemString(link)
+	if type(link) ~= "string" or link == "" then return nil end
+	local itemString = link:match("|H(item:[^|]+)|h")
+	if type(itemString) ~= "string" or itemString == "" then return nil end
+	return itemString
+end
+
+local function _parseItemLink(link, itemLoc, slotId)
+	if type(link) ~= "string" or link == "" then return nil end
+	local itemString = _extractItemString(link)
+	if not itemString then return nil end
+
+	local parts = _splitKeepingEmpty(itemString, ":")
+	local numBonusIds = tonumber(parts[14] or "0") or 0
+	local bonusIds = {}
+	if numBonusIds > 0 then
+		for i = 1, numBonusIds do
+			bonusIds[i] = tonumber(parts[14 + i] or "0") or 0
+		end
+	end
+
+	local itemLevel = nil
+	if type(C_Item) == "table" and type(C_Item.GetCurrentItemLevel) == "function" and itemLoc then
+		itemLevel = tonumber(C_Item.GetCurrentItemLevel(itemLoc) or 0) or nil
+		if itemLevel and itemLevel <= 0 then itemLevel = nil end
+	end
+
+	return {
+		slotId = tonumber(slotId) or 0,
+		link = link,
+		itemString = itemString,
+		itemId = tonumber(parts[2] or "0") or 0,
+		enchantId = tonumber(parts[3] or "0") or 0,
+		gemIds = {
+			tonumber(parts[4] or "0") or 0,
+			tonumber(parts[5] or "0") or 0,
+			tonumber(parts[6] or "0") or 0,
+			tonumber(parts[7] or "0") or 0,
+		},
+		bonusIds = bonusIds,
+		itemLevel = itemLevel,
+	}
+end
+
+local function _buildSnapshotDigest(snapshot)
+	if type(snapshot) ~= "table" then return "" end
+	local slots = type(snapshot.slots) == "table" and snapshot.slots or {}
+	local parts = {}
+	for i = 1, #INV_SLOTS do
+		local slotId = INV_SLOTS[i]
+		local parsed = slots[slotId]
+		local itemString = (type(parsed) == "table" and parsed.itemString) or ""
+		local itemLevel = (type(parsed) == "table" and tonumber(parsed.itemLevel)) or 0
+		parts[#parts + 1] = tostring(slotId) .. "=" .. tostring(itemString) .. "@" .. tostring(itemLevel)
+	end
+	return table.concat(parts, "|")
+end
+
+function EQUIP:_PublishSnapshotToGuild(snapshot, reason)
+	local comm = GMS and GMS.Comm or nil
+	if type(comm) ~= "table" or type(comm.PublishCharacterRecord) ~= "function" then
+		return false, "comm-unavailable"
+	end
+	local payload = {
+		module = METADATA.SHORT_NAME,
+		version = METADATA.VERSION,
+		reason = tostring(reason or "unknown"),
+		snapshot = snapshot,
+	}
+	return comm:PublishCharacterRecord(EQUIP_SYNC_DOMAIN, payload)
+end
+
+local function _scanPlayerEquipment()
 	local guid = _getPlayerGuid()
 
 	local slots = {}
 	for _, slotId in ipairs(INV_SLOTS) do
-		local itemLoc = ItemLocation:CreateFromEquipmentSlot(slotId)
-		if C_Item.DoesItemExist(itemLoc) then
-			local link = C_Item.GetItemLink(itemLoc)
-			slots[slotId] = link
+		local itemLoc = nil
+		if type(ItemLocation) == "table" and type(ItemLocation.CreateFromEquipmentSlot) == "function" then
+			itemLoc = ItemLocation:CreateFromEquipmentSlot(slotId)
+		end
+		if type(C_Item) == "table" and itemLoc and type(C_Item.DoesItemExist) == "function" and C_Item.DoesItemExist(itemLoc) then
+			local link = type(C_Item.GetItemLink) == "function" and C_Item.GetItemLink(itemLoc) or nil
+			slots[slotId] = _parseItemLink(link, itemLoc, slotId)
 		else
 			slots[slotId] = nil
 		end
@@ -248,7 +345,7 @@ function EQUIP:GetStore()
 	return _getEquipmentStore()
 end
 
-function EQUIP:SaveSnapshot(snapshot)
+function EQUIP:SaveSnapshot(snapshot, reason)
 	if type(snapshot) ~= "table" then
 		LOCAL_LOG("WARN", "SaveSnapshot: invalid snapshot type", type(snapshot))
 		return false
@@ -267,15 +364,31 @@ function EQUIP:SaveSnapshot(snapshot)
 		snapshot.slots = {}
 	end
 
+	local digest = _buildSnapshotDigest(snapshot)
+
 	local store = _getEquipmentStore()
 	if not store then
-		LOCAL_LOG("WARN", "SaveSnapshot: Equipment options not available")
-		return false
+		self._mem = self._mem or {}
+		self._mem.snapshot = snapshot
+		self._mem.lastDigest = digest
+		LOCAL_LOG("WARN", "SaveSnapshot: Equipment options not available, stored in memory buffer")
+		return true
 	end
 
+	local previousDigest = tostring(store.lastDigest or "")
 	store.snapshot = snapshot
+	store.lastDigest = digest
 	if self._options then
 		self._options.lastScanTs = snapshot.ts or 0
+	end
+
+	if digest ~= "" and digest ~= previousDigest then
+		local ok, publishReason = self:_PublishSnapshotToGuild(snapshot, reason)
+		if ok then
+			LOCAL_LOG("INFO", "Equipment snapshot published", tostring(reason or "unknown"))
+		else
+			LOCAL_LOG("WARN", "Equipment publish failed", tostring(publishReason or "unknown"), tostring(reason or "unknown"))
+		end
 	end
 
 	LOCAL_LOG("INFO", "Equipment snapshot saved")
@@ -297,8 +410,8 @@ function EQUIP:_ScheduleScan(delaySec, reason)
 	_schedule(delaySec or 0, function()
 		if token ~= self._scanToken then return end
 
-		local snap = _scanPlayerEquipmentMinimal()
-		local ok = self:SaveSnapshot(snap)
+		local snap = _scanPlayerEquipment()
+		local ok = self:SaveSnapshot(snap, reason)
 
 		if ok then
 			LOCAL_LOG("INFO", "Equipment scanned + saved", tostring(reason or "unknown"))

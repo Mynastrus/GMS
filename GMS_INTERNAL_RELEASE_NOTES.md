@@ -18,10 +18,14 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [ ] (leer)
 
 ### Changed
-- [ ] (leer)
+- [x] Equipment-Parsing erweitert: Ausruestungs-Slots werden jetzt als strukturierte Item-Daten (itemString/itemId/enchant/gems/bonusIds/itemLevel) erfasst und deterministisch geordnet gespeichert (`GMS/Modules/Equipment.lua`).
+- [x] Raids-Scan stabilisiert: Lifecycle/Event-Registrierung vervollstaendigt (Login/EnteringWorld/Encounter/BossKill) und Store-Zugriffe im Ingest-Pfad gehaertet (`GMS/Modules/Raids.lua`).
+- [x] MythicPlus-Scan normalisiert: API-Fallbacks und Run-Normalisierung fuer intime/overtime eingebaut, inklusive stabiler Sortierung der Dungeonliste (`GMS/Modules/MythicPlus.lua`).
 
 ### Fixed
-- [ ] (leer)
+- [x] Equipment-Persistenz/Verteilung korrigiert: Snapshot-Digest mit Change-Detection eingefuehrt und Guild-Sync via Comm (`EQUIPMENT_V1`) nur bei echten Aenderungen aktiviert; Memory-Buffer-Flush bei spaeter Options-Initialisierung ergaenzt (`GMS/Modules/Equipment.lua`).
+- [x] Raids-Guild-Sync korrigiert: Digest-basierte Aenderungserkennung und Comm-Publish (`RAIDS_V1`) fuer neue Lockout-/Progress-Daten hinzugefuegt (`GMS/Modules/Raids.lua`).
+- [x] MythicPlus-Guild-Sync korrigiert: Digest-basierte Aenderungserkennung und Comm-Publish (`MYTHICPLUS_V1`) fuer aktualisierte Score-/Dungeon-Daten hinzugefuegt (`GMS/Modules/MythicPlus.lua`).
 
 ### Rules/Infra
 - [ ] (leer)

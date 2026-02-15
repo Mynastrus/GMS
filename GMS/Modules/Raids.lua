@@ -70,7 +70,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.5",
+	VERSION      = "1.2.6",
 }
 
 -- ###########################################################################
@@ -111,6 +111,7 @@ end
 -- ###########################################################################
 
 local MODULE_NAME = METADATA.INTERN_NAME
+local RAIDS_SYNC_DOMAIN = "RAIDS_V1"
 
 local RAIDS = GMS:GetModule(MODULE_NAME, true)
 if not RAIDS then
@@ -197,6 +198,73 @@ local function ensureStore()
 	end
 
 	return RAIDS._options, charKey
+end
+
+local function _publishRaidsToGuild(payload, reason)
+	local comm = GMS and GMS.Comm or nil
+	if type(comm) ~= "table" or type(comm.PublishCharacterRecord) ~= "function" then
+		return false, "comm-unavailable"
+	end
+	local wire = {
+		module = METADATA.SHORT_NAME,
+		version = METADATA.VERSION,
+		reason = tostring(reason or "unknown"),
+		raids = payload,
+	}
+	return comm:PublishCharacterRecord(RAIDS_SYNC_DOMAIN, wire)
+end
+
+local function _buildRaidsDigest(raidsStore)
+	if type(raidsStore) ~= "table" then return "" end
+	local instanceIDs = {}
+	for instanceID in pairs(raidsStore) do
+		instanceIDs[#instanceIDs + 1] = tonumber(instanceID) or instanceID
+	end
+	table.sort(instanceIDs, function(a, b)
+		return tostring(a) < tostring(b)
+	end)
+
+	local out = {}
+	for i = 1, #instanceIDs do
+		local iid = instanceIDs[i]
+		local raidEntry = raidsStore[iid]
+		if type(raidEntry) == "table" then
+			out[#out + 1] = "I:" .. tostring(iid) .. ":" .. tostring(raidEntry.total or 0)
+			local best = raidEntry.best
+			if type(best) == "table" then
+				out[#out + 1] = "B:" .. tostring(best.diffID or "") .. ":" .. tostring(best.killed or 0) .. "/" .. tostring(best.total or 0)
+			else
+				out[#out + 1] = "B:-"
+			end
+
+			local current = raidEntry.current
+			if type(current) == "table" then
+				local diffIDs = {}
+				for diffID in pairs(current) do
+					diffIDs[#diffIDs + 1] = tonumber(diffID) or diffID
+				end
+				table.sort(diffIDs, function(a, b)
+					local an = tonumber(a)
+					local bn = tonumber(b)
+					if an and bn then return an < bn end
+					return tostring(a) < tostring(b)
+				end)
+
+				for j = 1, #diffIDs do
+					local d = diffIDs[j]
+					local cur = current[d]
+					if type(cur) == "table" then
+						out[#out + 1] = "C:" .. tostring(d) .. ":" .. tostring(cur.killed or 0) .. "/" .. tostring(cur.total or 0)
+							.. ":" .. tostring(cur.locked == true)
+							.. ":" .. tostring(cur.extended == true)
+							.. ":" .. tostring(cur.resetAt or 0)
+					end
+				end
+			end
+		end
+	end
+
+	return table.concat(out, "|")
 end
 
 -- ###########################################################################
@@ -575,6 +643,7 @@ end
 
 function RAIDS:OnInitialize()
 	LOCAL_LOG("INFO", "Initializing Raids module", METADATA.VERSION)
+	self:InitializeOptions()
 	self._pendingScan = false
 	self._scanToken = 0
 	self._ejReady = false
@@ -583,11 +652,23 @@ end
 
 function RAIDS:OnEnable()
 	LOCAL_LOG("INFO", "Enabling Raids module")
+	self:InitializeOptions()
+
 	-- SavedInstances update
 	if RequestRaidInfo and GetNumSavedInstances and GetSavedInstanceInfo then
 		self:RegisterEvent("UPDATE_INSTANCE_INFO", "OnUpdateInstanceInfo")
 	else
 		LOCAL_LOG("WARN", "Saved instances API not available")
+	end
+
+	self:RegisterEvent("PLAYER_LOGIN", "OnPlayerLogin")
+	self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnEnteringWorld")
+	self:RegisterEvent("ENCOUNTER_END", "OnEncounterEnd")
+	self:RegisterEvent("BOSS_KILL", "OnBossKill")
+
+	if not self:_ProbeEJReady() then
+		self:RegisterEvent("ADDON_LOADED", "ADDON_LOADED")
+		self:_TryLoadEncounterJournal()
 	end
 
 	-- Try to build EJ catalog early (gated until EJ is ready)
@@ -611,6 +692,9 @@ end
 
 function RAIDS:OnDisable()
 	LOCAL_LOG("INFO", "Disabling Raids module")
+	if type(self.UnregisterAllEvents) == "function" then
+		self:UnregisterAllEvents()
+	end
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
 
@@ -716,8 +800,11 @@ function RAIDS:OnUpdateInstanceInfo()
 		return
 	end
 
-	local catalog = store.catalog
-	local raidsStore = store.raids
+	local raidsStore = getRaidsStore()
+	if type(raidsStore) ~= "table" then
+		LOCAL_LOG("WARN", "OnUpdateInstanceInfo: raids store unavailable")
+		return
+	end
 	local tsNow = now()
 
 	-- Cleanup expired current lockouts (do not touch best)
@@ -822,6 +909,19 @@ function RAIDS:OnUpdateInstanceInfo()
 		if self._ejReady then
 			self:RebuildCatalog()
 			self:_ScheduleScan("rescan_after_unresolved", 2.0)
+		end
+	end
+
+	store.lastScan = tsNow or now()
+	local digest = _buildRaidsDigest(raidsStore)
+	local previousDigest = tostring(store.lastDigest or "")
+	store.lastDigest = digest
+	if digest ~= "" and digest ~= previousDigest then
+		local ok, publishReason = _publishRaidsToGuild(raidsStore, self._pendingReason)
+		if ok then
+			LOCAL_LOG("INFO", "Raids snapshot published", self._pendingReason or "?")
+		else
+			LOCAL_LOG("WARN", "Raids publish failed", tostring(publishReason or "unknown"), self._pendingReason or "?")
 		end
 	end
 
