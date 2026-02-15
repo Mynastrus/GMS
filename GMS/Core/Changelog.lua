@@ -34,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.7",
+	VERSION      = "1.3.8",
 }
 
 -- ###########################################################################
@@ -95,6 +95,24 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 -- ###########################################################################
 
 local RELEASES = {
+	{
+		version = "1.4.2",
+		date = "2026-02-15",
+		title_en = "Expanded locale coverage and branding consistency",
+		title_de = "Erweiterte Sprachabdeckung und konsistentes Branding",
+		notes_en = {
+			"Added dedicated locale files for frFR, esES, itIT, ptBR, ruRU, koKR, zhCN, and zhTW.",
+			"Added centralized locale fallback registration for common WoW locales, including esMX fallback to esES.",
+			"Updated Russian locale to Cyrillic strings while keeping all localization keys and format placeholders stable.",
+			"Corrected remaining UI branding text from 'Guild Management Suite' to 'Guild Management System'.",
+		},
+		notes_de = {
+			"Dedizierte Locale-Dateien fuer frFR, esES, itIT, ptBR, ruRU, koKR, zhCN und zhTW hinzugefuegt.",
+			"Zentrale Fallback-Registrierung fuer gaengige WoW-Sprachen ergaenzt, inkl. esMX-Fallback auf esES.",
+			"Russische Locale auf kyrillische Texte umgestellt, bei unveraenderten Localization-Keys und Platzhaltern.",
+			"Verbleibenden UI-Branding-Text von 'Guild Management Suite' auf 'Guild Management System' korrigiert.",
+		},
+	},
 	{
 		version = "1.4.1",
 		date = "2026-02-15",
