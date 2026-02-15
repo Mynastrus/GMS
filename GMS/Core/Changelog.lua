@@ -96,6 +96,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.4.5",
+		date = "2026-02-15",
+		title_en = "Stability fixes, CharInfo expansion, and release automation polish",
+		title_de = "Stabilitaetsfixes, CharInfo-Erweiterung und Release-Automation verfeinert",
+		notes_en = {
+			"Hardened Raid Encounter Journal readiness checks and API rebinding to avoid nil upvalue calls during initialization.",
+			"Stabilized Permissions and Logs page layout/render behavior to prevent compressed content and incorrect initial widths.",
+			"Expanded CharInfo profile coverage with Mythic+, raid status, equipment, talents, and PvP summary, prioritizing guild sync records when available.",
+			"Guarded CharInfo PvP API calls with protected execution to prevent page build failures from runtime argument errors.",
+			"CurseForge publish workflow now attaches a generated bilingual EN/DE markdown changelog directly from the latest release entry.",
+		},
+		notes_de = {
+			"Raid-Encounter-Journal-Readiness und API-Rebinding gehaertet, um nil-Upvalue-Aufrufe waehrend der Initialisierung zu vermeiden.",
+			"Layout- und Render-Verhalten von Permissions- und Logs-Seiten stabilisiert, damit Inhalte nicht gequetscht werden und die Initialbreiten korrekt sind.",
+			"CharInfo-Profil um Mythic+, Raidstatus, Equipment, Talente und PvP-Status erweitert; vorhandene Guild-Sync-Records werden bevorzugt ausgewertet.",
+			"CharInfo-PvP-API-Aufrufe per geschuetzter Ausfuehrung abgesichert, um Seitenaufbau-Fehler bei Laufzeit-Argumentproblemen zu verhindern.",
+			"CurseForge-Publish-Workflow sendet jetzt automatisch einen generierten zweisprachigen EN/DE-Markdown-Changelog aus dem neuesten Release-Eintrag mit.",
+		},
+	},
+	{
 		version = "1.4.4",
 		date = "2026-02-15",
 		title_en = "Cross-module roster sync and automated CurseForge delivery",
