@@ -53,6 +53,105 @@ jobs:
           mkdir -p RELEASE
           zip -r "RELEASE/GMS_${{ steps.version.outputs.version }}.zip" GMS
 
+      - name: Build CurseForge changelog (EN + DE)
+        id: changelog
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          def extract_first_release_block(text: str) -> str:
+            marker = "local RELEASES = {"
+            start = text.find(marker)
+            if start == -1:
+              raise ValueError("RELEASES block not found")
+            i = text.find("{", start)
+            if i == -1:
+              raise ValueError("RELEASES opening brace not found")
+            depth = 0
+            in_str = False
+            escape = False
+            first_entry_started = False
+            entry_start = -1
+            for idx in range(i, len(text)):
+              ch = text[idx]
+              if in_str:
+                if escape:
+                  escape = False
+                elif ch == "\\":
+                  escape = True
+                elif ch == '"':
+                  in_str = False
+                continue
+              if ch == '"':
+                in_str = True
+                continue
+              if ch == "{":
+                depth += 1
+                if depth == 2 and not first_entry_started:
+                  first_entry_started = True
+                  entry_start = idx
+                continue
+              if ch == "}":
+                if depth == 2 and first_entry_started:
+                  return text[entry_start:idx + 1]
+                depth -= 1
+            raise ValueError("Could not extract first release entry")
+
+          def field(block: str, key: str, default: str = "") -> str:
+            m = re.search(rf'\b{re.escape(key)}\s*=\s*"([^"]*)"', block)
+            return m.group(1).strip() if m else default
+
+          def notes(block: str, key: str):
+            m = re.search(rf'\b{re.escape(key)}\s*=\s*\{{(.*?)\n\s*\}}', block, re.S)
+            if not m:
+              return []
+            inner = m.group(1)
+            return [x.strip() for x in re.findall(r'"([^"]*)"', inner)]
+
+          path = pathlib.Path("GMS/Core/Changelog.lua")
+          text = path.read_text(encoding="utf-8")
+          block = extract_first_release_block(text)
+
+          version = field(block, "version", "unknown")
+          date = field(block, "date", "unknown")
+          title_en = field(block, "title_en", "Release")
+          title_de = field(block, "title_de", "Release")
+          notes_en = notes(block, "notes_en")
+          notes_de = notes(block, "notes_de")
+
+          lines = []
+          lines.append(f"# GMS {version}")
+          lines.append("")
+          lines.append(f"**Date:** {date}")
+          lines.append("")
+          lines.append(f"## EN - {title_en}")
+          if notes_en:
+            lines.extend([f"- {n}" for n in notes_en])
+          else:
+            lines.append("- Maintenance update.")
+          lines.append("")
+          lines.append(f"## DE - {title_de}")
+          if notes_de:
+            lines.extend([f"- {n}" for n in notes_de])
+          else:
+            lines.append("- Wartungsupdate.")
+          lines.append("")
+          lines.append("_Generated from `GMS/Core/Changelog.lua` (`RELEASES[1]`)._")
+
+          markdown = "\n".join(lines).strip() + "\n"
+
+          out = pathlib.Path(__import__("os").environ["GITHUB_OUTPUT"])
+          with out.open("a", encoding="utf-8") as f:
+            f.write("text<<EOF\n")
+            f.write(markdown)
+            f.write("EOF\n")
+
+          sys.stdout.write(markdown)
+          PY
+
       - name: Upload to CurseForge
         uses: itsmeow/curseforge-upload@v3
         with:
@@ -63,3 +162,4 @@ jobs:
           release_type: ${{ github.event.inputs.release_type || 'release' }}
           display_name: GMS ${{ steps.version.outputs.version }}
           changelog_type: markdown
+          changelog: ${{ steps.changelog.outputs.text }}
