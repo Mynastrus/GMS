@@ -9,7 +9,7 @@ local METADATA = {
 	INTERN_NAME  = "DB",
 	SHORT_NAME   = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION      = "1.1.1",
+	VERSION      = "1.1.5",
 }
 
 -- Blizzard Globals
@@ -217,9 +217,87 @@ function GMS:GetCharacterGUID()
 end
 
 function GMS:GetGuildStorageKey()
-	local g = self:GetGuildGUID()
-	if type(g) == "string" and g ~= "" then return g end
-	return "NO_GUILD"
+	local function normalize(s)
+		return tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	end
+
+	local function getCanonicalKey()
+		if not IsInGuild or not IsInGuild() then return nil end
+		local guildName = nil
+		if type(GetGuildInfo) == "function" then
+			local n = select(1, GetGuildInfo("player"))
+			if type(n) == "string" and n ~= "" then guildName = n end
+		end
+		if (not guildName or guildName == "") and type(C_GuildInfo) == "table" and type(C_GuildInfo.GetGuildInfo) == "function" then
+			local ok, n = pcall(C_GuildInfo.GetGuildInfo, "player")
+			if ok and type(n) == "string" and n ~= "" then guildName = n end
+		end
+		guildName = normalize(guildName)
+		if guildName == "" then return nil end
+		local realm = normalize((type(GetRealmName) == "function" and GetRealmName()) or "Unknown")
+		local faction = normalize((type(UnitFactionGroup) == "function" and UnitFactionGroup("player")) or "Unknown")
+		if realm == "" then realm = "Unknown" end
+		if faction == "" then faction = "Unknown" end
+		return string.format("%s|%s|%s", realm, faction, guildName), guildName, faction
+	end
+
+	local canonical, guildName, faction = getCanonicalKey()
+	local guidKey = self:GetGuildGUID()
+
+	-- Fallback: if exactly one guild bucket exists, reuse it.
+	if self.db and type(self.db.global) == "table" and type(self.db.global.guilds) == "table" then
+		local buckets = self.db.global.guilds
+
+		if type(canonical) == "string" and canonical ~= "" and type(buckets[canonical]) == "table" then
+			return canonical
+		end
+		if type(guidKey) == "string" and guidKey ~= "" and type(buckets[guidKey]) == "table" then
+			return guidKey
+		end
+
+		-- Legacy key recovery: find unique key by guild/faction suffix.
+		local suffixMatch = nil
+		local suffixCount = 0
+		local preferredByData = nil
+		if guildName and guildName ~= "" then
+			local suffix = "|" .. tostring(guildName)
+			local factionNeedle = "|" .. tostring(faction or "")
+			for k, v in pairs(buckets) do
+				if type(k) == "string" and type(v) == "table" and k:sub(-#suffix) == suffix then
+					if faction == "" or k:find(factionNeedle, 1, true) then
+						suffixCount = suffixCount + 1
+						if not suffixMatch then suffixMatch = k end
+						if type(v.GUILDLOG) == "table" and type(v.GUILDLOG.entries) == "table" and #v.GUILDLOG.entries > 0 then
+							preferredByData = k
+						end
+					end
+				end
+			end
+		end
+		if preferredByData then
+			return preferredByData
+		end
+		if suffixCount == 1 and suffixMatch then
+			return suffixMatch
+		end
+
+		local first = nil
+		local count = 0
+		for k in pairs(buckets) do
+			if type(k) == "string" and k ~= "" then
+				count = count + 1
+				if not first then first = k end
+				if count > 1 then break end
+			end
+		end
+		if count == 1 and first then
+			return first
+		end
+	end
+
+	if type(canonical) == "string" and canonical ~= "" then return canonical end
+	if type(guidKey) == "string" and guidKey ~= "" then return guidKey end
+	return nil
 end
 
 -- Early init attempt (harmless if Core runs it again later)
@@ -248,6 +326,13 @@ local function ApplyDefaults(target, defaults)
 	end
 end
 
+local function NormalizeModuleKey(moduleName)
+	local key = tostring(moduleName or "")
+	key = key:gsub("^%s+", ""):gsub("%s+$", "")
+	if key == "" then return nil end
+	return string.upper(key)
+end
+
 local function GetScopeRoot(self, scope)
 	if type(self.InitializeStandardDatabases) == "function" then
 		self:InitializeStandardDatabases(false)
@@ -273,6 +358,9 @@ local function GetScopeRoot(self, scope)
 	elseif scope == "GUILD" then
 		global.guilds = type(global.guilds) == "table" and global.guilds or {}
 		local gKey = self:GetGuildStorageKey()
+		if type(gKey) ~= "string" or gKey == "" then
+			return nil
+		end
 		global.guilds[gKey] = type(global.guilds[gKey]) == "table" and global.guilds[gKey] or {}
 		return global.guilds[gKey]
 	end
@@ -284,37 +372,44 @@ end
 -- @param defaults table: The default values (flat table)
 -- @param scope string: "PROFILE", "GLOBAL", "CHAR", "GUILD"
 function GMS:RegisterModuleOptions(moduleName, defaults, scope)
-	if not moduleName then return nil end
+	local moduleKey = NormalizeModuleKey(moduleName)
+	if not moduleKey then return nil end
 	scope = string.upper(tostring(scope or "PROFILE"))
 
-	local root = GetScopeRoot(self, scope)
-	if type(root) ~= "table" then return nil end
-
-	root[moduleName] = type(root[moduleName]) == "table" and root[moduleName] or {}
-	ApplyDefaults(root[moduleName], defaults)
-
-	-- Store registration meta
-	GMS.DB._registrations[moduleName] = {
-		name = moduleName,
+	-- Always persist registration metadata, even when scope root is not ready yet
+	-- (e.g. early boot before guild key becomes available).
+	GMS.DB._registrations[moduleKey] = {
+		name = moduleKey,
 		defaults = defaults,
 		scope = scope,
 		namespace = nil,
 	}
 
-	LOCAL_LOG("DEBUG", "Registered options", moduleName, scope)
-	return root[moduleName]
+	local root = GetScopeRoot(self, scope)
+	if type(root) ~= "table" then
+		LOCAL_LOG("DEBUG", "Registered options deferred (scope root unavailable)", moduleKey, scope)
+		return nil
+	end
+
+	root[moduleKey] = type(root[moduleKey]) == "table" and root[moduleKey] or {}
+	ApplyDefaults(root[moduleKey], defaults)
+
+	LOCAL_LOG("DEBUG", "Registered options", moduleKey, scope)
+	return root[moduleKey]
 end
 
 --- Retrieves the option table for a module, respecting its scope.
 function GMS:GetModuleOptions(moduleName)
-	local reg = GMS.DB._registrations[moduleName]
+	local moduleKey = NormalizeModuleKey(moduleName)
+	if not moduleKey then return nil end
+	local reg = GMS.DB._registrations[moduleKey]
 	if not reg then return nil end
 
 	local root = GetScopeRoot(self, reg.scope)
 	if type(root) ~= "table" then return nil end
-	root[moduleName] = type(root[moduleName]) == "table" and root[moduleName] or {}
-	ApplyDefaults(root[moduleName], reg.defaults)
-	return root[moduleName]
+	root[moduleKey] = type(root[moduleKey]) == "table" and root[moduleKey] or {}
+	ApplyDefaults(root[moduleKey], reg.defaults)
+	return root[moduleKey]
 end
 
 --- Resets all databases to defaults.

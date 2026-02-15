@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "GUILDLOG",
 	SHORT_NAME   = "GuildLog",
 	DISPLAY_NAME = "Guild Log",
-	VERSION      = "1.1.0",
+	VERSION      = "1.1.6",
 }
 
 local LibStub = LibStub
@@ -38,6 +38,10 @@ local wipe = wipe
 
 local AceGUI = LibStub("AceGUI-3.0", true)
 if not AceGUI then return end
+
+---@diagnostic disable: undefined-global
+local _G = _G
+---@diagnostic enable: undefined-global
 
 GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
 
@@ -69,6 +73,7 @@ end
 GMS[MODULE_NAME] = GuildLog
 
 GuildLog._options = GuildLog._options or nil
+GuildLog._optionsBound = GuildLog._optionsBound or false
 GuildLog._snapshot = GuildLog._snapshot or nil
 GuildLog._pageRegistered = GuildLog._pageRegistered or false
 GuildLog._dockRegistered = GuildLog._dockRegistered or false
@@ -85,25 +90,121 @@ local OPTIONS_DEFAULTS = {
 	maxEntries = 1000,
 }
 
-GuildLog._optionsRegistered = GuildLog._optionsRegistered or false
-
-local function EnsureModuleOptionsRegistered()
-	if GuildLog._optionsRegistered then return end
-	if type(GMS.RegisterModuleOptions) ~= "function" then return end
-	pcall(function()
-		GMS:RegisterModuleOptions(MODULE_NAME, OPTIONS_DEFAULTS, "GUILD")
-	end)
-	GuildLog._optionsRegistered = true
-end
-
 local function GetScopedOptions()
-	EnsureModuleOptionsRegistered()
-	if type(GMS.GetModuleOptions) ~= "function" then return nil end
-	local ok, opts = pcall(GMS.GetModuleOptions, GMS, MODULE_NAME)
-	if not ok or type(opts) ~= "table" then
+	if type(GMS.InitializeStandardDatabases) == "function" then
+		pcall(GMS.InitializeStandardDatabases, GMS, false)
+	end
+	if not GMS or type(GMS.db) ~= "table" or type(GMS.db.global) ~= "table" then
 		return nil
 	end
-	return opts
+
+	local global = GMS.db.global
+	global.guilds = type(global.guilds) == "table" and global.guilds or {}
+
+	local guildKey = nil
+	if type(GMS.GetGuildStorageKey) == "function" then
+		guildKey = GMS:GetGuildStorageKey()
+	end
+
+	if type(guildKey) ~= "string" or guildKey == "" then
+		local first = nil
+		local count = 0
+		for k in pairs(global.guilds) do
+			if type(k) == "string" and k ~= "" then
+				count = count + 1
+				if not first then first = k end
+				if count > 1 then break end
+			end
+		end
+		if count == 1 and first then
+			guildKey = first
+		end
+	end
+	if type(guildKey) ~= "string" or guildKey == "" then
+		return nil
+	end
+
+	global.guilds[guildKey] = type(global.guilds[guildKey]) == "table" and global.guilds[guildKey] or {}
+	local gRoot = global.guilds[guildKey]
+
+	-- Key-compat: migrate old mixed-case module buckets into canonical key.
+	if type(gRoot[MODULE_NAME]) ~= "table" then
+		local legacyKeys = { "GuildLog", "guildlog" }
+		for i = 1, #legacyKeys do
+			local lk = legacyKeys[i]
+			if type(gRoot[lk]) == "table" then
+				gRoot[MODULE_NAME] = gRoot[lk]
+				gRoot[lk] = nil
+				break
+			end
+		end
+	end
+	gRoot[MODULE_NAME] = type(gRoot[MODULE_NAME]) == "table" and gRoot[MODULE_NAME] or {}
+
+	-- Legacy migration: try to import old guildlog buckets once if current is empty.
+	local target = gRoot[MODULE_NAME]
+	local targetEntries = (type(target.entries) == "table") and target.entries or nil
+	local isEmpty = (not targetEntries) or (#targetEntries == 0)
+	if isEmpty then
+		local candidates = { "GUILDACTIVITY", "GuildActivity", "guildactivity", "GUILD_ACTIVITY", "GA" }
+		for i = 1, #candidates do
+			local key = candidates[i]
+			local src = gRoot[key]
+			if type(src) == "table" and type(src.entries) == "table" and #src.entries > 0 then
+				target.entries = src.entries
+				if type(src.memberHistory) == "table" and next(src.memberHistory) ~= nil then
+					target.memberHistory = src.memberHistory
+				end
+				if src.chatEcho ~= nil then
+					target.chatEcho = src.chatEcho and true or false
+				end
+				if src.maxEntries ~= nil then
+					target.maxEntries = tonumber(src.maxEntries) or target.maxEntries
+				end
+				LOCAL_LOG("INFO", "Migrated GuildLog legacy entries from guild bucket key", key, #src.entries)
+				break
+			end
+		end
+	end
+
+	-- Legacy migration: optional import from deprecated GMS_Guild_DB if available.
+	if (type(target.entries) ~= "table" or #target.entries == 0) and type(_G) == "table" and type(_G.GMS_Guild_DB) == "table" then
+		local old = _G.GMS_Guild_DB[guildKey]
+		if type(old) ~= "table" then
+			-- fallback: single bucket in legacy DB
+			local first, count = nil, 0
+			for k, v in pairs(_G.GMS_Guild_DB) do
+				if type(v) == "table" then
+					count = count + 1
+					if not first then first = v end
+					if count > 1 then break end
+				end
+			end
+			if count == 1 then old = first end
+		end
+		if type(old) == "table" then
+			local oldCandidates = { old[MODULE_NAME], old.GUILDACTIVITY, old.GuildActivity, old.guildactivity, old.GUILD_ACTIVITY, old.GA, old }
+			for i = 1, #oldCandidates do
+				local src = oldCandidates[i]
+				if type(src) == "table" and type(src.entries) == "table" and #src.entries > 0 then
+					target.entries = src.entries
+					if type(src.memberHistory) == "table" and next(src.memberHistory) ~= nil then
+						target.memberHistory = src.memberHistory
+					end
+					if src.chatEcho ~= nil then
+						target.chatEcho = src.chatEcho and true or false
+					end
+					if src.maxEntries ~= nil then
+						target.maxEntries = tonumber(src.maxEntries) or target.maxEntries
+					end
+					LOCAL_LOG("INFO", "Migrated GuildLog legacy entries from GMS_Guild_DB", #src.entries)
+					break
+				end
+			end
+		end
+	end
+
+	return gRoot[MODULE_NAME]
 end
 
 local function T(key, fallback, ...)
@@ -126,9 +227,33 @@ local function ClampMaxEntries(v)
 end
 
 local function EnsureOptions()
-	local opts = GetScopedOptions()
-	if type(opts) ~= "table" then
-		opts = GuildLog._options or {}
+	local current = GuildLog._options
+	local scoped = GetScopedOptions()
+	local opts = nil
+
+	if type(scoped) == "table" then
+		opts = scoped
+		GuildLog._optionsBound = true
+
+		-- If we started in RAM fallback before guild key was available,
+		-- merge runtime data into the real persistent table once bound.
+		if type(current) == "table" and current ~= opts then
+			if (type(opts.entries) ~= "table" or #opts.entries == 0) and type(current.entries) == "table" and #current.entries > 0 then
+				opts.entries = current.entries
+			end
+			if (type(opts.memberHistory) ~= "table" or next(opts.memberHistory) == nil) and type(current.memberHistory) == "table" then
+				opts.memberHistory = current.memberHistory
+			end
+			if opts.chatEcho == nil and current.chatEcho ~= nil then
+				opts.chatEcho = current.chatEcho and true or false
+			end
+			if opts.maxEntries == nil and current.maxEntries ~= nil then
+				opts.maxEntries = tonumber(current.maxEntries) or opts.maxEntries
+			end
+		end
+	else
+		opts = current or {}
+		GuildLog._optionsBound = false
 	end
 
 	if opts.chatEcho == nil then opts.chatEcho = false end
@@ -140,21 +265,35 @@ local function EnsureOptions()
 end
 
 local function EnsureOptionsCompat()
-	-- Keep function name for existing call sites during transition; now fully new DB only.
-	local opts = GetScopedOptions()
-	if type(opts) == "table" then GuildLog._options = opts end
+	-- Keep function name for existing call sites.
 	return EnsureOptions()
 end
 
+local function SyncOptionsToScoped()
+	local opts = EnsureOptionsCompat()
+	if type(opts) ~= "table" then return opts end
+	local scoped = GetScopedOptions()
+	if type(scoped) ~= "table" then return opts end
+
+	-- Persist current runtime state immediately into the guild-scoped DB table.
+	scoped.chatEcho = opts.chatEcho and true or false
+	scoped.maxEntries = ClampMaxEntries(opts.maxEntries)
+	scoped.entries = type(opts.entries) == "table" and opts.entries or {}
+	scoped.memberHistory = type(opts.memberHistory) == "table" and opts.memberHistory or {}
+	GuildLog._options = scoped
+	GuildLog._optionsBound = true
+	return scoped
+end
+
 local function Entries()
-	local opts = GuildLog._options or EnsureOptionsCompat()
+	local opts = EnsureOptionsCompat()
 	if type(opts) ~= "table" then return nil end
 	if type(opts.entries) ~= "table" then opts.entries = {} end
 	return opts.entries
 end
 
 local function MemberHistory()
-	local opts = GuildLog._options or EnsureOptionsCompat()
+	local opts = EnsureOptionsCompat()
 	if type(opts) ~= "table" then return nil end
 	if type(opts.memberHistory) ~= "table" then opts.memberHistory = {} end
 	return opts.memberHistory
@@ -168,7 +307,7 @@ local function FormatNow()
 end
 
 local function PushEntry(kind, msg, data)
-	local opts = GuildLog._options or EnsureOptionsCompat()
+	local opts = EnsureOptionsCompat()
 	local entries = Entries()
 	if type(entries) ~= "table" then return end
 
@@ -184,6 +323,9 @@ local function PushEntry(kind, msg, data)
 	while #entries > maxEntries do
 		table.remove(entries, 1)
 	end
+
+	-- Hard persist mirror to avoid any runtime ref ambiguity.
+	opts = SyncOptionsToScoped() or opts
 
 	if opts and opts.chatEcho and type(GMS.Print) == "function" then
 		GMS:Print("|cff03A9F4[GuildLog]|r " .. tostring(msg or ""))
@@ -417,7 +559,7 @@ local function BuildCurrentRosterSnapshot()
 		return out
 	end
 
-	local total = tonumber(GetNumGuildMembers()) or 0
+	local total = tonumber((select(1, GetNumGuildMembers()))) or 0
 	for i = 1, total do
 		local name, rank, rankIndex, level, class, zone, note, officerNote, online, status, classFileName, _, _, _, _, _, guid = GetGuildRosterInfo(i)
 		local nameShort, realm, normalizedName = SplitNameRealm(name)
@@ -720,20 +862,17 @@ local function RegisterPage()
 	if not ui or type(ui.RegisterPage) ~= "function" then return false end
 	if GuildLog._pageRegistered then return true end
 
-	ui:RegisterPage(MODULE_NAME, 70, T("GA_PAGE_TITLE", "Guild Activity"), function(root, _, isCached)
+	ui:RegisterPage(MODULE_NAME, 70, T("GA_PAGE_TITLE", "Guild Activity"), function(root, _, _)
+		if type(root.ReleaseChildren) == "function" then
+			pcall(root.ReleaseChildren, root)
+		end
+
 		if ui and type(ui.Header_BuildIconText) == "function" then
 			ui:Header_BuildIconText({
 				icon = "Interface\\Icons\\Achievement_Guildperk_EverybodysFriend",
 				text = "|cff03A9F4" .. T("GA_HEADER_TITLE", "Guild Activity Log") .. "|r",
 				subtext = T("GA_HEADER_SUB", "Tracks guild roster changes in a dedicated module log."),
 			})
-		end
-
-		if isCached then
-			if GuildLog._ui and type(GuildLog._ui.render) == "function" then
-				GuildLog._ui.render()
-			end
-			return
 		end
 
 		root:SetLayout("Fill")
@@ -752,11 +891,15 @@ local function RegisterPage()
 		local cbChat = AceGUI:Create("CheckBox")
 		cbChat:SetLabel(T("GA_CHAT_ECHO", "Post new entries in chat"))
 		cbChat:SetWidth(260)
-		cbChat:SetValue((GuildLog._options and GuildLog._options.chatEcho) == true)
+		do
+			local opts = EnsureOptionsCompat()
+			cbChat:SetValue((type(opts) == "table" and opts.chatEcho) == true)
+		end
 		cbChat:SetCallback("OnValueChanged", function(_, _, v)
-			local opts = GuildLog._options or EnsureOptionsCompat()
+			local opts = EnsureOptionsCompat()
 			if type(opts) == "table" then
 				opts.chatEcho = v and true or false
+				SyncOptionsToScoped()
 			end
 		end)
 		controls:AddChild(cbChat)
@@ -784,15 +927,37 @@ local function RegisterPage()
 		end)
 		controls:AddChild(btnClear)
 
+		local statusLine = AceGUI:Create("Label")
+		statusLine:SetFullWidth(true)
+		statusLine:SetText("")
+		wrapper:AddChild(statusLine)
+
 		local scroller = AceGUI:Create("ScrollFrame")
 		scroller:SetLayout("List")
 		scroller:SetFullWidth(true)
 		scroller:SetFullHeight(true)
 		wrapper:AddChild(scroller)
 
+		local function updateStatusLine(entriesCount)
+			local opts = EnsureOptionsCompat()
+			local guildKey = type(GMS.GetGuildStorageKey) == "function" and tostring(GMS:GetGuildStorageKey() or "-") or "-"
+			local hist = type(opts) == "table" and opts.memberHistory or nil
+			local histCount = 0
+			if type(hist) == "table" then
+				for _ in pairs(hist) do histCount = histCount + 1 end
+			end
+			local chatEcho = (type(opts) == "table" and opts.chatEcho) and "|cff00ff00ON|r" or "|cffff4040OFF|r"
+			statusLine:SetText(string.format(
+				"|cffb0b0b0DB:|r %s  |cffb0b0b0Entries:|r %d  |cffb0b0b0History:|r %d  |cffb0b0b0Chat:|r %s",
+				guildKey, tonumber(entriesCount) or 0, histCount, chatEcho
+			))
+		end
+
 		local function render()
+			EnsureOptionsCompat()
 			local entries = Entries() or {}
 			scroller:ReleaseChildren()
+			updateStatusLine(#entries)
 
 			if #entries == 0 then
 				local empty = AceGUI:Create("Label")
@@ -887,6 +1052,7 @@ end
 
 function GuildLog:InitializeOptions()
 	EnsureOptions()
+	SyncOptionsToScoped()
 end
 
 function GuildLog:OnEnable()
@@ -904,7 +1070,8 @@ function GuildLog:OnEnable()
 	end
 
 	self:RegisterEvent("GUILD_ROSTER_UPDATE", function()
-		GuildLog:ScheduleScan(false, true)
+		GuildLog:InitializeOptions()
+		GuildLog:ScheduleScan(true, true)
 	end)
 	self:RegisterEvent("PLAYER_GUILD_UPDATE", function()
 		GuildLog:InitializeOptions()
