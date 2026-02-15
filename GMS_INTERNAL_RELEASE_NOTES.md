@@ -37,6 +37,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] GuildLog-Hard-Persist-Mirror hinzugefuegt: Eintraege werden zusaetzlich explizit in den aktuellen Guild-Bucket geschrieben, um Referenz-/Timing-Ambiguitaeten zu eliminieren.
 - [x] GuildLog-UI bindet jetzt beim Rendern/Toggle immer aktiv an die persistente Guild-Optionstabelle; historische Eintraege und `chatEcho`-Status bleiben damit nach Reload sichtbar.
 - [x] GuildLog-UI rendert bei jedem Oeffnen vollstaendig neu (kein Cache-Stale), inklusive Statuszeile mit aktivem DB-Key, Entry-Count, History-Count und ChatEcho-Status.
+- [x] GuildLog-UI zeigt bei fehlenden Legacy-Entries jetzt eine rekonstruierte Historienansicht aus `memberHistory` (Join/Leave/Rejoin-Zaehler), damit Altstaende sichtbar bleiben.
 
 ### Rules/Infra
 - [x] Versionsupdates fuer geaenderte Dateien gemaess Projektregeln (`Database`, `Comm`, `GuildLog`).

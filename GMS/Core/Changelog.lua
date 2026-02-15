@@ -96,6 +96,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.4.1",
+		date = "2026-02-15",
+		title_en = "GuildLog UI recovery and legacy visibility improvements",
+		title_de = "GuildLog-UI-Recovery und verbesserte Legacy-Sichtbarkeit",
+		notes_en = {
+			"Reworked GuildLog page rendering to rebuild reliably on each open and avoid stale page cache state.",
+			"Added GuildLog status line in UI showing active DB guild key, entry count, history count, and chat echo state.",
+			"Improved guild storage key resolution so existing guild buckets with data are reused consistently.",
+			"Added legacy GuildLog migration from old module keys and deprecated guild DB layouts.",
+			"When legacy installs have member history but missing activity entries, UI now shows reconstructed history rows as fallback.",
+		},
+		notes_de = {
+			"GuildLog-Seitenrendering ueberarbeitet: wird bei jedem Oeffnen zuverlaessig neu aufgebaut und ist damit cache-stabil.",
+			"Statuszeile im GuildLog-UI hinzugefuegt (aktiver DB-Guild-Key, Entry-Anzahl, History-Anzahl, Chat-Echo-Status).",
+			"Guild-Storage-Key-Aufloesung verbessert, sodass bestehende Guild-Buckets mit Daten konsistent wiederverwendet werden.",
+			"Legacy-Migration fuer GuildLog aus alten Modul-Keys und veralteten Guild-DB-Layouts ergaenzt.",
+			"Falls bei Legacy-Installationen Historie vorhanden ist, aber Activity-Entries fehlen, zeigt die UI jetzt rekonstruierte Historienzeilen als Fallback.",
+		},
+	},
+	{
 		version = "1.4.0",
 		date = "2026-02-14",
 		title_en = "Guild data sync foundation and GuildLog module release",

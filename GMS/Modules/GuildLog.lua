@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "GUILDLOG",
 	SHORT_NAME   = "GuildLog",
 	DISPLAY_NAME = "Guild Log",
-	VERSION      = "1.1.6",
+	VERSION      = "1.1.7",
 }
 
 local LibStub = LibStub
@@ -956,10 +956,42 @@ local function RegisterPage()
 		local function render()
 			EnsureOptionsCompat()
 			local entries = Entries() or {}
+			local opts = EnsureOptionsCompat() or {}
 			scroller:ReleaseChildren()
 			updateStatusLine(#entries)
 
-			if #entries == 0 then
+			local display = {}
+			for i = 1, #entries do
+				display[i] = entries[i]
+			end
+
+			-- Fallback: reconstruct readable history rows when legacy installs have
+			-- member history but no persisted activity entries yet.
+			if #display <= 1 and type(opts.memberHistory) == "table" and next(opts.memberHistory) ~= nil then
+				local synth = {}
+				for guid, h in pairs(opts.memberHistory) do
+					if type(h) == "table" then
+						local name = tostring(h.name or guid or "?")
+						local firstTs = tonumber(h.firstTrackedAt) or 0
+						local joinCount = tonumber(h.joinCount) or 0
+						local leftCount = tonumber(h.leftCount) or 0
+						local rejoinCount = tonumber(h.rejoinCount) or 0
+						synth[#synth + 1] = {
+							ts = firstTs,
+							time = tostring(h.firstTrackedTime or "-"),
+							kind = "HISTORY",
+							msg = string.format("%s | joins:%d leaves:%d rejoins:%d", name, joinCount, leftCount, rejoinCount),
+						}
+					end
+				end
+				table.sort(synth, function(a, b) return (tonumber(a.ts) or 0) > (tonumber(b.ts) or 0) end)
+				local limit = math.min(#synth, 300)
+				for i = 1, limit do
+					display[#display + 1] = synth[i]
+				end
+			end
+
+			if #display == 0 then
 				local empty = AceGUI:Create("Label")
 				empty:SetFullWidth(true)
 				empty:SetText("|cff9d9d9d" .. T("GA_EMPTY", "No guild activity entries yet.") .. "|r")
@@ -970,8 +1002,8 @@ local function RegisterPage()
 				return
 			end
 
-			for i = #entries, 1, -1 do
-				local e = entries[i]
+			for i = #display, 1, -1 do
+				local e = display[i]
 				local row = AceGUI:Create("SimpleGroup")
 				row:SetFullWidth(true)
 				row:SetLayout("Flow")
@@ -995,7 +1027,7 @@ local function RegisterPage()
 			end
 
 			if ui and type(ui.SetStatusText) == "function" then
-				ui:SetStatusText(T("GA_STATUS_FMT", "Guild Activity: %d entries", #entries))
+				ui:SetStatusText(T("GA_STATUS_FMT", "Guild Activity: %d entries", #display))
 			end
 		end
 
