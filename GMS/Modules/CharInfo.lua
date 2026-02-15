@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.8",
+	VERSION      = "1.0.9",
 }
 
 local LibStub = LibStub
@@ -46,11 +46,10 @@ local UnitGUID                   = UnitGUID
 local UnitExists                 = UnitExists
 local UnitIsPlayer               = UnitIsPlayer
 local C_Timer                    = C_Timer
-local GetProfessions             = GetProfessions
-local GetProfessionInfo          = GetProfessionInfo
-local C_TradeSkillUI             = C_TradeSkillUI
 local C_ClassTalents             = C_ClassTalents
 local C_Traits                   = C_Traits
+local C_PvP                      = C_PvP
+local GetPVPLifetimeStats        = GetPVPLifetimeStats
 local GameFontNormalSmallOutline = GameFontNormalSmallOutline
 local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
 ---@diagnostic enable: undefined-global
@@ -302,47 +301,69 @@ local function GetTalentLoadoutName()
 	return tostring(configID)
 end
 
-local function GetProfessionsSummary()
+local function ExtractRatingFromResult(...)
+	local n = select("#", ...)
+	if n <= 0 then return nil end
+	local first = select(1, ...)
+	if type(first) == "table" then
+		local tableRating = tonumber(first.rating or first.currentRating or first.personalRating)
+		if tableRating and tableRating > 0 then return tableRating end
+	end
+	for i = 1, n do
+		local v = select(i, ...)
+		if type(v) == "number" and v > 0 and v < 5000 then
+			return v
+		end
+	end
+	return nil
+end
+
+local function GetLocalPvPSummary()
 	local parts = {}
-	if type(GetProfessions) == "function" and type(GetProfessionInfo) == "function" then
-		local p1, p2, arch, fish, cook = GetProfessions()
-		local indices = { p1, p2, cook, fish, arch }
-		for i = 1, #indices do
-			local idx = indices[i]
-			if idx then
-				local name, _, skillLevel, maxSkillLevel = GetProfessionInfo(idx)
-				if name and name ~= "" then
-					local cur = tonumber(skillLevel) or 0
-					local maxv = tonumber(maxSkillLevel) or 0
-					parts[#parts + 1] = string.format("%s (%d/%d)", tostring(name), cur, maxv)
+
+	local hk = nil
+	if type(GetPVPLifetimeStats) == "function" then
+		hk = tonumber(select(1, GetPVPLifetimeStats()))
+	end
+	if hk and hk > 0 then
+		parts[#parts + 1] = string.format("HK %d", hk)
+	end
+
+	local honorLevel = nil
+	if type(C_PvP) == "table" and type(C_PvP.GetHonorLevel) == "function" then
+		honorLevel = tonumber(C_PvP.GetHonorLevel())
+	end
+	if honorLevel and honorLevel > 0 then
+		parts[#parts + 1] = string.format("Honor %d", honorLevel)
+	end
+
+	local ratedText = nil
+	if type(C_PvP) == "table" and type(C_PvP.GetPersonalRatedInfo) == "function" then
+		local brackets = {
+			{ key = "solo_shuffle", label = "Shuffle" },
+			{ key = "blitz", label = "Blitz" },
+			{ key = "3v3", label = "3v3" },
+			{ key = "2v2", label = "2v2" },
+			{ key = "rbg", label = "RBG" },
+		}
+		for i = 1, #brackets do
+			local b = brackets[i]
+			local ok, a, c, d, e, f = pcall(C_PvP.GetPersonalRatedInfo, b.key)
+			if ok then
+				local rating = ExtractRatingFromResult(a, c, d, e, f)
+				if rating and rating > 0 then
+					ratedText = string.format("%s %d", b.label, rating)
+					break
 				end
 			end
 		end
 	end
-
-	if #parts == 0
-		and type(C_TradeSkillUI) == "table"
-		and type(C_TradeSkillUI.GetAllProfessionTradeSkillLines) == "function"
-		and type(C_TradeSkillUI.GetProfessionInfoBySkillLineID) == "function" then
-		local lines = C_TradeSkillUI.GetAllProfessionTradeSkillLines()
-		if type(lines) == "table" then
-			for i = 1, #lines do
-				local lineID = lines[i]
-				local info = C_TradeSkillUI.GetProfessionInfoBySkillLineID(lineID)
-				if type(info) == "table" then
-					local name = tostring(info.professionName or "")
-					local cur = tonumber(info.skillLevel) or 0
-					local maxv = tonumber(info.maxSkillLevel) or 0
-					if name ~= "" then
-						parts[#parts + 1] = string.format("%s (%d/%d)", name, cur, maxv)
-					end
-				end
-			end
-		end
+	if ratedText then
+		parts[#parts + 1] = ratedText
 	end
 
 	if #parts <= 0 then return "-" end
-	return table.concat(parts, ", ")
+	return table.concat(parts, " | ")
 end
 
 local function GetLatestDomainRecordForGuid(domain, guid)
@@ -389,7 +410,7 @@ local function BuildCharData(player, ctxGuid)
 		equipmentItemLevel = nil,
 		equipmentSlots = 0,
 		talents = "-",
-		professions = "-",
+		pvp = "-",
 	}
 
 	local playerGuid = tostring((player and player.guid) or "")
@@ -425,13 +446,13 @@ local function BuildCharData(player, ctxGuid)
 		else
 			data.talents = (loadout ~= "-" and loadout) or specText
 		end
-		data.professions = GetProfessionsSummary()
+		data.pvp = GetLocalPvPSummary()
 		return data
 	end
 
 	data.isContext = true
 	data.talents = "-"
-	data.professions = "-"
+	data.pvp = "-"
 
 	local recMeta = GetLatestDomainRecordForGuid("roster_meta", targetGuid)
 	if recMeta and type(recMeta.payload) == "table" then
@@ -657,7 +678,7 @@ function CHARINFO:TryRegisterPage()
 		AddValueLine(cardOverview, "Raidstatus", details.raidStatus or "-")
 		AddValueLine(cardOverview, "Equipment", details.equipment or "-")
 		AddValueLine(cardOverview, "Talents", details.talents or "-")
-		AddValueLine(cardOverview, "Professions", details.professions or "-")
+		AddValueLine(cardOverview, "PvP", details.pvp or "-")
 		AddValueLine(cardOverview, "GUID", player.guid or "-")
 
 		local cardContext = AceGUI:Create("InlineGroup")
