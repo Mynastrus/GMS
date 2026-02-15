@@ -96,6 +96,24 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.4.4",
+		date = "2026-02-15",
+		title_en = "Cross-module roster sync and automated CurseForge delivery",
+		title_de = "Moduluebergreifende Roster-Synchronisierung und automatisierte CurseForge-Auslieferung",
+		notes_en = {
+			"Roster now broadcasts player meta data on online/login/world/guild state transitions so the shown GMS version updates faster across guild members.",
+			"Roster now hydrates and displays item level, Mythic+ score, and raid status from persisted sync records (Equipment, MythicPlus, Raids), including startup hydration from existing Comm records.",
+			"Equipment, Raids, and MythicPlus modules now use normalized parsing plus digest-based change detection and publish updates to guild sync domains only when data changed.",
+			"Added GitHub Actions workflow for CurseForge upload with manual release type selection (release/beta/alpha) and integrated project release rules for bilingual EN/DE changelogs.",
+		},
+		notes_de = {
+			"Das Roster sendet Metadaten jetzt bei Online/Login/World/Guild-Zustandswechseln aktiv, damit die angezeigte GMS-Version gildenweit schneller aktuell ist.",
+			"Das Roster uebernimmt und zeigt Itemlevel, Mythic+-Wertung und Raid-Status aus persistierten Sync-Records (Equipment, MythicPlus, Raids), inklusive Initial-Hydration aus vorhandenen Comm-Records.",
+			"Die Module Equipment, Raids und MythicPlus nutzen jetzt normalisiertes Parsing mit Digest-basierter Aenderungserkennung und veroeffentlichen nur bei echten Datenaenderungen in die Guild-Sync-Domains.",
+			"GitHub-Actions-Workflow fuer CurseForge-Upload mit manueller Release-Type-Auswahl (release/beta/alpha) hinzugefuegt und Projektregeln fuer zweisprachige EN/DE-Release-Notes verankert.",
+		},
+	},
+	{
 		version = "1.4.3",
 		date = "2026-02-15",
 		title_en = "GuildLog persistence hardening and comm loopback guard",
