@@ -10,6 +10,15 @@ on:
         description: "Version (X.Y.Z). Leave empty to use the current tag name."
         required: false
         type: string
+      release_type:
+        description: "CurseForge release type"
+        required: false
+        default: release
+        type: choice
+        options:
+          - release
+          - beta
+          - alpha
 
 permissions:
   contents: read
@@ -51,6 +60,6 @@ jobs:
           project_id: ${{ secrets.CF_PROJECT_ID }}
           game_endpoint: ${{ vars.CF_GAME_ENDPOINT || 'wow' }}
           file_path: RELEASE/GMS_${{ steps.version.outputs.version }}.zip
-          release_type: release
+          release_type: ${{ github.event.inputs.release_type || 'release' }}
           display_name: GMS ${{ steps.version.outputs.version }}
           changelog_type: markdown
