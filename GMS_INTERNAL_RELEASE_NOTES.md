@@ -26,9 +26,13 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] Equipment-Liste in CharInfo zeigt anklickbare Itemlinks mit Tooltip (`InteractiveLabel`, `GameTooltip:SetHyperlink`, `HandleModifiedItemClick`).
 - [x] CharInfo-Datenbindung erweitert: klare No-Data-Hinweise, Placeholder für PvP/Talente/Account-Charaktere und vorbereitete `cardOrder`-Basis für spätere individuelle Anordnung.
 - [x] CharInfo-Layout weiter verfeinert: Header-Meta in kompakter 2-Spalten-Darstellung, Top-Alignment der Hauptspalten, resize-stabile Breitenaktualisierung ohne automatisches Zurücksetzen der Fenstergröße, sowie robuster Equipment-Fallback direkt nach Reload.
+- [x] CharInfo-Header erweitert: rechter Aktions-Button (WoW-Icon) mit Kontextmenü für Standardaktionen (Anflüstern, Name kopieren, Gruppe einladen, Anvisieren per Slash).
+- [x] CharInfo-Layoutbreiten für die obere 2-Spalten-Sektion auf relative Breiten umgestellt, damit rechte Spalte bündig zu Full-Width-Karten endet.
+- [x] Fraktionsanzeige in CharInfo lokalisiert (z. B. `Alliance` -> `Allianz` unter `deDE`).
 
 ### Fixed
 - [x] Lua-Diagnostics (`undefined-field`) in `Core/Database.lua` beseitigt, indem `_G`-Zugriffe auf optionale SVs via `rawget(_G, "...")` erfolgen.
+- [x] `ADDON_ACTION_FORBIDDEN` beim CharInfo-Menüpunkt "Anvisieren" behoben (kein direkter Protected-Call mehr aus Dropdown-Callback).
 
 ### Rules/Infra
 - [ ] (leer)

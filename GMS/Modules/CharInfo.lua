@@ -34,6 +34,7 @@ if not GMS then return end
 local _G                         = _G
 local GetTime                    = GetTime
 local time                       = time
+local GetLocale                  = GetLocale
 local UnitFullName               = UnitFullName
 local UnitClass                  = UnitClass
 local UnitRace                   = UnitRace
@@ -55,6 +56,17 @@ local GameTooltip                = GameTooltip
 local HandleModifiedItemClick    = HandleModifiedItemClick
 local GameFontNormalSmallOutline = GameFontNormalSmallOutline
 local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
+local LoadAddOn                  = LoadAddOn
+local EasyMenu                   = EasyMenu
+local CreateFrame                = CreateFrame
+local UIParent                   = UIParent
+local UIDropDownMenu_Initialize  = UIDropDownMenu_Initialize
+local UIDropDownMenu_AddButton   = UIDropDownMenu_AddButton
+local ToggleDropDownMenu         = ToggleDropDownMenu
+local ChatEdit_ChooseBoxForSend  = ChatEdit_ChooseBoxForSend
+local ChatEdit_ActivateChat      = ChatEdit_ActivateChat
+local C_PartyInfo                = C_PartyInfo
+local InviteUnit                 = InviteUnit
 ---@diagnostic enable: undefined-global
 
 local AceGUI = LibStub("AceGUI-3.0", true)
@@ -191,6 +203,167 @@ local function FormatNameRealm(name, realm)
 		return name .. "-" .. realm
 	end
 	return name
+end
+
+local function LocalizeFactionName(faction)
+	local f = tostring(faction or "-")
+	if f == "" then return "-" end
+
+	if type(GetLocale) == "function" and GetLocale() == "deDE" then
+		if f == "Alliance" then return "Allianz" end
+		if f == "Horde" then return "Horde" end
+	end
+
+	return f
+end
+
+local function OpenChatEditWithText(text)
+	local t = tostring(text or "")
+	if t == "" then return end
+
+	local editBox = nil
+	if type(ChatEdit_ChooseBoxForSend) == "function" then
+		editBox = ChatEdit_ChooseBoxForSend()
+	end
+	if editBox and type(ChatEdit_ActivateChat) == "function" then
+		ChatEdit_ActivateChat(editBox)
+	end
+	if editBox and type(editBox.SetText) == "function" then
+		editBox:SetText(t)
+		if type(editBox.HighlightText) == "function" then
+			editBox:HighlightText()
+		end
+	end
+end
+
+local function TryInviteUnitByName(nameFull, nameShort)
+	local full = tostring(nameFull or "")
+	local short = tostring(nameShort or "")
+
+	local function TryInvite(target)
+		target = tostring(target or "")
+		if target == "" then return false end
+
+		if type(C_PartyInfo) == "table" and type(C_PartyInfo.InviteUnit) == "function" then
+			local ok = pcall(C_PartyInfo.InviteUnit, target)
+			if ok then return true end
+		end
+		if type(InviteUnit) == "function" then
+			local ok = pcall(InviteUnit, target)
+			if ok then return true end
+		end
+		return false
+	end
+
+	if TryInvite(full) then return true end
+	if TryInvite(short) then return true end
+
+	local parsedShort = full:match("^([^%-]+)")
+	if parsedShort and parsedShort ~= short and TryInvite(parsedShort) then
+		return true
+	end
+
+	return false
+end
+
+CHARINFO._headerContextMenuFrame = CHARINFO._headerContextMenuFrame or nil
+
+local function EnsureDropdownAPI()
+	if type(EasyMenu) == "function" then return true end
+	if type(LoadAddOn) == "function" then
+		pcall(LoadAddOn, "Blizzard_UIDropDownMenu")
+	end
+	EasyMenu = (type(_G) == "table" and rawget(_G, "EasyMenu")) or EasyMenu
+	UIDropDownMenu_Initialize = (type(_G) == "table" and rawget(_G, "UIDropDownMenu_Initialize")) or UIDropDownMenu_Initialize
+	UIDropDownMenu_AddButton = (type(_G) == "table" and rawget(_G, "UIDropDownMenu_AddButton")) or UIDropDownMenu_AddButton
+	ToggleDropDownMenu = (type(_G) == "table" and rawget(_G, "ToggleDropDownMenu")) or ToggleDropDownMenu
+	return type(EasyMenu) == "function"
+		or (type(UIDropDownMenu_Initialize) == "function"
+			and type(UIDropDownMenu_AddButton) == "function"
+			and type(ToggleDropDownMenu) == "function")
+end
+
+local function LocalMenuText(en, de)
+	if type(GetLocale) == "function" and GetLocale() == "deDE" and tostring(de or "") ~= "" then
+		return tostring(de)
+	end
+	return tostring(en or "")
+end
+
+local function ShowHeaderActionsMenu(details)
+	if not EnsureDropdownAPI() then return end
+	if type(CreateFrame) ~= "function" then return end
+
+	if not CHARINFO._headerContextMenuFrame then
+		CHARINFO._headerContextMenuFrame = CreateFrame("Frame", "GMSCharInfoHeaderContextMenu", UIParent, "UIDropDownMenuTemplate")
+	end
+	if not CHARINFO._headerContextMenuFrame then return end
+
+	local fullName = tostring(details and details.general and details.general.name or "")
+	local shortName = fullName:match("^([^%-]+)") or fullName
+	local guid = tostring(details and details.general and details.general.guid or "")
+	local isSelf = (type(UnitGUID) == "function" and guid ~= "" and guid == tostring(UnitGUID("player") or ""))
+
+	local menu = {
+		{ text = fullName ~= "" and fullName or "-", isTitle = true, notCheckable = true },
+		{
+			text = LocalMenuText("Whisper", "Anfluestern"),
+			notCheckable = true,
+			disabled = (fullName == ""),
+			func = function()
+				if fullName ~= "" then
+					OpenChatEditWithText("/w " .. fullName .. " ")
+				end
+			end,
+		},
+		{
+			text = LocalMenuText("Copy name", "Name kopieren"),
+			notCheckable = true,
+			disabled = (fullName == ""),
+			func = function()
+				if fullName ~= "" then
+					OpenChatEditWithText(fullName)
+				end
+			end,
+		},
+		{
+			text = LocalMenuText("Invite to group", "In Gruppe einladen"),
+			notCheckable = true,
+			disabled = (fullName == "" or isSelf),
+			func = function()
+				if fullName == "" or isSelf then return end
+				if TryInviteUnitByName(fullName, shortName) then return end
+				OpenChatEditWithText("/invite " .. fullName)
+			end,
+		},
+		{
+			text = LocalMenuText("Target", "Anvisieren"),
+			notCheckable = true,
+			disabled = (shortName == ""),
+			func = function()
+				if shortName ~= "" then
+					-- Avoid protected-call taint from dropdown callbacks.
+					OpenChatEditWithText("/target " .. shortName)
+				end
+			end,
+		},
+	}
+
+	if type(EasyMenu) == "function" then
+		EasyMenu(menu, CHARINFO._headerContextMenuFrame, "cursor", 0, 0, "MENU")
+		return
+	end
+	if type(UIDropDownMenu_Initialize) == "function"
+		and type(UIDropDownMenu_AddButton) == "function"
+		and type(ToggleDropDownMenu) == "function" then
+		UIDropDownMenu_Initialize(CHARINFO._headerContextMenuFrame, function(_, level)
+			if level ~= 1 then return end
+			for i = 1, #menu do
+				UIDropDownMenu_AddButton(menu[i], level)
+			end
+		end, "MENU")
+		ToggleDropDownMenu(1, nil, CHARINFO._headerContextMenuFrame, "cursor", 0, 0)
+	end
 end
 
 local function GetPlayerSnapshot()
@@ -634,7 +807,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			class = tostring((player and player.class) or "-"),
 			classFile = tostring((player and player.classFile) or ""),
 			race = tostring((player and player.race) or "-"),
-			faction = tostring((UnitFactionGroup and UnitFactionGroup("player")) or "-"),
+			faction = LocalizeFactionName((UnitFactionGroup and UnitFactionGroup("player")) or "-"),
 			level = tostring((player and player.level) or "-"),
 			spec = tostring((player and player.spec) or "-"),
 			guild = tostring((player and player.guild) or "-"),
@@ -654,7 +827,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		data.general.class = tostring((player and player.class) or "-")
 		data.general.classFile = tostring((player and player.classFile) or "")
 		data.general.race = tostring((player and player.race) or "-")
-		data.general.faction = tostring((UnitFactionGroup and UnitFactionGroup("player")) or "-")
+		data.general.faction = LocalizeFactionName((UnitFactionGroup and UnitFactionGroup("player")) or "-")
 		data.general.level = tostring((player and player.level) or "-")
 		data.general.spec = tostring((player and player.spec) or "-")
 		data.general.guild = tostring((player and player.guild) or "-")
@@ -905,39 +1078,85 @@ local function GetClassIconCoords(classFile)
 	return 0, 1, 0, 1
 end
 
-local function AddHeaderMetaRow(parent, colWidth, lk, lv, rk, rv)
-	local row = AceGUI:Create("SimpleGroup")
-	row:SetFullWidth(true)
-	row:SetLayout("Flow")
-	parent:AddChild(row)
+local function BuildCharInfoUIHeader(ui, details, ctxFrom)
+	if not ui or type(ui.Header_Clear) ~= "function" or type(ui.GetHeaderContent) ~= "function" then
+		return false
+	end
+	if not AceGUI then return false end
 
-	local keyW = 56
-	local valW = math.floor((colWidth - (keyW * 2) - 8) / 2)
-	if valW < 90 then valW = 90 end
+	ui:Header_Clear()
+	local hc = ui:GetHeaderContent()
+	if not hc then return false end
+	if type(hc.SetLayout) == "function" then
+		hc:SetLayout("Flow")
+	end
 
-	local lKey = AceGUI:Create("Label")
-	lKey:SetWidth(keyW)
-	lKey:SetText("|cff9d9d9d" .. tostring(lk or "-") .. "|r")
-	if lKey.label then lKey.label:SetFontObject(GameFontNormalSmallOutline) end
-	row:AddChild(lKey)
+	local icon = AceGUI:Create("Icon")
+	icon:SetImage("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
+	icon:SetImageSize(18, 18)
+	icon:SetWidth(26)
+	local cl, cr, ct, cb = GetClassIconCoords(details and details.general and details.general.classFile or "")
+	if icon.image and type(icon.image.SetTexCoord) == "function" then
+		icon.image:SetTexCoord(cl, cr, ct, cb)
+	end
+	hc:AddChild(icon)
 
-	local lVal = AceGUI:Create("Label")
-	lVal:SetWidth(valW)
-	lVal:SetText("|cffffffff" .. tostring(lv or "-") .. "|r")
-	if lVal.label then lVal.label:SetFontObject(GameFontNormalSmallOutline) end
-	row:AddChild(lVal)
+	local classHex = GetClassHex(details and details.general and details.general.classFile or "")
+	local colorCode = tostring(classHex or "FFFFFFFF")
+	if #colorCode == 6 then colorCode = "FF" .. colorCode end
 
-	local rKey = AceGUI:Create("Label")
-	rKey:SetWidth(keyW)
-	rKey:SetText("|cff9d9d9d" .. tostring(rk or "-") .. "|r")
-	if rKey.label then rKey.label:SetFontObject(GameFontNormalSmallOutline) end
-	row:AddChild(rKey)
+	local name = AceGUI:Create("Label")
+	name:SetWidth(240)
+	name:SetText(string.format("|c%s%s|r", colorCode, tostring(details and details.general and details.general.name or "-")))
+	if name.label then
+		name.label:SetFontObject(GameFontNormalOutline)
+		name.label:SetJustifyH("LEFT")
+		name.label:SetJustifyV("MIDDLE")
+	end
+	hc:AddChild(name)
 
-	local rVal = AceGUI:Create("Label")
-	rVal:SetWidth(valW)
-	rVal:SetText("|cffffffff" .. tostring(rv or "-") .. "|r")
-	if rVal.label then rVal.label:SetFontObject(GameFontNormalSmallOutline) end
-	row:AddChild(rVal)
+	local totalWidth = 980
+	if ui and ui._frame and type(ui._frame.GetWidth) == "function" then
+		totalWidth = math.max(760, tonumber(ui._frame:GetWidth()) or 980)
+	end
+	local leftMetaWidth = math.max(260, math.floor(totalWidth - 360))
+
+	local leftMeta = AceGUI:Create("Label")
+	leftMeta:SetWidth(leftMetaWidth)
+	leftMeta:SetText(string.format(
+		"|cff9d9d9dLevel|r %s  |cff9d9d9dRace|r %s  |cff9d9d9dFaction|r %s  |cff9d9d9dGUID|r %s",
+		tostring(details and details.general and details.general.level or "-"),
+		tostring(details and details.general and details.general.race or "-"),
+		LocalizeFactionName(details and details.general and details.general.faction or "-"),
+		tostring(details and details.general and details.general.guid or "-")
+	))
+	if leftMeta.label then
+		leftMeta.label:SetFontObject(GameFontNormalSmallOutline)
+		leftMeta.label:SetJustifyH("LEFT")
+		leftMeta.label:SetJustifyV("MIDDLE")
+	end
+	hc:AddChild(leftMeta)
+
+	local actions = AceGUI:Create("Icon")
+	actions:SetImage("Interface\\Icons\\INV_Misc_Gear_01")
+	actions:SetImageSize(16, 16)
+	actions:SetWidth(24)
+	actions:SetHeight(20)
+	actions:SetCallback("OnClick", function()
+		ShowHeaderActionsMenu(details)
+	end)
+	if actions.image and type(actions.image.SetDesaturated) == "function" then
+		actions.image:SetDesaturated(false)
+	end
+	if actions.image and type(actions.image.SetTexCoord) == "function" then
+		actions.image:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+	end
+	if actions.SetLabel then
+		actions:SetLabel("")
+	end
+	hc:AddChild(actions)
+
+	return true
 end
 
 local DEFAULT_CARD_ORDER = { "MYTHIC", "EQUIPMENT", "RAIDS", "OVERVIEW", "ACCOUNT", "TALENTS", "PVP" }
@@ -1126,26 +1345,7 @@ function CHARINFO:TryRegisterPage()
 		local details = BuildCharData(player, ctxGuid, ctxName)
 		EnsureResizeHook(root)
 
-		local headerName = tostring((details and details.general and details.general.name) or ctxName or player.name_full or "-")
-		local headerClassFile = tostring((details and details.general and details.general.classFile) or player.classFile or "")
-		local headerClassHex = GetClassHex(headerClassFile)
-		local headerColor = tostring(headerClassHex or "FFFFFFFF")
-		if #headerColor == 6 then
-			headerColor = "FF" .. headerColor
-		end
-
-		if ui2 and type(ui2.Header_BuildIconText) == "function" then
-			ui2:Header_BuildIconText({
-				icon = ICON,
-				text = "|cff03A9F4" .. METADATA.DISPLAY_NAME .. "|r",
-				subtext = string.format(
-					"Character: |c%s%s|r  |cff9d9d9dContext:%s|r",
-					headerColor,
-					headerName,
-					details.isContext and (" " .. tostring(ctxFrom or "external")) or " local"
-				),
-			})
-		end
+		BuildCharInfoUIHeader(ui2, details, details.isContext and (ctxFrom or "external") or "local")
 		if ui2 and type(ui2.SetStatusText) == "function" then
 			ui2:SetStatusText(details.isContext and "CHARINFO: context active" or "CHARINFO: player only")
 		end
@@ -1172,55 +1372,10 @@ function CHARINFO:TryRegisterPage()
 		wrapper:SetLayout("List")
 		scroller:AddChild(wrapper)
 
-		local header = AceGUI:Create("InlineGroup")
-		header:SetTitle("")
-		header:SetFullWidth(true)
-		header:SetLayout("Flow")
-		wrapper:AddChild(header)
-
-		local portrait = AceGUI:Create("Icon")
-		portrait:SetImage("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
-		portrait:SetImageSize(36, 36)
-		portrait:SetWidth(44)
-		local cl, cr, ct, cb = GetClassIconCoords(details.general.classFile)
-		if portrait.image and type(portrait.image.SetTexCoord) == "function" then
-			portrait.image:SetTexCoord(cl, cr, ct, cb)
-		end
-		header:AddChild(portrait)
-
-		local identity = AceGUI:Create("SimpleGroup")
-		identity:SetLayout("List")
-		identity:SetWidth(520)
-		header:AddChild(identity)
-
-		local classHex = GetClassHex(details.general.classFile or "")
-		local title = AceGUI:Create("Label")
-		title:SetFullWidth(true)
-		local colorCode = tostring(classHex or "FFFFFFFF")
-		if #colorCode == 6 then
-			colorCode = "FF" .. colorCode
-		end
-		title:SetText(string.format("|c%s%s|r", colorCode, tostring(details.general.name or "-")))
-		identity:AddChild(title)
-
-		local metaGrid = AceGUI:Create("SimpleGroup")
-		metaGrid:SetFullWidth(true)
-		metaGrid:SetLayout("List")
-		identity:AddChild(metaGrid)
-		local metaWidth = 500
-		if identity.frame and type(identity.frame.GetWidth) == "function" then
-			local w = tonumber(identity.frame:GetWidth()) or metaWidth
-			if w > 0 then metaWidth = w end
-		end
-		AddHeaderMetaRow(metaGrid, metaWidth, "Level", details.general.level, "Class", details.general.class)
-		AddHeaderMetaRow(metaGrid, metaWidth, "Race", details.general.race, "Spec", details.general.spec)
-		AddHeaderMetaRow(metaGrid, metaWidth, "Faction", details.general.faction, "Guild", details.general.guild)
-		AddHeaderMetaRow(metaGrid, metaWidth, "GUID", details.general.guid, "Source", ctxFrom or "local")
-
 		local actions = AceGUI:Create("SimpleGroup")
 		actions:SetLayout("Flow")
-		actions:SetWidth(360)
-		header:AddChild(actions)
+		actions:SetFullWidth(true)
+		wrapper:AddChild(actions)
 
 		local btnSelf = AceGUI:Create("Button")
 		btnSelf:SetText("Use Player")
@@ -1284,8 +1439,7 @@ function CHARINFO:TryRegisterPage()
 		actions:AddChild(btnRefresh)
 
 		if details.isContext and not details.hasAnyExternalData then
-			local warn = AceGUI:Create("InlineGroup")
-			warn:SetTitle("")
+			local warn = AceGUI:Create("SimpleGroup")
 			warn:SetFullWidth(true)
 			warn:SetLayout("List")
 			wrapper:AddChild(warn)
@@ -1305,9 +1459,9 @@ function CHARINFO:TryRegisterPage()
 				pageWidth = w
 			end
 		end
-		local innerWidth = pageWidth - 26
+		local innerWidth = pageWidth - 40
 		if innerWidth < 860 then innerWidth = 860 end
-		local colWidth = math.floor((innerWidth - 18) / 2)
+		local colWidth = math.floor((innerWidth - 10) / 2)
 		if colWidth < 420 then colWidth = 420 end
 
 		local opts = (type(CHARINFO._options) == "table") and CHARINFO._options or nil
@@ -1479,24 +1633,17 @@ function CHARINFO:TryRegisterPage()
 
 		local pinnedRow = AceGUI:Create("SimpleGroup")
 		pinnedRow:SetFullWidth(true)
-		pinnedRow:SetLayout("Table")
-		pinnedRow:SetUserData("table", {
-			columns = { colWidth, colWidth },
-			spaceH = 10,
-			alignV = "TOP",
-		})
+		pinnedRow:SetLayout("Flow")
 		contentRow:AddChild(pinnedRow)
 
 		local leftStack = AceGUI:Create("SimpleGroup")
 		leftStack:SetLayout("List")
-		leftStack:SetWidth(colWidth)
-		leftStack:SetUserData("cell", { alignV = "TOP" })
+		leftStack:SetRelativeWidth(0.495)
 		pinnedRow:AddChild(leftStack)
 
 		local rightStack = AceGUI:Create("SimpleGroup")
 		rightStack:SetLayout("List")
-		rightStack:SetWidth(colWidth)
-		rightStack:SetUserData("cell", { alignV = "TOP" })
+		rightStack:SetRelativeWidth(0.495)
 		pinnedRow:AddChild(rightStack)
 
 		for i = 1, #leftPinned do
