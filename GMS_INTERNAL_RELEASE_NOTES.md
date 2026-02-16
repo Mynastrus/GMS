@@ -18,6 +18,8 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [ ] (leer)
 
 ### Changed
+- [x] CharInfo-Equipmentkarte visuell gestrafft: kompaktere Zeilenhoehen/Icons, separate Spalten `TSET` und `VZ` vor dem iLvl, Gesamt-iLvl rechtsbuendig direkt ueber der iLvl-Spalte; `Captured Slots` und `Source` in der Equipmentkarte entfernt. (Datei: `GMS/Modules/CharInfo.lua`)
+- [x] CharInfo-Equipmentliste zeigt jetzt alle definierten Slots auch ohne Snapshot-Daten; nicht belegte Slots bleiben sichtbar und leer. (Datei: `GMS/Modules/CharInfo.lua`)
 - [x] Equipment-Initialscan robust gemacht: Fallback-Trigger in `OnEnable`, damit Login-Scan auch nach Reload/late enable ausgefuehrt wird. (Datei: `GMS/Modules/Equipment.lua`)
 - [x] Raids-Scan robust gemacht: Fallback-Trigger in `OnEnable` sowie Store-Readiness-Polling mit Retry eingebaut. (Datei: `GMS/Modules/Raids.lua`)
 - [x] Logs-Source-Aufloesung erweitert: Registry-Matching beruecksichtigt jetzt auch `shortName`, damit die blaue Source-Spalte konsistent auf `DISPLAY_NAME` aufgeloest wird. (Datei: `GMS/Core/Logs.lua`)
@@ -31,6 +33,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] CharInfo-Raidkarte erweitert: lokaler Spieler nutzt jetzt Fallback-Kette fuer `Best` (`Local RAIDS` -> `Synced RAIDS_V1` -> `roster_meta`/Roster-Cache inkl. `best_in_raid`), damit Best-Werte auch ohne frische Detailzeilen sichtbar sind. (Datei: `GMS/Modules/CharInfo.lua`)
 
 ### Fixed
+- [x] Roster-Logspam reduziert: `lastSeenReason` zaehlt nicht mehr als strukturelle Datenaenderung, dadurch wird `Local account character tracked` nicht mehr bei jedem Trigger erneut geloggt/publisht. (Datei: `GMS/Modules/Roster.lua`)
 - [x] CharInfo liest Equipment-Daten jetzt auch aus dem lokalen Memory-Buffer (`equip._mem.snapshot`), wenn der Char-Store noch nicht verfuegbar ist. (Datei: `GMS/Modules/CharInfo.lua`)
 - [x] Equipment-Buffer wird bei fehlendem Store automatisch gepollt und spaeter in den Char-Store geflusht. (Datei: `GMS/Modules/Equipment.lua`)
 - [x] One-Time-Reset gegen Reload-Wipe-Loops abgesichert: wenn Schema bereits migriert ist, wird der Hard-Reset nicht erneut ausgefuehrt und der Marker nur nachgezogen. (Datei: `GMS/Core/Database.lua`)

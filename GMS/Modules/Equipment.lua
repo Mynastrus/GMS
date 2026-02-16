@@ -31,6 +31,8 @@ local tonumber      = tonumber
 local C_Timer       = C_Timer
 local C_Item        = C_Item
 local ItemLocation  = ItemLocation
+local GetItemInfo   = GetItemInfo
+local GetItemInfoInstant = GetItemInfoInstant
 local UnitGUID      = UnitGUID
 local UnitName      = UnitName
 local UnitFullName  = UnitFullName
@@ -50,7 +52,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.8",
+	VERSION      = "1.3.9",
 }
 
 -- ###########################################################################
@@ -370,12 +372,42 @@ local function _parseItemLink(link, itemLoc, slotId)
 	if not itemString then return nil end
 
 	local parts = _splitKeepingEmpty(itemString, ":")
+	local enchantId = tonumber(parts[3] or "0") or 0
+	local gemIds = {
+		tonumber(parts[4] or "0") or 0,
+		tonumber(parts[5] or "0") or 0,
+		tonumber(parts[6] or "0") or 0,
+		tonumber(parts[7] or "0") or 0,
+	}
+	local gemCount = 0
+	for i = 1, #gemIds do
+		if tonumber(gemIds[i] or 0) > 0 then
+			gemCount = gemCount + 1
+		end
+	end
+
 	local numBonusIds = tonumber(parts[14] or "0") or 0
 	local bonusIds = {}
 	if numBonusIds > 0 then
 		for i = 1, numBonusIds do
 			bonusIds[i] = tonumber(parts[14 + i] or "0") or 0
 		end
+	end
+
+	local icon = 0
+	if type(GetItemInfoInstant) == "function" then
+		local _, _, _, _, iconID = GetItemInfoInstant(link)
+		icon = tonumber(iconID or 0) or 0
+	end
+
+	local setId = 0
+	if type(GetItemInfo) == "function" then
+		local _, _, _, _, _, _, _, _, _, iconFromInfo, _, _, _, _, _, itemSetID = GetItemInfo(link)
+		local infoIcon = tonumber(iconFromInfo or 0) or 0
+		if infoIcon > 0 then
+			icon = infoIcon
+		end
+		setId = tonumber(itemSetID or 0) or 0
 	end
 
 	local itemLevel = nil
@@ -389,13 +421,13 @@ local function _parseItemLink(link, itemLoc, slotId)
 		link = link,
 		itemString = itemString,
 		itemId = tonumber(parts[2] or "0") or 0,
-		enchantId = tonumber(parts[3] or "0") or 0,
-		gemIds = {
-			tonumber(parts[4] or "0") or 0,
-			tonumber(parts[5] or "0") or 0,
-			tonumber(parts[6] or "0") or 0,
-			tonumber(parts[7] or "0") or 0,
-		},
+		icon = icon,
+		enchantId = enchantId,
+		hasEnchant = enchantId > 0,
+		gemIds = gemIds,
+		gemCount = gemCount,
+		hasSocketedGem = gemCount > 0,
+		setId = setId,
 		bonusIds = bonusIds,
 		itemLevel = itemLevel,
 	}

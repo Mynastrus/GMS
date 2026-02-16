@@ -50,6 +50,7 @@ local GetExpansionLevel             = GetExpansionLevel
 local GetExpansionDisplayInfo       = GetExpansionDisplayInfo
 local GetCategoryList               = GetCategoryList
 local GetCategoryNumAchievements    = GetCategoryNumAchievements
+local GetCategoryInfo               = GetCategoryInfo
 local GetAchievementInfo            = GetAchievementInfo
 local GetStatistic                  = GetStatistic
 local C_EncounterJournal            = C_EncounterJournal
@@ -77,7 +78,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.12",
+	VERSION      = "1.2.14",
 }
 
 -- ###########################################################################
@@ -144,6 +145,20 @@ local STORE_POLL_MAX_TRIES = 25
 local STORE_POLL_INTERVAL = 1.0
 local STATS_ENRICH_LOGIN_GRACE = 30
 local STATS_ENRICH_MIN_INTERVAL = 900
+local STATS_ENRICH_MAX_CATEGORIES = 120
+local STATS_ENRICH_MAX_ACHIEVEMENTS = 1400
+
+local RAID_STATS_CATEGORY_KEYWORDS = {
+	"raid",
+	"schlachtzug",
+	"schlachtzugsbrowser",
+	"mythisch",
+	"mytisch",
+	"mythic",
+	"heroisch",
+	"heroic",
+	"normal",
+}
 
 RAIDS._catalog = nil
 
@@ -652,13 +667,63 @@ local function resolveInstanceIDFromRaidName(catalog, raidName)
 	return nil
 end
 
-local function BuildAchievementCategoryIDs()
+local function BuildCategoryRaidHints(catalog)
+	local hints = {}
+	local seen = {}
+	if type(catalog) ~= "table" or type(catalog.byInstanceID) ~= "table" then
+		return hints
+	end
+
+	for _, raid in pairs(catalog.byInstanceID) do
+		local normalized = normalizeRaidName(raid and raid.name or "")
+		if normalized ~= "" and not seen[normalized] then
+			seen[normalized] = true
+			hints[#hints + 1] = normalized
+		end
+	end
+	return hints
+end
+
+local function IsRaidRelatedAchievementCategory(categoryID, raidHints)
+	if type(GetCategoryInfo) ~= "function" then
+		return true
+	end
+
+	local ok, categoryName = pcall(GetCategoryInfo, categoryID)
+	if not ok then
+		return false
+	end
+
+	local normalized = normalizeRaidName(categoryName)
+	if normalized == "" then
+		return false
+	end
+
+	for i = 1, #RAID_STATS_CATEGORY_KEYWORDS do
+		local k = RAID_STATS_CATEGORY_KEYWORDS[i]
+		if normalized:find(k, 1, true) then
+			return true
+		end
+	end
+
+	for i = 1, #raidHints do
+		local hint = raidHints[i]
+		if normalized:find(hint, 1, true) or hint:find(normalized, 1, true) then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function BuildAchievementCategoryIDs(catalog)
 	local out = {}
 	local raw = { GetCategoryList() }
+	local raidHints = BuildCategoryRaidHints(catalog)
 
 	local function pushID(v)
 		local id = tonumber(v)
-		if id then
+		if id and IsRaidRelatedAchievementCategory(id, raidHints) then
 			out[#out + 1] = id
 		end
 	end
@@ -674,7 +739,53 @@ local function BuildAchievementCategoryIDs()
 		end
 	end
 
+	-- Safety fallback: if filtering produced nothing, keep legacy behavior.
+	if #out <= 0 then
+		local fallback = {}
+		local function pushFallback(v)
+			local id = tonumber(v)
+			if id then
+				fallback[#fallback + 1] = id
+			end
+		end
+		if #raw == 1 and type(raw[1]) == "table" then
+			local list = raw[1]
+			for i = 1, #list do
+				pushFallback(list[i])
+			end
+		else
+			for i = 1, #raw do
+				pushFallback(raw[i])
+			end
+		end
+		out = fallback
+	end
+
 	return out
+end
+
+local function GetCategoryAchievementCount(categoryID)
+	local cid = tonumber(categoryID)
+	if not cid or cid <= 0 then
+		return 0
+	end
+
+	local okCount, count = pcall(GetCategoryNumAchievements, cid, true)
+	if okCount then
+		return tonumber(count) or 0
+	end
+
+	local okCountFallback, fallbackCount = pcall(GetCategoryNumAchievements, cid, false)
+	if okCountFallback then
+		return tonumber(fallbackCount) or 0
+	end
+
+	local okLegacy, legacyCount = pcall(GetCategoryNumAchievements, cid)
+	if okLegacy then
+		return tonumber(legacyCount) or 0
+	end
+
+	return 0
 end
 
 local function BuildBestByRaidFromCharacterStatistics(catalog)
@@ -688,23 +799,31 @@ local function BuildBestByRaidFromCharacterStatistics(catalog)
 		return out, matched
 	end
 
-	local categories = BuildAchievementCategoryIDs()
+	local categories = BuildAchievementCategoryIDs(catalog)
+	local scannedCategories = 0
+	local scannedAchievements = 0
+	local hitBudget = false
+
 	for i = 1, #categories do
-		local categoryID = categories[i]
-		local num = 0
-		local okCount, count = pcall(GetCategoryNumAchievements, categoryID, true)
-		if okCount then
-			num = tonumber(count) or 0
-		else
-			local okCountFallback, fallbackCount = pcall(GetCategoryNumAchievements, categoryID, false)
-			if okCountFallback then
-				num = tonumber(fallbackCount) or 0
-			end
+		if scannedCategories >= STATS_ENRICH_MAX_CATEGORIES then
+			hitBudget = true
+			break
 		end
+		scannedCategories = scannedCategories + 1
+
+		local categoryID = categories[i]
+		local num = GetCategoryAchievementCount(categoryID)
 		for idx = 1, num do
-			local id, name, _, _, _, _, _, _, _, _, _, _, _, _, isStatistic = GetAchievementInfo(categoryID, idx)
-			if id and isStatistic then
-				local statCount = parseStatisticValueToNumber(GetStatistic(id))
+			scannedAchievements = scannedAchievements + 1
+			if scannedAchievements > STATS_ENRICH_MAX_ACHIEVEMENTS then
+				hitBudget = true
+				break
+			end
+
+			local okInfo, id, name, _, _, _, _, _, _, _, _, _, _, _, isStatistic = pcall(GetAchievementInfo, categoryID, idx)
+			if okInfo and id and isStatistic then
+				local okStat, rawStat = pcall(GetStatistic, id)
+				local statCount = okStat and parseStatisticValueToNumber(rawStat) or nil
 				if statCount and statCount > 0 then
 					local diffID, raidName, bossName = parseRaidStatisticLabel(name)
 					if diffID and raidName and bossName then
@@ -733,6 +852,13 @@ local function BuildBestByRaidFromCharacterStatistics(catalog)
 				end
 			end
 		end
+		if hitBudget then
+			break
+		end
+	end
+
+	if hitBudget then
+		LOCAL_LOG("WARN", "Raid statistics scan budget reached", "categories=" .. tostring(scannedCategories), "achievements=" .. tostring(scannedAchievements))
 	end
 
 	for _, perRaid in pairs(out) do
@@ -1095,10 +1221,55 @@ function RAIDS:_ScheduleDeferredStatsScan(reason, delay)
 
 	C_Timer.After(d, function()
 		RAIDS._statsDeferredScheduled = false
-		RAIDS:ScanNow(r)
+		RAIDS:_RunStandaloneStatisticsEnrichment(r)
 	end)
 
 	return true
+end
+
+function RAIDS:_RunStandaloneStatisticsEnrichment(reason)
+	local tsNow = now()
+	local runStats, gateReason = self:_ShouldRunStatisticsEnrichment(reason, tsNow)
+	if not runStats then
+		return false, gateReason
+	end
+
+	local store, charKey = ensureStore()
+	if not store or not charKey then
+		return false, "store-unavailable"
+	end
+
+	local raidsStore = getRaidsStore()
+	if type(raidsStore) ~= "table" then
+		return false, "raids-store-unavailable"
+	end
+
+	self:_EnsureCatalogReady()
+
+	local applied, matched = ApplyRaidBestFromCharacterStatistics(raidsStore, RAIDS._catalog, tsNow, reason)
+	self._statsLastRunAt = tonumber(tsNow or now() or 0) or self._statsLastRunAt
+	if applied > 0 then
+		LOCAL_LOG("INFO", "Raid best enriched from character statistics", "applied=" .. tostring(applied), "matched=" .. tostring(matched), "reason=" .. tostring(reason or "standalone"))
+	end
+
+	store.lastScan = tsNow or now()
+	local digest = _buildRaidsDigest(raidsStore)
+	local previousDigest = tostring(store.lastDigest or "")
+	store.lastDigest = digest
+	if digest ~= "" and digest ~= previousDigest then
+		local ok, publishReason = _publishRaidsToGuild(raidsStore, reason or "stats-standalone")
+		if ok then
+			LOCAL_LOG("INFO", "Raids snapshot published", reason or "stats-standalone")
+		else
+			LOCAL_LOG("WARN", "Raids publish failed", tostring(publishReason or "unknown"), reason or "stats-standalone")
+		end
+		local roster = GMS and (GMS:GetModule("ROSTER", true) or GMS:GetModule("Roster", true)) or nil
+		if type(roster) == "table" and type(roster.BroadcastMetaHeartbeat) == "function" then
+			roster:BroadcastMetaHeartbeat(true)
+		end
+	end
+
+	return true, applied
 end
 
 function RAIDS:_ShouldRunStatisticsEnrichment(reason, tsNow)

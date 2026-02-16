@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.13",
+	VERSION      = "1.0.14",
 }
 
 local LibStub = LibStub
@@ -44,6 +44,7 @@ local UnitFactionGroup           = UnitFactionGroup
 local GetSpecialization          = GetSpecialization
 local GetSpecializationInfo      = GetSpecializationInfo
 local GetAverageItemLevel        = GetAverageItemLevel
+local GetItemInfoInstant         = GetItemInfoInstant
 local UnitGUID                   = UnitGUID
 local UnitExists                 = UnitExists
 local UnitIsPlayer               = UnitIsPlayer
@@ -607,38 +608,70 @@ local EQUIP_SLOT_NAMES = {
 	[9] = "Wrist", [10] = "Hands", [11] = "Ring 1", [12] = "Ring 2", [13] = "Trinket 1", [14] = "Trinket 2",
 	[15] = "Back", [16] = "Main Hand", [17] = "Off Hand",
 }
+local EQUIP_TIER_SLOT_IDS = {
+	[1] = true, [3] = true, [5] = true, [7] = true, [10] = true,
+}
+local EQUIP_DEFAULT_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 
 local function BuildEquipmentRowsFromSnapshot(snapshot)
-	if type(snapshot) ~= "table" or type(snapshot.slots) ~= "table" then
-		return {}, nil, 0
-	end
+	local hasSnapshot = type(snapshot) == "table" and type(snapshot.slots) == "table"
 
 	local rows = {}
 	for i = 1, #EQUIP_SLOT_ORDER do
 		local slotId = EQUIP_SLOT_ORDER[i]
-		local slot = snapshot.slots[slotId]
+		local slot = hasSnapshot and snapshot.slots[slotId] or nil
+		local link = ""
+		local text = ""
+		local ilvl = nil
+		local icon = nil
+		local hasEnchant = false
+		local isTierSet = false
+
 		if type(slot) == "table" then
-			local link = tostring(slot.link or "")
+			link = tostring(slot.link or "")
 			local itemId = tonumber(slot.itemId or 0) or 0
-			local ilvl = tonumber(slot.itemLevel or 0) or 0
-			local text = "-"
+			local itemLevel = tonumber(slot.itemLevel or 0) or 0
+			ilvl = (itemLevel > 0) and itemLevel or nil
+
+			icon = tonumber(slot.icon or 0) or 0
+			if icon <= 0 and link ~= "" and type(GetItemInfoInstant) == "function" then
+				local _, _, _, _, iconID = GetItemInfoInstant(link)
+				icon = tonumber(iconID or 0) or 0
+			end
+			if icon <= 0 and (link ~= "" or itemId > 0) then
+				icon = EQUIP_DEFAULT_ICON
+			end
+
 			if link ~= "" then
 				text = link
 			elseif itemId > 0 then
 				text = string.format("item:%d", itemId)
 			end
 
-			rows[#rows + 1] = {
-				slotId = slotId,
-				slotName = EQUIP_SLOT_NAMES[slotId] or ("Slot " .. tostring(slotId)),
-				text = text,
-				link = link,
-				itemLevel = (ilvl > 0) and ilvl or nil,
-			}
+			local enchantId = tonumber(slot.enchantId or 0) or 0
+			hasEnchant = (slot.hasEnchant == true) or (enchantId > 0)
+
+			local setId = tonumber(slot.setId or 0) or 0
+			local tierSlot = EQUIP_TIER_SLOT_IDS[tonumber(slotId or 0) or 0] == true
+			isTierSet = (slot.isTierSet == true) or (tierSlot and setId > 0)
 		end
+
+		rows[#rows + 1] = {
+			slotId = slotId,
+			slotName = EQUIP_SLOT_NAMES[slotId] or ("Slot " .. tostring(slotId)),
+			text = text,
+			link = link,
+			icon = icon,
+			hasEnchant = hasEnchant,
+			isTierSet = isTierSet,
+			itemLevel = ilvl,
+		}
 	end
 
-	local ilvl, slots = BuildItemLevelFromEquipmentSnapshot(snapshot)
+	local ilvl, slots = nil, 0
+	if hasSnapshot then
+		ilvl, slots = BuildItemLevelFromEquipmentSnapshot(snapshot)
+	end
 	return rows, ilvl, tonumber(slots) or 0
 end
 
@@ -1594,33 +1627,128 @@ function CHARINFO:TryRegisterPage()
 		local function BuildCard_Equipment(parent)
 			local card = NewCardContainer(parent, "Equipment")
 			local ilvlText = (details.equipment.ilvl and string.format("%.1f", details.equipment.ilvl)) or "-"
-			AddValueLine(card, "Item Level", ilvlText)
-			AddValueLine(card, "Captured Slots", tostring(details.equipment.slots or 0))
-			AddValueLine(card, "Source", details.equipment.source or "-")
-			if #details.equipment.rows <= 0 then
-				AddNoDataHint(card, "No equipment snapshot available for this character.")
-				return
+
+			local equipIconWidth = 20
+			local equipSlotWidth = 82
+			local equipTSetWidth = 36
+			local equipVZWidth = 30
+			local equipLvlWidth = 56
+			local cardWidth = colWidth - 32
+			if card and card.content and type(card.content.GetWidth) == "function" then
+				local cw = tonumber(card.content:GetWidth()) or 0
+				if cw > 0 then cardWidth = cw end
 			end
-			local equipSlotWidth = 110
-			local equipLvlWidth = 70
-			local equipItemWidth = colWidth - equipSlotWidth - equipLvlWidth - 40
-			if equipItemWidth < 180 then equipItemWidth = 180 end
+			if cardWidth < 360 then cardWidth = 360 end
+			local equipItemWidth = cardWidth - equipIconWidth - equipSlotWidth - equipTSetWidth - equipVZWidth - equipLvlWidth - 22
+			if equipItemWidth < 130 then equipItemWidth = 130 end
+
+			local headTop = AceGUI:Create("SimpleGroup")
+			headTop:SetFullWidth(true)
+			headTop:SetLayout("Flow")
+			headTop:SetHeight(10)
+			card:AddChild(headTop)
+
+			local headSpacerA = AceGUI:Create("Label")
+			headSpacerA:SetWidth(equipIconWidth + equipSlotWidth + equipItemWidth + equipTSetWidth + equipVZWidth)
+			headSpacerA:SetText("")
+			headTop:AddChild(headSpacerA)
+
+			local headILvlTop = AceGUI:Create("Label")
+			headILvlTop:SetWidth(equipLvlWidth)
+			headILvlTop:SetText("|cff03A9F4" .. ilvlText .. "|r")
+			if headILvlTop.label then
+				headILvlTop.label:SetFontObject(GameFontNormalSmallOutline)
+				headILvlTop.label:SetJustifyH("RIGHT")
+				headILvlTop.label:SetWordWrap(false)
+			end
+			headTop:AddChild(headILvlTop)
+
+			local head = AceGUI:Create("SimpleGroup")
+			head:SetFullWidth(true)
+			head:SetLayout("Flow")
+			head:SetHeight(10)
+			card:AddChild(head)
+
+			local headSpacerB = AceGUI:Create("Label")
+			headSpacerB:SetWidth(equipIconWidth + equipSlotWidth + equipItemWidth)
+			headSpacerB:SetText("")
+			head:AddChild(headSpacerB)
+
+			local headTSet = AceGUI:Create("Label")
+			headTSet:SetWidth(equipTSetWidth)
+			headTSet:SetText("|cff9d9d9dTSET|r")
+			if headTSet.label then
+				headTSet.label:SetFontObject(GameFontNormalSmallOutline)
+				headTSet.label:SetJustifyH("CENTER")
+				headTSet.label:SetWordWrap(false)
+			end
+			head:AddChild(headTSet)
+
+			local headVZ = AceGUI:Create("Label")
+			headVZ:SetWidth(equipVZWidth)
+			headVZ:SetText("|cff9d9d9dVZ|r")
+			if headVZ.label then
+				headVZ.label:SetFontObject(GameFontNormalSmallOutline)
+				headVZ.label:SetJustifyH("CENTER")
+				headVZ.label:SetWordWrap(false)
+			end
+			head:AddChild(headVZ)
+
+			local headILvl = AceGUI:Create("Label")
+			headILvl:SetWidth(equipLvlWidth)
+			headILvl:SetText("|cff9d9d9diLvl|r")
+			if headILvl.label then
+				headILvl.label:SetFontObject(GameFontNormalSmallOutline)
+				headILvl.label:SetJustifyH("RIGHT")
+				headILvl.label:SetWordWrap(false)
+			end
+			head:AddChild(headILvl)
+
 			for i = 1, #details.equipment.rows do
 				local e = details.equipment.rows[i]
 				local row = AceGUI:Create("SimpleGroup")
 				row:SetFullWidth(true)
 				row:SetLayout("Flow")
+				row:SetHeight(10)
 				card:AddChild(row)
+
+				local icon = AceGUI:Create("Icon")
+				icon:SetWidth(equipIconWidth)
+				icon:SetHeight(10)
+				if e.icon then
+					icon:SetImage(e.icon)
+				else
+					icon:SetImage(nil)
+				end
+				icon:SetImageSize(10, 10)
+				if tostring(e.link or "") ~= "" then
+					icon:SetCallback("OnEnter", function(widget)
+						if GameTooltip and widget and widget.frame then
+							GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
+							GameTooltip:SetHyperlink(tostring(e.link))
+							GameTooltip:Show()
+						end
+					end)
+					icon:SetCallback("OnLeave", function()
+						if GameTooltip then GameTooltip:Hide() end
+					end)
+				end
+				row:AddChild(icon)
 
 				local slot = AceGUI:Create("Label")
 				slot:SetWidth(equipSlotWidth)
 				slot:SetText("|cff9d9d9d" .. tostring(e.slotName or "-") .. "|r")
+				if slot.label then
+					slot.label:SetFontObject(GameFontNormalSmallOutline)
+					slot.label:SetWordWrap(false)
+				end
 				row:AddChild(slot)
 
 				local item = AceGUI:Create("InteractiveLabel")
 				item:SetWidth(equipItemWidth)
-				item:SetText(tostring(e.text or "-"))
+				item:SetText(tostring(e.text or ""))
 				if item.label then
+					item.label:SetFontObject(GameFontNormalSmallOutline)
 					item.label:SetJustifyH("LEFT")
 					item.label:SetWordWrap(false)
 				end
@@ -1643,10 +1771,35 @@ function CHARINFO:TryRegisterPage()
 				end
 				row:AddChild(item)
 
+				local tset = AceGUI:Create("Label")
+				tset:SetWidth(equipTSetWidth)
+				tset:SetText((e.isTierSet == true) and "|cffffc107T|r" or "")
+				if tset.label then
+					tset.label:SetFontObject(GameFontNormalSmallOutline)
+					tset.label:SetJustifyH("CENTER")
+					tset.label:SetWordWrap(false)
+				end
+				row:AddChild(tset)
+
+				local vz = AceGUI:Create("Label")
+				vz:SetWidth(equipVZWidth)
+				vz:SetText((e.hasEnchant == true) and "|cff4caf50VZ|r" or "")
+				if vz.label then
+					vz.label:SetFontObject(GameFontNormalSmallOutline)
+					vz.label:SetJustifyH("CENTER")
+					vz.label:SetWordWrap(false)
+				end
+				row:AddChild(vz)
+
 				local lvl = AceGUI:Create("Label")
 				lvl:SetWidth(equipLvlWidth)
 				local l = tonumber(e.itemLevel)
 				lvl:SetText((l and l > 0) and ("|cff03A9F4" .. tostring(l) .. "|r") or "|cff7f7f7f-|r")
+				if lvl.label then
+					lvl.label:SetFontObject(GameFontNormalSmallOutline)
+					lvl.label:SetJustifyH("RIGHT")
+					lvl.label:SetWordWrap(false)
+				end
 				row:AddChild(lvl)
 			end
 		end

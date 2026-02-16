@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.0.25",
+	VERSION      = "1.0.26",
 }
 
 local LibStub = LibStub
@@ -102,6 +102,8 @@ end
 
 local MODULE_NAME = "ROSTER"
 local DISPLAY_NAME = "Roster"
+local ACCOUNT_CHARS_SYNC_DOMAIN = "ACCOUNT_CHARS_V1"
+local ACCOUNT_CHARS_PUBLISH_MIN_INTERVAL = 20
 
 local Roster = GMS:GetModule(MODULE_NAME, true)
 if not Roster then
@@ -758,6 +760,191 @@ function Roster:GetAccountLinkStore()
 	return links
 end
 
+local function BuildAccountCharsListForGuild(links, guildKey)
+	local out = {}
+	local key = tostring(guildKey or "")
+	if key == "" then
+		return out
+	end
+	if type(links) ~= "table" or type(links.chars) ~= "table" then
+		return out
+	end
+
+	for guid, entry in pairs(links.chars) do
+		if type(entry) == "table" and tostring(entry.guildKey or "") == key then
+			out[#out + 1] = {
+				guid = tostring(guid or ""),
+				name_full = tostring(entry.name_full or entry.name or guid or "-"),
+				name = tostring(entry.name or ""),
+				realm = tostring(entry.realm or ""),
+				level = tonumber(entry.level or 0) or 0,
+				class = tostring(entry.class or "-"),
+				classFile = tostring(entry.classFile or ""),
+				guild = tostring(entry.guild or ""),
+				guildKey = key,
+				lastSeenAt = tonumber(entry.lastSeenAt or 0) or 0,
+			}
+		end
+	end
+
+	table.sort(out, function(a, b)
+		return tostring(a.name_full or "") < tostring(b.name_full or "")
+	end)
+
+	return out
+end
+
+local function BuildAccountCharsDigest(guildKey, chars)
+	local parts = { tostring(guildKey or "") }
+	for i = 1, #chars do
+		local row = chars[i]
+		parts[#parts + 1] = string.format(
+			"%s:%s:%s:%d:%s",
+			tostring(row.guid or ""),
+			tostring(row.name_full or ""),
+			tostring(row.classFile or ""),
+			tonumber(row.level or 0) or 0,
+			tostring(row.guildKey or "")
+		)
+	end
+	return table.concat(parts, "|")
+end
+
+local function BuildGuildVerifiedLinkedRows(roster, selectedGuid, chars, fallbackGuildKey, sourceLabel)
+	local guid = tostring(selectedGuid or "")
+	if guid == "" then
+		return {}, false, "No character GUID available."
+	end
+	if type(chars) ~= "table" or #chars <= 0 then
+		return {}, false, "No same-account guild characters recorded yet."
+	end
+
+	local selectedGuildKey = tostring(fallbackGuildKey or "")
+	for i = 1, #chars do
+		local row = chars[i]
+		if type(row) == "table" and tostring(row.guid or "") == guid then
+			local rowGuildKey = tostring(row.guildKey or "")
+			if rowGuildKey ~= "" then
+				selectedGuildKey = rowGuildKey
+			end
+			break
+		end
+	end
+	if selectedGuildKey == "" then
+		return {}, false, "Selected character has no guild link."
+	end
+
+	local currentGuildKey = select(1, GetCurrentGuildStorageKeySafe())
+	if tostring(currentGuildKey or "") == "" or tostring(currentGuildKey or "") ~= selectedGuildKey then
+		return {}, false, "Selected character is outside the current guild context."
+	end
+
+	local currentMember = roster:GetMemberByGUID(guid)
+	if type(currentMember) ~= "table" then
+		return {}, false, "Selected character is not currently in guild roster."
+	end
+
+	local rows = {}
+	for i = 1, #chars do
+		local entry = chars[i]
+		if type(entry) == "table" then
+			local otherGuid = tostring(entry.guid or "")
+			local otherGuildKey = tostring(entry.guildKey or selectedGuildKey)
+			if otherGuid ~= "" and otherGuid ~= guid and otherGuildKey == selectedGuildKey then
+				local member = roster:GetMemberByGUID(otherGuid)
+				if type(member) == "table" then
+					rows[#rows + 1] = {
+						guid = otherGuid,
+						name_full = tostring(member.name_full or member.name or entry.name_full or entry.name or "-"),
+						level = tonumber(member.level or entry.level or 0) or 0,
+						class = tostring(member.class or entry.class or "-"),
+						classFile = tostring(member.classFileName or entry.classFile or ""),
+						online = member.online == true,
+					}
+				end
+			end
+		end
+	end
+
+	table.sort(rows, function(a, b)
+		return tostring(a.name_full or "") < tostring(b.name_full or "")
+	end)
+
+	if #rows <= 0 then
+		return rows, false, "No same-account guild characters currently in guild roster."
+	end
+
+	return rows, true, tostring(sourceLabel or "Account guild links (guild-verified)")
+end
+
+function Roster:PublishLocalAccountLinks(reason, force)
+	local comm = GMS and GMS.Comm
+	if type(comm) ~= "table" or type(comm.PublishRecord) ~= "function" then
+		return false, "comm-unavailable"
+	end
+
+	local guid = (type(UnitGUID) == "function") and tostring(UnitGUID("player") or "") or ""
+	if guid == "" then
+		return false, "no-player-guid"
+	end
+
+	local links = self:GetAccountLinkStore()
+	if type(links) ~= "table" or type(links.chars) ~= "table" then
+		return false, "store-unavailable"
+	end
+
+	local base = links.chars[guid]
+	if type(base) ~= "table" then
+		return false, "player-row-missing"
+	end
+
+	local guildKey = tostring(base.guildKey or "")
+	if guildKey == "" then
+		return false, "no-guild"
+	end
+
+	local chars = BuildAccountCharsListForGuild(links, guildKey)
+	if #chars <= 0 then
+		return false, "no-same-guild-chars"
+	end
+
+	local digest = BuildAccountCharsDigest(guildKey, chars)
+	local nowTs = (type(GetTime) == "function" and GetTime()) or 0
+	local lastTs = tonumber(self._accountCharsLastPublishAt or 0) or 0
+	local forcePublish = (force == true)
+
+	if not forcePublish and (nowTs - lastTs) < ACCOUNT_CHARS_PUBLISH_MIN_INTERVAL then
+		return false, "cooldown"
+	end
+	if not forcePublish and digest == tostring(self._accountCharsLastDigest or "") then
+		return false, "unchanged"
+	end
+
+	local payload = {
+		schema = 1,
+		guildKey = guildKey,
+		guild = tostring(base.guild or ""),
+		sourceGuid = guid,
+		reason = tostring(reason or "unknown"),
+		chars = chars,
+		characters = {},
+	}
+	for i = 1, #chars do
+		payload.characters[#payload.characters + 1] = tostring(chars[i].name_full or chars[i].guid or "-")
+	end
+
+	local ok = comm:PublishRecord(ACCOUNT_CHARS_SYNC_DOMAIN, guid, payload, {
+		updatedAt = nowTs,
+	})
+	if ok then
+		self._accountCharsLastDigest = digest
+		self._accountCharsLastPublishAt = nowTs
+		LOCAL_LOG("INFO", "Account links published", tostring(#chars), tostring(reason or "unknown"))
+		return true, "published"
+	end
+	return false, "publish-failed"
+end
+
 function Roster:TrackLocalAccountCharacter(reason)
 	local guid = (type(UnitGUID) == "function") and tostring(UnitGUID("player") or "") or ""
 	if guid == "" then return false end
@@ -786,11 +973,13 @@ function Roster:TrackLocalAccountCharacter(reason)
 	local row = links.chars[guid]
 	local changed = false
 
-	local function SetTextField(key, value)
+	local function SetTextField(key, value, countAsChange)
 		local v = tostring(value or "")
 		if tostring(row[key] or "") ~= v then
 			row[key] = v
-			changed = true
+			if countAsChange ~= false then
+				changed = true
+			end
 		end
 	end
 
@@ -811,7 +1000,8 @@ function Roster:TrackLocalAccountCharacter(reason)
 	SetNumberField("level", level)
 	SetTextField("guild", guildName)
 	SetTextField("guildKey", guildKey)
-	SetTextField("lastSeenReason", tostring(reason or "unknown"))
+	-- Reason updates are operational metadata and should not count as structural row changes.
+	SetTextField("lastSeenReason", tostring(reason or "unknown"), false)
 
 	local nowTs = (type(time) == "function" and time()) or 0
 	local oldSeenAt = tonumber(row.lastSeenAt or 0) or 0
@@ -822,7 +1012,75 @@ function Roster:TrackLocalAccountCharacter(reason)
 	if changed then
 		LOCAL_LOG("INFO", "Local account character tracked", guid, nameFull, guildKey ~= "" and guildKey or "no-guild")
 	end
+
+	if tostring(reason or "") ~= "query" then
+		self:PublishLocalAccountLinks(reason, changed)
+	end
+
 	return true
+end
+
+function Roster:GetSyncedAccountGuildCharactersForGuid(guid)
+	local g = tostring(guid or "")
+	if g == "" then
+		return {}, false, "No character GUID available."
+	end
+
+	local comm = GMS and GMS.Comm
+	if type(comm) ~= "table" or type(comm.GetRecordsByDomain) ~= "function" then
+		return {}, false, "Comm record store unavailable."
+	end
+
+	local records = comm:GetRecordsByDomain(ACCOUNT_CHARS_SYNC_DOMAIN)
+	if type(records) ~= "table" or #records <= 0 then
+		return {}, false, "No synced account-link record found for selected character."
+	end
+
+	local best = nil
+	local bestUpdated = -1
+	local bestSeq = -1
+	for i = 1, #records do
+		local rec = records[i]
+		if type(rec) == "table" and type(rec.payload) == "table" then
+			local match = false
+			if tostring(rec.charGUID or "") == g or tostring(rec.originGUID or "") == g then
+				match = true
+			else
+				local chars = rec.payload.chars
+				if type(chars) == "table" then
+					for j = 1, #chars do
+						local row = chars[j]
+						if type(row) == "table" and tostring(row.guid or "") == g then
+							match = true
+							break
+						end
+					end
+				end
+			end
+
+			if match then
+				local updated = tonumber(rec.updatedAt) or 0
+				local seq = tonumber(rec.seq) or 0
+				if updated > bestUpdated or (updated == bestUpdated and seq > bestSeq) then
+					best = rec
+					bestUpdated = updated
+					bestSeq = seq
+				end
+			end
+		end
+	end
+
+	if type(best) ~= "table" or type(best.payload) ~= "table" then
+		return {}, false, "No synced account-link record found for selected character."
+	end
+
+	return BuildGuildVerifiedLinkedRows(
+		self,
+		g,
+		type(best.payload.chars) == "table" and best.payload.chars or {},
+		tostring(best.payload.guildKey or ""),
+		"Synced account guild links (guild-verified)"
+	)
 end
 
 function Roster:GetLinkedAccountGuildCharactersForGuid(guid)
@@ -834,56 +1092,34 @@ function Roster:GetLinkedAccountGuildCharactersForGuid(guid)
 	self:TrackLocalAccountCharacter("query")
 
 	local links = self:GetAccountLinkStore()
-	if type(links) ~= "table" or type(links.chars) ~= "table" then
-		return {}, false, "Account link store unavailable."
-	end
-
-	local base = links.chars[g]
-	if type(base) ~= "table" then
-		return {}, false, "Selected character is not recorded in local account DB."
-	end
-
-	local guildKey = tostring(base.guildKey or "")
-	if guildKey == "" then
-		return {}, false, "Selected character has no guild link."
-	end
-
-	local currentGuildKey = select(1, GetCurrentGuildStorageKeySafe())
-	if tostring(currentGuildKey or "") == "" or tostring(currentGuildKey or "") ~= guildKey then
-		return {}, false, "Selected character is outside the current guild context."
-	end
-
-	local currentMember = self:GetMemberByGUID(g)
-	if type(currentMember) ~= "table" then
-		return {}, false, "Selected character is not currently in guild roster."
-	end
-
-	local rows = {}
-	for otherGuid, entry in pairs(links.chars) do
-		if tostring(otherGuid or "") ~= g and type(entry) == "table" and tostring(entry.guildKey or "") == guildKey then
-			local member = self:GetMemberByGUID(otherGuid)
-			if type(member) == "table" then
-				rows[#rows + 1] = {
-					guid = tostring(otherGuid),
-					name_full = tostring(member.name_full or entry.name_full or member.name or entry.name or "-"),
-					level = tonumber(member.level or entry.level or 0) or 0,
-					class = tostring(member.class or entry.class or "-"),
-					classFile = tostring(member.classFileName or entry.classFile or ""),
-					online = member.online == true,
-				}
+	if type(links) == "table" and type(links.chars) == "table" then
+		local base = links.chars[g]
+		if type(base) == "table" then
+			local guildKey = tostring(base.guildKey or "")
+			local localChars = BuildAccountCharsListForGuild(links, guildKey)
+			local rows, hasData, source = BuildGuildVerifiedLinkedRows(
+				self,
+				g,
+				localChars,
+				guildKey,
+				"Local account guild links (guild-verified)"
+			)
+			if hasData then
+				return rows, true, source
 			end
+			local syncedRows, syncedHasData, syncedSource = self:GetSyncedAccountGuildCharactersForGuid(g)
+			if syncedHasData then
+				return syncedRows, true, syncedSource
+			end
+			return rows, false, source
 		end
 	end
 
-	table.sort(rows, function(a, b)
-		return tostring(a.name_full or "") < tostring(b.name_full or "")
-	end)
-
-	if #rows <= 0 then
-		return rows, false, "No same-account guild characters currently in guild roster."
+	local syncedRows, syncedHasData, syncedSource = self:GetSyncedAccountGuildCharactersForGuid(g)
+	if syncedHasData then
+		return syncedRows, true, syncedSource
 	end
-
-	return rows, true, "Local account guild links (guild-verified)"
+	return syncedRows, false, syncedSource
 end
 
 function Roster:SetMemberGmsVersion(guid, version, seenAt)
