@@ -34,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.8",
+	VERSION      = "1.3.9",
 }
 
 -- ###########################################################################
@@ -95,6 +95,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 -- ###########################################################################
 
 local RELEASES = {
+	{
+		version = "1.4.7",
+		date = "2026-02-16",
+		title_en = "Account-link sync rollout, CharInfo equipment polish, and roster noise reduction",
+		title_de = "Account-Link-Sync-Rollout, CharInfo-Equipment-Polish und weniger Roster-Rauschen",
+		notes_en = {
+			"Added synced account-link publishing and retrieval in Roster via ACCOUNT_CHARS_V1 with digest/cooldown guards and guild-verified resolution paths.",
+			"Expanded CharInfo account character handling to use the new synced/local account-link pipeline with improved source fallback behavior.",
+			"Refined CharInfo equipment presentation with tighter row spacing, dedicated TSET and VZ columns, right-aligned per-slot item levels, and a right-aligned total item level header.",
+			"Equipment view now keeps all defined slots visible even when no snapshot entry exists, so empty slots are shown consistently without placeholder item text.",
+			"Reduced repetitive Roster INFO logs for local account tracking by excluding operational reason updates from structural change detection.",
+		},
+		notes_de = {
+			"Im Roster wurde synchronisierte Account-Link-Publikation und -Abfrage ueber ACCOUNT_CHARS_V1 eingefuehrt, inklusive Digest-/Cooldown-Schutz und gildenverifizierter Aufloesung.",
+			"Die CharInfo-Account-Char-Verarbeitung nutzt jetzt die neue Sync-/Local-Account-Link-Pipeline mit verbessertem Source-Fallback-Verhalten.",
+			"Die CharInfo-Equipment-Darstellung wurde gestrafft: engerer Zeilenabstand, eigene TSET- und VZ-Spalten, rechtsbuendige Slot-Itemlevel sowie rechtsbuendiger Gesamt-Itemlevel-Header.",
+			"Die Equipment-Ansicht zeigt nun alle definierten Slots auch ohne Snapshot-Eintrag; leere Slots bleiben konsistent sichtbar ohne Platzhalter-Itemtext.",
+			"Wiederholte Roster-INFO-Logs beim lokalen Account-Tracking wurden reduziert, da reine Reason-Updates nicht mehr als strukturelle Aenderung gewertet werden.",
+		},
+	},
 	{
 		version = "1.4.6",
 		date = "2026-02-15",
