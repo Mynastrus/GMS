@@ -9,7 +9,7 @@ local METADATA = {
 	INTERN_NAME  = "DB",
 	SHORT_NAME   = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION      = "1.1.5",
+	VERSION      = "1.1.6",
 }
 
 -- Blizzard Globals
@@ -189,6 +189,15 @@ local function ApplyOneTimeReleaseResetIfNeeded(self)
 
 	local alreadyApplied = tostring(global[ONE_TIME_RESET_MARKER_KEY] or "")
 	if alreadyApplied == target then
+		return false
+	end
+
+	-- Prevent repeated wipe loops on reload if marker is missing but schema is already migrated.
+	local schemaVersion = tonumber(global.version) or 0
+	if schemaVersion >= 2 then
+		global[ONE_TIME_RESET_MARKER_KEY] = target
+		global[ONE_TIME_RESET_MARKER_AT_KEY] = tonumber(global[ONE_TIME_RESET_MARKER_AT_KEY]) or (now() or 0)
+		LOCAL_LOG("INFO", "One-time hard reset skipped (already migrated)", "target=" .. target, "schema=" .. tostring(schemaVersion))
 		return false
 	end
 

@@ -48,6 +48,10 @@ local IsAddOnLoaded                 = IsAddOnLoaded
 local C_AddOns                      = C_AddOns
 local GetExpansionLevel             = GetExpansionLevel
 local GetExpansionDisplayInfo       = GetExpansionDisplayInfo
+local GetCategoryList               = GetCategoryList
+local GetCategoryNumAchievements    = GetCategoryNumAchievements
+local GetAchievementInfo            = GetAchievementInfo
+local GetStatistic                  = GetStatistic
 local C_EncounterJournal            = C_EncounterJournal
 local EJ_GetNumTiers                = EJ_GetNumTiers
 local EJ_SelectTier                 = EJ_SelectTier
@@ -58,6 +62,7 @@ local EJ_GetNumEncounters           = EJ_GetNumEncounters
 local EJ_GetEncounterInfoByIndex    = EJ_GetEncounterInfoByIndex
 local EJ_GetTierInfo                = EJ_GetTierInfo
 local EJ_GetCurrentTier             = EJ_GetCurrentTier
+local IsLoggedIn                    = IsLoggedIn
 local ReloadUI                      = ReloadUI
 local table                         = table
 local string                        = string
@@ -72,7 +77,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.7",
+	VERSION      = "1.2.9",
 }
 
 -- ###########################################################################
@@ -134,6 +139,9 @@ local OPTIONS_DEFAULTS = {
 	raids = {}, -- { [instanceID] = { current = {...}, best = {...} } }
 	lastScan = 0,
 }
+
+local STORE_POLL_MAX_TRIES = 25
+local STORE_POLL_INTERVAL = 1.0
 
 RAIDS._catalog = nil
 
@@ -239,6 +247,45 @@ local function ensureStore()
 	end
 
 	return directStore, charKey
+end
+
+function RAIDS:_StartStorePoll(reason)
+	if self._storePollActive then return end
+	if not C_Timer or not C_Timer.After then return end
+
+	local readyStore, readyCharKey = ensureStore()
+	if readyStore and readyCharKey then
+		self._storePollActive = false
+		self._storePollTries = 0
+		return
+	end
+
+	self._storePollActive = true
+	self._storePollTries = 0
+	local scanReason = tostring(reason or "store-ready")
+
+	local function step()
+		if not RAIDS._storePollActive then return end
+
+		local store, charKey = ensureStore()
+		if store and charKey then
+			RAIDS._storePollActive = false
+			RAIDS._storePollTries = 0
+			RAIDS:_ScheduleScan(scanReason, 0.25)
+			return
+		end
+
+		RAIDS._storePollTries = (tonumber(RAIDS._storePollTries) or 0) + 1
+		if RAIDS._storePollTries >= STORE_POLL_MAX_TRIES then
+			RAIDS._storePollActive = false
+			LOCAL_LOG("WARN", "Raids store unavailable after poll retries", RAIDS._storePollTries)
+			return
+		end
+
+		C_Timer.After(STORE_POLL_INTERVAL, step)
+	end
+
+	C_Timer.After(STORE_POLL_INTERVAL, step)
 end
 
 local function RegisterRaidsSlash()
@@ -508,6 +555,203 @@ local function normalizeRaidName(name)
 	if name == "" then return "" end
 	name = string.lower(name)
 	return (name:gsub("[%s%p]+", ""))
+end
+
+local function parseDifficultyIDFromText(text)
+	local dn = string.lower(tostring(text or ""))
+	if dn == "" then return nil end
+	if dn:find("schlachtzugsbrowser", 1, true)
+		or dn:find("raid finder", 1, true)
+		or dn:find("lfr", 1, true) then
+		return 17
+	end
+	if dn:find("mythisch", 1, true) or dn:find("mythic", 1, true) then
+		return 16
+	end
+	if dn:find("heroisch", 1, true) or dn:find("heroic", 1, true) then
+		return 15
+	end
+	if dn:find("normal", 1, true) then
+		return 14
+	end
+	return nil
+end
+
+local function parseStatisticValueToNumber(raw)
+	local s = tostring(raw or "")
+	s = s:gsub("%s+", "")
+	if s == "" or s == "-" or s == "--" then return nil end
+	s = s:gsub("[^%d%-]", "")
+	if s == "" or s == "-" then return nil end
+	local n = tonumber(s)
+	if not n or n <= 0 then return nil end
+	return n
+end
+
+local function parseRaidStatisticLabel(label)
+	local txt = tostring(label or "")
+	if txt == "" then return nil, nil, nil end
+
+	local bossName = txt:match("^(.-)%s*%(")
+	local descriptor = txt:match("%((.+)%)")
+	if type(descriptor) ~= "string" or descriptor == "" then
+		return nil, nil, nil
+	end
+
+	local diffText, raidName = descriptor:match("^([^:]+):%s*(.+)$")
+	if type(diffText) ~= "string" or type(raidName) ~= "string" then
+		return nil, nil, nil
+	end
+
+	local diffID = parseDifficultyIDFromText(diffText)
+	if not diffID then
+		return nil, nil, nil
+	end
+
+	bossName = tostring(bossName or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	raidName = tostring(raidName or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	if bossName == "" or raidName == "" then
+		return nil, nil, nil
+	end
+
+	return diffID, raidName, bossName
+end
+
+local function resolveInstanceIDFromRaidName(catalog, raidName)
+	local rName = tostring(raidName or "")
+	if rName == "" then return nil end
+
+	if type(catalog) == "table" then
+		if type(catalog.nameToInstanceID) == "table" then
+			local iid = catalog.nameToInstanceID[rName]
+			if iid then return iid end
+		end
+		if type(catalog.nameNormToInstanceID) == "table" then
+			local n = normalizeRaidName(rName)
+			if n ~= "" then
+				local iid = catalog.nameNormToInstanceID[n]
+				if iid then return iid end
+			end
+		end
+	end
+
+	local fallback = normalizeRaidName(rName)
+	if fallback ~= "" then
+		return "name:" .. fallback
+	end
+	return nil
+end
+
+local function BuildBestByRaidFromCharacterStatistics(catalog)
+	local out = {}
+	local matched = 0
+
+	if type(GetCategoryList) ~= "function"
+		or type(GetCategoryNumAchievements) ~= "function"
+		or type(GetAchievementInfo) ~= "function"
+		or type(GetStatistic) ~= "function" then
+		return out, matched
+	end
+
+	local categories = { GetCategoryList() }
+	for i = 1, #categories do
+		local categoryID = categories[i]
+		local num = tonumber(GetCategoryNumAchievements(categoryID, true) or GetCategoryNumAchievements(categoryID) or 0) or 0
+		for idx = 1, num do
+			local id, name, _, _, _, _, _, _, _, _, _, _, _, _, isStatistic = GetAchievementInfo(categoryID, idx)
+			if id and isStatistic then
+				local statCount = parseStatisticValueToNumber(GetStatistic(id))
+				if statCount and statCount > 0 then
+					local diffID, raidName, bossName = parseRaidStatisticLabel(name)
+					if diffID and raidName and bossName then
+						local instanceID = resolveInstanceIDFromRaidName(catalog, raidName)
+						if instanceID then
+							out[instanceID] = out[instanceID] or {}
+							local perRaid = out[instanceID]
+							local bucket = perRaid[diffID]
+							if type(bucket) ~= "table" then
+								local catRaid = type(catalog) == "table" and type(catalog.byInstanceID) == "table" and catalog.byInstanceID[instanceID] or nil
+								bucket = {
+									killed = 0,
+									total = tonumber(catRaid and catRaid.total or 0) or 0,
+									bosses = {},
+								}
+								perRaid[diffID] = bucket
+							end
+							local bossKey = string.lower(tostring(bossName))
+							if bossKey ~= "" and not bucket.bosses[bossKey] then
+								bucket.bosses[bossKey] = true
+								bucket.killed = (tonumber(bucket.killed) or 0) + 1
+								matched = matched + 1
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	for _, perRaid in pairs(out) do
+		for _, bucket in pairs(perRaid) do
+			bucket.killed = tonumber(bucket.killed) or 0
+			bucket.total = tonumber(bucket.total) or bucket.killed
+			bucket.bosses = nil
+		end
+	end
+
+	return out, matched
+end
+
+local function ApplyRaidBestFromCharacterStatistics(raidsStore, catalog, tsNow, reason)
+	if type(raidsStore) ~= "table" then return 0, 0 end
+
+	local statsByRaid, matched = BuildBestByRaidFromCharacterStatistics(catalog)
+	if type(statsByRaid) ~= "table" then
+		return 0, matched
+	end
+
+	local applied = 0
+	for instanceID, perRaid in pairs(statsByRaid) do
+		if type(perRaid) == "table" then
+			local catRaid = type(catalog) == "table" and type(catalog.byInstanceID) == "table" and catalog.byInstanceID[instanceID] or nil
+			local raidEntry = raidsStore[instanceID]
+			if type(raidEntry) ~= "table" then
+				raidEntry = {
+					instanceID = instanceID,
+					name = (catRaid and catRaid.name) or tostring(instanceID),
+					total = tonumber(catRaid and catRaid.total or 0) or 0,
+					current = {},
+				}
+				raidsStore[instanceID] = raidEntry
+			end
+
+			raidEntry.current = type(raidEntry.current) == "table" and raidEntry.current or {}
+			raidEntry.total = tonumber(raidEntry.total) or tonumber(catRaid and catRaid.total or 0) or 0
+
+			for diffID, bestNode in pairs(perRaid) do
+				local dID = tonumber(diffID)
+				local killed = tonumber(bestNode and bestNode.killed or 0) or 0
+				local total = tonumber(bestNode and bestNode.total or 0) or tonumber(raidEntry.total) or 0
+				if total <= 0 then total = killed end
+				if dID and killed > 0 then
+					local prevShort = type(raidEntry.best) == "table" and tostring(raidEntry.best.short or "") or ""
+					updateBest(raidEntry, dID, killed, total)
+					local nextShort = type(raidEntry.best) == "table" and tostring(raidEntry.best.short or "") or ""
+					if nextShort ~= "" and nextShort ~= prevShort then
+						applied = applied + 1
+					end
+					if total > (tonumber(raidEntry.total) or 0) then
+						raidEntry.total = total
+					end
+				end
+			end
+
+			raidEntry.lastScan = raidEntry.lastScan or tsNow
+			raidEntry.lastReason = raidEntry.lastReason or tostring(reason or "stats-fallback")
+		end
+	end
+
+	return applied, matched
 end
 
 local function buildExpansionRaidCatalog()
@@ -802,6 +1046,8 @@ function RAIDS:OnInitialize()
 	self:InitializeOptions()
 	self._pendingScan = false
 	self._scanToken = 0
+	self._storePollActive = false
+	self._storePollTries = 0
 	self._ejReady = false
 	self._ejUnsupported = false
 	self._scanWantedAfterCatalog = nil
@@ -810,6 +1056,7 @@ end
 function RAIDS:OnEnable()
 	LOCAL_LOG("INFO", "Enabling Raids module")
 	self:InitializeOptions()
+	self:_StartStorePoll("store-ready-enable")
 
 	-- SavedInstances update
 	if RequestRaidInfo and GetNumSavedInstances and GetSavedInstanceInfo then
@@ -841,6 +1088,12 @@ function RAIDS:OnEnable()
 	-- Try to build EJ catalog early (gated until EJ is ready)
 	self:_EnsureCatalogReady()
 
+	-- PLAYER_LOGIN / PLAYER_ENTERING_WORLD may already have fired.
+	-- Ensure at least one initial scan after reload/late enable.
+	if IsLoggedIn and IsLoggedIn() then
+		self:_ScheduleScan("enable-fallback", 1.0)
+	end
+
 	-- Hook into configuration changes
 	if type(GMS.RegisterMessage) == "function" then
 		self:RegisterMessage("GMS_CONFIG_CHANGED", "OnConfigChanged")
@@ -859,6 +1112,7 @@ end
 
 function RAIDS:OnDisable()
 	LOCAL_LOG("INFO", "Disabling Raids module")
+	self._storePollActive = false
 	if type(self.UnregisterAllEvents) == "function" then
 		self:UnregisterAllEvents()
 	end
@@ -926,8 +1180,12 @@ function RAIDS:ScanNow(reason)
 	local store, charKey = ensureStore()
 	if not store or not charKey then
 		LOCAL_LOG("WARN", "ScanNow failed: DB or player key missing", reason)
+		self:_StartStorePoll("store-ready-scan")
 		return false
 	end
+
+	self._storePollActive = false
+	self._storePollTries = 0
 
 	self:_EnsureCatalogReady()
 
@@ -959,8 +1217,12 @@ function RAIDS:OnUpdateInstanceInfo()
 	local store, charKey = ensureStore()
 	if not store or not charKey then
 		LOCAL_LOG("WARN", "OnUpdateInstanceInfo: DB or player key missing")
+		self:_StartStorePoll("store-ready-ingest")
 		return
 	end
+
+	self._storePollActive = false
+	self._storePollTries = 0
 
 	local catalogReady = self:_EnsureCatalogReady()
 	if not catalogReady then
@@ -1169,6 +1431,11 @@ function RAIDS:OnUpdateInstanceInfo()
 			self:RebuildCatalog()
 			self:_ScheduleScan("rescan_after_unresolved", 2.0)
 		end
+	end
+
+	local statsApplied, statsMatched = ApplyRaidBestFromCharacterStatistics(raidsStore, RAIDS._catalog, tsNow, self._pendingReason)
+	if statsApplied > 0 then
+		LOCAL_LOG("INFO", "Raid best enriched from character statistics", "applied=" .. tostring(statsApplied), "matched=" .. tostring(statsMatched))
 	end
 
 	store.lastScan = tsNow or now()

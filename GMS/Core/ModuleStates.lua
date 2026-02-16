@@ -19,7 +19,7 @@ local METADATA = {
 	INTERN_NAME  = "MODULESTATES",
 	SHORT_NAME   = "ModuleStates",
 	DISPLAY_NAME = "Module States",
-	VERSION      = "1.1.2",
+	VERSION      = "1.1.3",
 }
 
 local LibStub = LibStub
@@ -158,6 +158,7 @@ function GMS:RegisterExtension(meta)
 
 	entry.key = key
 	entry.name = (meta and (meta.NAME or meta.name)) or key
+	entry.shortName = (meta and (meta.SHORT_NAME or meta.shortName)) or entry.shortName
 	entry.displayName = (meta and (meta.DISPLAY_NAME or meta.displayName)) or entry.name
 	entry.version = (meta and (meta.VERSION or meta.version)) or entry.version or "1.0.0"
 	entry.desc = meta.DESC or meta.desc
@@ -178,6 +179,7 @@ function GMS:RegisterModule(mod, meta)
 
 	entry.key = key
 	entry.name = (meta and (meta.NAME or meta.name)) or key
+	entry.shortName = (meta and (meta.SHORT_NAME or meta.shortName)) or entry.shortName
 	entry.displayName = (meta and (meta.DISPLAY_NAME or meta.displayName)) or entry.name
 	entry.version = (meta and (meta.VERSION or meta.version)) or entry.version or "1.0.0"
 	entry.desc = meta and (meta.DESC or meta.desc)

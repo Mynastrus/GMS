@@ -35,6 +35,7 @@ local UnitGUID      = UnitGUID
 local UnitName      = UnitName
 local UnitFullName  = UnitFullName
 local GetServerTime = GetServerTime
+local IsLoggedIn    = IsLoggedIn
 local time          = time
 local table         = table
 local string        = string
@@ -49,7 +50,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.7",
+	VERSION      = "1.3.8",
 }
 
 -- ###########################################################################
@@ -122,6 +123,7 @@ local EQUIP_SYNC_DOMAIN    = "EQUIPMENT_V1"
 
 EQUIP._scanToken = EQUIP._scanToken or 0
 EQUIP._pollTries = EQUIP._pollTries or 0
+EQUIP._storePollActive = EQUIP._storePollActive or false
 
 -- Memory buffer, falls SavedVariables noch nicht verfügbar sind
 EQUIP._mem = EQUIP._mem or {
@@ -242,6 +244,55 @@ local function _getEquipmentStore()
 	return opts.equipment
 end
 
+local function _hasBufferedSnapshot(self)
+	return type(self) == "table"
+		and type(self._mem) == "table"
+		and type(self._mem.snapshot) == "table"
+end
+
+function EQUIP:_TryFlushBufferedSnapshot(reason)
+	if not _hasBufferedSnapshot(self) then
+		return true
+	end
+
+	local memSnap = self._mem.snapshot
+	self._mem.snapshot = nil
+	local ok = self:SaveSnapshot(memSnap, reason or "mem-flush")
+	if _hasBufferedSnapshot(self) then
+		return false
+	end
+	return ok
+end
+
+function EQUIP:_StartStorePoll()
+	if self._storePollActive then return end
+	if not _hasBufferedSnapshot(self) then return end
+
+	self._storePollActive = true
+	self._pollTries = 0
+
+	local function step()
+		if not EQUIP._storePollActive then return end
+
+		if EQUIP:_TryFlushBufferedSnapshot("mem-poll-flush") then
+			EQUIP._storePollActive = false
+			EQUIP._pollTries = 0
+			return
+		end
+
+		EQUIP._pollTries = (tonumber(EQUIP._pollTries) or 0) + 1
+		if EQUIP._pollTries >= STORE_POLL_MAX_TRIES then
+			EQUIP._storePollActive = false
+			LOCAL_LOG("WARN", "Equipment store unavailable after poll retries", EQUIP._pollTries)
+			return
+		end
+
+		_schedule(STORE_POLL_INTERVAL, step)
+	end
+
+	_schedule(STORE_POLL_INTERVAL, step)
+end
+
 function EQUIP:InitializeOptions()
 	-- Register equipment options using new API
 	if GMS and type(GMS.RegisterModuleOptions) == "function" then
@@ -263,22 +314,19 @@ function EQUIP:InitializeOptions()
 	local direct = _getDirectCharOptionsStore()
 	if type(direct) == "table" then
 		self._options = direct
-		if type(self._mem) == "table" and type(self._mem.snapshot) == "table" then
-			local memSnap = self._mem.snapshot
-			self._mem.snapshot = nil
-			self:SaveSnapshot(memSnap, "mem-flush")
-		end
+		self:_TryFlushBufferedSnapshot("mem-flush")
+		self._storePollActive = false
+		self._pollTries = 0
 		LOCAL_LOG("INFO", "Equipment options initialized (direct CHAR store)")
 	else
-		if self._options and type(self._mem) == "table" and type(self._mem.snapshot) == "table" then
-			local memSnap = self._mem.snapshot
-			self._mem.snapshot = nil
-			self:SaveSnapshot(memSnap, "mem-flush")
+		if self._options then
+			self:_TryFlushBufferedSnapshot("mem-flush")
 		end
 		if self._options then
 			LOCAL_LOG("INFO", "Equipment options initialized")
 		else
 			LOCAL_LOG("WARN", "Equipment options unavailable after initialization")
+			self:_StartStorePoll()
 		end
 	end
 end
@@ -439,9 +487,13 @@ function EQUIP:SaveSnapshot(snapshot, reason)
 		self._mem = self._mem or {}
 		self._mem.snapshot = snapshot
 		self._mem.lastDigest = digest
+		self:_StartStorePoll()
 		LOCAL_LOG("WARN", "SaveSnapshot: Equipment options not available, stored in memory buffer")
 		return true
 	end
+
+	self._storePollActive = false
+	self._pollTries = 0
 
 	local previousDigest = tostring(store.lastDigest or "")
 	store.snapshot = snapshot
@@ -522,10 +574,18 @@ function EQUIP:OnEnable()
 	self:RegisterEvent("UNIT_INVENTORY_CHANGED", "_OnUnitInventoryChanged")
 
 	self:InitializeOptions()
+	self:_StartStorePoll()
+
+	-- PLAYER_LOGIN may already be gone by the time Ace enables the module.
+	-- Ensure login scans still run on reload/late enable.
+	if IsLoggedIn and IsLoggedIn() then
+		self:_OnPlayerLogin()
+	end
 
 	GMS:SetReady("MOD:" .. METADATA.INTERN_NAME)
 end
 
 function EQUIP:OnDisable()
+	self._storePollActive = false
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end

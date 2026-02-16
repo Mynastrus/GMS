@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.0.23",
+	VERSION      = "1.0.24",
 }
 
 local LibStub = LibStub
@@ -793,6 +793,7 @@ local function CollectLocalMetaPayload()
 		ilvl = ilvl,
 		mplus = mplus,
 		raid = raid,
+		best_in_raid = raid,
 	}
 end
 
@@ -819,6 +820,7 @@ function Roster:BroadcastMetaHeartbeat(force)
 			ilvl = payload.ilvl,
 			mplus = payload.mplus,
 			raid = payload.raid,
+			best_in_raid = payload.best_in_raid,
 		}, {
 			updatedAt = (GetTime and GetTime()) or 0,
 		})
@@ -830,6 +832,7 @@ function Roster:BroadcastMetaHeartbeat(force)
 		ilvl = payload.ilvl,
 		mplus = payload.mplus,
 		raid = payload.raid,
+		best_in_raid = payload.best_in_raid,
 		ts = (GetTime and GetTime()) or 0,
 	}, "BULK", "GUILD")
 
@@ -851,7 +854,7 @@ function Roster:InitCommMetaSync()
 			version = data.version or data.v,
 			ilvl = data.ilvl,
 			mplus = data.mplus,
-			raid = data.raid,
+			raid = data.raid or data.best_in_raid,
 		}
 		local seenAt = data.ts or (GetTime and GetTime()) or 0
 		if Roster:SetMemberMeta(guid, payload, seenAt) then
@@ -876,7 +879,7 @@ function Roster:InitCommMetaSync()
 				version = payload.version,
 				ilvl = payload.ilvl,
 				mplus = payload.mplus,
-				raid = payload.raid,
+				raid = payload.raid or payload.best_in_raid,
 			}, record.updatedAt or ((GetTime and GetTime()) or 0)) then
 				RefreshRosterIfVisible()
 			end
@@ -938,7 +941,7 @@ function Roster:InitCommMetaSync()
 				version = payload.version,
 				ilvl = payload.ilvl,
 				mplus = payload.mplus,
-				raid = payload.raid,
+				raid = payload.raid or payload.best_in_raid,
 			}, record.updatedAt or ((GetTime and GetTime()) or 0))
 		end)
 

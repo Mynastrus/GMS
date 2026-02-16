@@ -55,7 +55,7 @@ local METADATA = {
 	INTERN_NAME  = "LOGS",
 	SHORT_NAME   = "Logs",
 	DISPLAY_NAME = "Logging Console",
-	VERSION      = "1.1.20",
+	VERSION      = "1.1.21",
 }
 
 -- ###########################################################################
@@ -730,9 +730,10 @@ local function BuildLogRow(entry, totalWidth)
 		for _, meta in pairs(reg) do
 			local key = tostring(meta.key or ""):upper()
 			local name = tostring(meta.name or ""):upper()
+			local short = tostring(meta.shortName or ""):upper()
 			local display = tostring(meta.displayName or "")
 			local displayU = display:upper()
-			if su == key or su == name or su == displayU then
+			if su == key or su == name or su == short or su == displayU then
 				return (display ~= "" and display) or s
 			end
 		end

@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.10",
+	VERSION      = "1.0.11",
 }
 
 local LibStub = LibStub
@@ -882,6 +882,11 @@ local function BuildCharData(player, ctxGuid, ctxName)
 				eqSnapshot = eqBucket.equipment.snapshot
 				data.equipment.source = "Saved character DB"
 			end
+		end
+		if type(eqSnapshot) ~= "table" and type(equip) == "table" and type(equip._mem) == "table"
+			and type(equip._mem.snapshot) == "table" then
+			eqSnapshot = equip._mem.snapshot
+			data.equipment.source = "Local memory buffer"
 		end
 		if type(eqSnapshot) ~= "table" then
 			local recEquipLocal = GetLatestDomainRecordForGuid("EQUIPMENT_V1", playerGuid)
