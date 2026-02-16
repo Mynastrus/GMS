@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.11",
+	VERSION      = "1.0.13",
 }
 
 local LibStub = LibStub
@@ -785,12 +785,57 @@ local function NormalizeNameList(raw)
 	return out
 end
 
+local function NormalizeAccountCharacterRows(rows)
+	local out = {}
+	if type(rows) ~= "table" then
+		return out
+	end
+
+	for i = 1, #rows do
+		local r = rows[i]
+		if type(r) == "table" then
+			out[#out + 1] = {
+				guid = tostring(r.guid or ""),
+				name_full = tostring(r.name_full or r.name or "-"),
+				level = tonumber(r.level or 0) or 0,
+				class = tostring(r.class or "-"),
+				classFile = tostring(r.classFile or r.classFileName or ""),
+				online = (r.online == true),
+			}
+		elseif type(r) == "string" and r ~= "" then
+			out[#out + 1] = {
+				guid = "",
+				name_full = tostring(r),
+				level = 0,
+				class = "-",
+				classFile = "",
+				online = false,
+			}
+		end
+	end
+
+	return out
+end
+
 local function GetAccountCharactersForGuid(guid)
 	local g = tostring(guid or "")
 	if g == "" then return {}, false, "No character GUID available." end
 
-	local names = {}
 	local roster = GMS and (GMS:GetModule("ROSTER", true) or GMS:GetModule("Roster", true)) or nil
+	if type(roster) == "table" and type(roster.GetLinkedAccountGuildCharactersForGuid) == "function" then
+		local ok, rows, hasData, source = pcall(roster.GetLinkedAccountGuildCharactersForGuid, roster, g)
+		if ok and type(rows) == "table" then
+			local normalized = NormalizeAccountCharacterRows(rows)
+			local hasRows = (hasData == true) or (#normalized > 0)
+			return normalized, hasRows, tostring(source or "Local account guild links")
+		end
+		if not ok then
+			LOCAL_LOG("WARN", "Account-link query failed", tostring(rows))
+		end
+	end
+
+	-- Legacy fallback (for older roster versions): synced names without guild-live verification.
+	local names = {}
 	if type(roster) == "table" and type(roster.GetMemberMeta) == "function" then
 		local ok, meta = pcall(roster.GetMemberMeta, roster, g)
 		if ok and type(meta) == "table" then
@@ -808,10 +853,39 @@ local function GetAccountCharactersForGuid(guid)
 	end
 
 	if #names <= 0 then
-		return names, false, "No same-account guild characters recorded yet."
+		return {}, false, "No same-account guild characters recorded yet."
 	end
 	table.sort(names)
-	return names, true, "Synced account-character list"
+	return NormalizeAccountCharacterRows(names), true, "Legacy synced account-character list"
+end
+
+local function GetRaidSummaryFromRosterMeta(guid)
+	local g = tostring(guid or "")
+	if g == "" then
+		return "", "-"
+	end
+
+	local recMeta = GetLatestDomainRecordForGuid("roster_meta", g)
+	if recMeta and type(recMeta.payload) == "table" then
+		local p = recMeta.payload
+		local raid = tostring(p.raid or p.best_in_raid or "")
+		if raid ~= "" and raid ~= "-" then
+			return raid, "Synced roster_meta"
+		end
+	end
+
+	local roster = GMS and (GMS:GetModule("ROSTER", true) or GMS:GetModule("Roster", true)) or nil
+	if type(roster) == "table" and type(roster.GetMemberMeta) == "function" then
+		local ok, meta = pcall(roster.GetMemberMeta, roster, g)
+		if ok and type(meta) == "table" then
+			local raid = tostring(meta.raid or meta.best_in_raid or "")
+			if raid ~= "" and raid ~= "-" then
+				return raid, "Local roster meta cache"
+			end
+		end
+	end
+
+	return "", "-"
 end
 
 local function BuildCharData(player, ctxGuid, ctxName)
@@ -871,8 +945,33 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		local raidStore = raids and raids._options and raids._options.raids or nil
 		data.raids.summary = BuildRaidStatusFromRaidsStore(raidStore)
 		data.raids.rows = BuildRaidRows(raidStore)
-		data.raids.hasData = #data.raids.rows > 0
+		data.raids.hasData = (#data.raids.rows > 0) or (data.raids.summary ~= "-" and data.raids.summary ~= "")
 		data.raids.source = "Local module data"
+		if not data.raids.hasData and playerGuid ~= "" then
+			local recRLocal = GetLatestDomainRecordForGuid("RAIDS_V1", playerGuid)
+			if recRLocal and type(recRLocal.payload) == "table" and type(recRLocal.payload.raids) == "table" then
+				local rowsLocal = BuildRaidRows(recRLocal.payload.raids)
+				local summaryLocal = BuildRaidStatusFromRaidsStore(recRLocal.payload.raids)
+				if summaryLocal ~= "" and summaryLocal ~= "-" then
+					data.raids.summary = summaryLocal
+				end
+				if #rowsLocal > 0 then
+					data.raids.rows = rowsLocal
+				end
+				data.raids.hasData = (#data.raids.rows > 0) or (data.raids.summary ~= "-" and data.raids.summary ~= "")
+				if data.raids.hasData then
+					data.raids.source = "Synced RAIDS_V1"
+				end
+			end
+		end
+		if (data.raids.summary == "" or data.raids.summary == "-") and playerGuid ~= "" then
+			local fallbackRaid, fallbackSource = GetRaidSummaryFromRosterMeta(playerGuid)
+			if fallbackRaid ~= "" and fallbackRaid ~= "-" then
+				data.raids.summary = fallbackRaid
+				data.raids.hasData = true
+				data.raids.source = fallbackSource
+			end
+		end
 
 		local equip = GMS and GMS:GetModule("Equipment", true) or nil
 		local eqSnapshot = equip and equip._options and equip._options.equipment and equip._options.equipment.snapshot or nil
@@ -944,7 +1043,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 				data.mythic.hasData = true
 				data.mythic.source = "Synced roster_meta"
 			end
-			local raid = tostring(p.raid or "")
+			local raid = tostring(p.raid or p.best_in_raid or "")
 			if raid ~= "" and raid ~= "-" then
 				data.raids.summary = raid
 				data.raids.hasData = true
@@ -1287,7 +1386,16 @@ local function BuildDetailsSignature(details)
 
 	local accountRows = details.accountChars and details.accountChars.rows or {}
 	for i = 1, #accountRows do
-		out[#out + 1] = tostring(accountRows[i] or "")
+		local r = accountRows[i]
+		if type(r) == "table" then
+			out[#out + 1] = tostring(r.guid or "")
+			out[#out + 1] = tostring(r.name_full or r.name or "")
+			out[#out + 1] = tostring(r.level or "")
+			out[#out + 1] = tostring(r.classFile or "")
+			out[#out + 1] = (r.online == true) and "1" or "0"
+		else
+			out[#out + 1] = tostring(r or "")
+		end
 	end
 
 	return table.concat(out, "|")
@@ -1548,7 +1656,11 @@ function CHARINFO:TryRegisterPage()
 			AddValueLine(card, "Best", details.raids.summary or "-")
 			AddValueLine(card, "Source", details.raids.source or "-")
 			if #details.raids.rows <= 0 then
-				AddNoDataHint(card, "No raid progress data available for this character.")
+				if tostring(details.raids.summary or "-") == "-" then
+					AddNoDataHint(card, "No raid progress data available for this character.")
+				else
+					AddMutedLine(card, "Detailed per-raid rows are not available yet.")
+				end
 				return
 			end
 			local maxRows = math.min(#details.raids.rows, 8)
@@ -1575,11 +1687,73 @@ function CHARINFO:TryRegisterPage()
 			local card = NewCardContainer(parent, "Guild Characters on Same Account")
 			AddValueLine(card, "Source", details.accountChars.source or "-")
 			if #details.accountChars.rows <= 0 then
-				AddNoDataHint(card, "No linked account characters recorded yet (placeholder for upcoming account-link tracking).")
+				AddNoDataHint(card, "No linked account characters currently verified in guild roster.")
 				return
 			end
+
+			local hint = AceGUI:Create("Label")
+			hint:SetFullWidth(true)
+			hint:SetText("|cff7f7f7fClick a character to open CharInfo.|r")
+			if hint.label then
+				hint.label:SetFontObject(GameFontNormalSmallOutline)
+			end
+			card:AddChild(hint)
+
+			local accountClassWidth = 120
+			local accountStateWidth = 80
+			local accountNameWidth = colWidth - accountClassWidth - accountStateWidth - 48
+			if accountNameWidth < 200 then accountNameWidth = 200 end
+
 			for i = 1, #details.accountChars.rows do
-				AddMutedLine(card, tostring(details.accountChars.rows[i] or "-"))
+				local rowData = details.accountChars.rows[i]
+				local rowGuid = tostring((type(rowData) == "table" and rowData.guid) or "")
+				local rowNameFull = tostring((type(rowData) == "table" and rowData.name_full) or rowData or "-")
+				local rowLevel = tonumber((type(rowData) == "table" and rowData.level) or 0) or 0
+				local rowClass = tostring((type(rowData) == "table" and rowData.class) or "-")
+				local rowClassFile = tostring((type(rowData) == "table" and rowData.classFile) or "")
+				local rowOnline = (type(rowData) == "table" and rowData.online == true) or false
+
+				local classHex = tostring(GetClassHex(rowClassFile) or "FFFFFFFF")
+				if #classHex == 6 then classHex = "FF" .. classHex end
+
+				local nameText = rowNameFull
+				if rowLevel > 0 then
+					nameText = string.format("%s |cff9d9d9d(Lv %d)|r", rowNameFull, rowLevel)
+				end
+
+				local row = AceGUI:Create("SimpleGroup")
+				row:SetFullWidth(true)
+				row:SetLayout("Flow")
+				card:AddChild(row)
+
+				local nameLabel = AceGUI:Create("InteractiveLabel")
+				nameLabel:SetWidth(accountNameWidth)
+				nameLabel:SetText(string.format("|c%s%s|r", classHex, nameText))
+				if nameLabel.label then
+					nameLabel.label:SetJustifyH("LEFT")
+					nameLabel.label:SetWordWrap(false)
+				end
+				if rowGuid ~= "" then
+					nameLabel:SetCallback("OnClick", function()
+						SetNavContext({
+							source = "CHARINFO_ACCOUNT",
+							guid = rowGuid,
+							name_full = rowNameFull,
+						})
+						OpenSelf()
+					end)
+				end
+				row:AddChild(nameLabel)
+
+				local classLabel = AceGUI:Create("Label")
+				classLabel:SetWidth(accountClassWidth)
+				classLabel:SetText("|cff9d9d9d" .. rowClass .. "|r")
+				row:AddChild(classLabel)
+
+				local statusLabel = AceGUI:Create("Label")
+				statusLabel:SetWidth(accountStateWidth)
+				statusLabel:SetText(rowOnline and "|cff4caf50Online|r" or "|cff7f7f7fOffline|r")
+				row:AddChild(statusLabel)
 			end
 		end
 

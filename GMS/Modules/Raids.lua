@@ -77,7 +77,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.9",
+	VERSION      = "1.2.12",
 }
 
 -- ###########################################################################
@@ -142,6 +142,8 @@ local OPTIONS_DEFAULTS = {
 
 local STORE_POLL_MAX_TRIES = 25
 local STORE_POLL_INTERVAL = 1.0
+local STATS_ENRICH_LOGIN_GRACE = 30
+local STATS_ENRICH_MIN_INTERVAL = 900
 
 RAIDS._catalog = nil
 
@@ -557,15 +559,17 @@ local function normalizeRaidName(name)
 	return (name:gsub("[%s%p]+", ""))
 end
 
-local function parseDifficultyIDFromText(text)
-	local dn = string.lower(tostring(text or ""))
+local function parseDifficultyIDFromLowerText(dn)
+	dn = tostring(dn or "")
 	if dn == "" then return nil end
 	if dn:find("schlachtzugsbrowser", 1, true)
 		or dn:find("raid finder", 1, true)
 		or dn:find("lfr", 1, true) then
 		return 17
 	end
-	if dn:find("mythisch", 1, true) or dn:find("mythic", 1, true) then
+	if dn:find("mythisch", 1, true)
+		or dn:find("mytisch", 1, true)
+		or dn:find("mythic", 1, true) then
 		return 16
 	end
 	if dn:find("heroisch", 1, true) or dn:find("heroic", 1, true) then
@@ -575,6 +579,12 @@ local function parseDifficultyIDFromText(text)
 		return 14
 	end
 	return nil
+end
+
+local function parseDifficultyIDFromText(text)
+	local dn = string.lower(tostring(text or ""))
+	if dn == "" then return nil end
+	return parseDifficultyIDFromLowerText(dn)
 end
 
 local function parseStatisticValueToNumber(raw)
@@ -642,6 +652,31 @@ local function resolveInstanceIDFromRaidName(catalog, raidName)
 	return nil
 end
 
+local function BuildAchievementCategoryIDs()
+	local out = {}
+	local raw = { GetCategoryList() }
+
+	local function pushID(v)
+		local id = tonumber(v)
+		if id then
+			out[#out + 1] = id
+		end
+	end
+
+	if #raw == 1 and type(raw[1]) == "table" then
+		local list = raw[1]
+		for i = 1, #list do
+			pushID(list[i])
+		end
+	else
+		for i = 1, #raw do
+			pushID(raw[i])
+		end
+	end
+
+	return out
+end
+
 local function BuildBestByRaidFromCharacterStatistics(catalog)
 	local out = {}
 	local matched = 0
@@ -653,10 +688,19 @@ local function BuildBestByRaidFromCharacterStatistics(catalog)
 		return out, matched
 	end
 
-	local categories = { GetCategoryList() }
+	local categories = BuildAchievementCategoryIDs()
 	for i = 1, #categories do
 		local categoryID = categories[i]
-		local num = tonumber(GetCategoryNumAchievements(categoryID, true) or GetCategoryNumAchievements(categoryID) or 0) or 0
+		local num = 0
+		local okCount, count = pcall(GetCategoryNumAchievements, categoryID, true)
+		if okCount then
+			num = tonumber(count) or 0
+		else
+			local okCountFallback, fallbackCount = pcall(GetCategoryNumAchievements, categoryID, false)
+			if okCountFallback then
+				num = tonumber(fallbackCount) or 0
+			end
+		end
 		for idx = 1, num do
 			local id, name, _, _, _, _, _, _, _, _, _, _, _, _, isStatistic = GetAchievementInfo(categoryID, idx)
 			if id and isStatistic then
@@ -1037,6 +1081,52 @@ function RAIDS:_ScheduleScan(reason, delay)
 	return true
 end
 
+function RAIDS:_ScheduleDeferredStatsScan(reason, delay)
+	if self._statsDeferredScheduled then
+		return false
+	end
+	if not C_Timer or not C_Timer.After then
+		return false
+	end
+
+	self._statsDeferredScheduled = true
+	local d = tonumber(delay) or STATS_ENRICH_LOGIN_GRACE
+	local r = tostring(reason or "stats-deferred")
+
+	C_Timer.After(d, function()
+		RAIDS._statsDeferredScheduled = false
+		RAIDS:ScanNow(r)
+	end)
+
+	return true
+end
+
+function RAIDS:_ShouldRunStatisticsEnrichment(reason, tsNow)
+	local nowTs = tonumber(tsNow or now() or 0) or 0
+	local loginAt = tonumber(self._loginSeenAt or 0) or 0
+	if nowTs > 0 and loginAt > 0 and (nowTs - loginAt) < STATS_ENRICH_LOGIN_GRACE then
+		return false, "login-grace"
+	end
+
+	local last = tonumber(self._statsLastRunAt or 0) or 0
+	if nowTs > 0 and last > 0 and (nowTs - last) < STATS_ENRICH_MIN_INTERVAL then
+		return false, "cooldown"
+	end
+
+	local r = string.lower(tostring(reason or ""))
+	if r == "login"
+		or r == "entering_world"
+		or r == "enable-fallback"
+		or r == "store-ready-enable"
+		or r == "store-ready-scan"
+		or r == "store-ready-ingest"
+		or r == "ej_ready_final" then
+		return false, "startup-reason"
+	end
+
+	return true, "ok"
+end
+
 -- ###########################################################################
 -- # LIFECYCLE
 -- ###########################################################################
@@ -1051,6 +1141,9 @@ function RAIDS:OnInitialize()
 	self._ejReady = false
 	self._ejUnsupported = false
 	self._scanWantedAfterCatalog = nil
+	self._loginSeenAt = tonumber(now() or 0) or 0
+	self._statsLastRunAt = 0
+	self._statsDeferredScheduled = false
 end
 
 function RAIDS:OnEnable()
@@ -1091,7 +1184,9 @@ function RAIDS:OnEnable()
 	-- PLAYER_LOGIN / PLAYER_ENTERING_WORLD may already have fired.
 	-- Ensure at least one initial scan after reload/late enable.
 	if IsLoggedIn and IsLoggedIn() then
+		self._loginSeenAt = tonumber(now() or 0) or self._loginSeenAt
 		self:_ScheduleScan("enable-fallback", 1.0)
+		self:_ScheduleDeferredStatsScan("stats-deferred", STATS_ENRICH_LOGIN_GRACE + 2)
 	end
 
 	-- Hook into configuration changes
@@ -1113,6 +1208,7 @@ end
 function RAIDS:OnDisable()
 	LOCAL_LOG("INFO", "Disabling Raids module")
 	self._storePollActive = false
+	self._statsDeferredScheduled = false
 	if type(self.UnregisterAllEvents) == "function" then
 		self:UnregisterAllEvents()
 	end
@@ -1124,11 +1220,15 @@ end
 -- ###########################################################################
 
 function RAIDS:OnPlayerLogin()
+	self._loginSeenAt = tonumber(now() or 0) or self._loginSeenAt
 	self:_ScheduleScan("login", 2.0)
+	self:_ScheduleDeferredStatsScan("stats-deferred", STATS_ENRICH_LOGIN_GRACE + 2)
 end
 
 function RAIDS:OnEnteringWorld()
+	self._loginSeenAt = tonumber(now() or 0) or self._loginSeenAt
 	self:_ScheduleScan("entering_world", 1.0)
+	self:_ScheduleDeferredStatsScan("stats-deferred", STATS_ENRICH_LOGIN_GRACE + 2)
 end
 
 function RAIDS:OnEncounterEnd(_, _, _, _, _, success)
@@ -1277,14 +1377,7 @@ function RAIDS:OnUpdateInstanceInfo()
 			if not looksLikeRaid then
 				local dn = string.lower(difficultyName or "")
 				local mp = tonumber(maxPlayers) or 0
-				if dn:find("schlachtzugsbrowser", 1, true)
-					or dn:find("raid finder", 1, true)
-					or dn:find("lfr", 1, true)
-					or dn:find("normal", 1, true)
-					or dn:find("heroic", 1, true)
-					or dn:find("heroisch", 1, true)
-					or dn:find("mythic", 1, true)
-					or dn:find("mythisch", 1, true)
+				if parseDifficultyIDFromLowerText(dn)
 					or (mp > 5 and (encCount > 0 or progress > 0)) then
 					looksLikeRaid = true
 				end
@@ -1311,15 +1404,8 @@ function RAIDS:OnUpdateInstanceInfo()
 				local dID = tonumber(diffID) or diffID
 				if type(dID) ~= "number" then
 					local dn = string.lower(tostring(difficultyName or ""))
-					if dn:find("schlachtzugsbrowser", 1, true) or dn:find("raid finder", 1, true) or dn:find("lfr", 1, true) then
-						dID = 17
-					elseif dn:find("mythisch", 1, true) or dn:find("mythic", 1, true) then
-						dID = 16
-					elseif dn:find("heroisch", 1, true) or dn:find("heroic", 1, true) then
-						dID = 15
-					elseif dn:find("normal", 1, true) then
-						dID = 14
-					else
+					dID = parseDifficultyIDFromLowerText(dn)
+					if type(dID) ~= "number" then
 						-- API 12.x fallback: if diffID is missing, keep progress by assigning LFR bucket.
 						dID = 17
 					end
@@ -1433,9 +1519,17 @@ function RAIDS:OnUpdateInstanceInfo()
 		end
 	end
 
-	local statsApplied, statsMatched = ApplyRaidBestFromCharacterStatistics(raidsStore, RAIDS._catalog, tsNow, self._pendingReason)
-	if statsApplied > 0 then
-		LOCAL_LOG("INFO", "Raid best enriched from character statistics", "applied=" .. tostring(statsApplied), "matched=" .. tostring(statsMatched))
+	local runStats, statsGateReason = self:_ShouldRunStatisticsEnrichment(self._pendingReason, tsNow)
+	if runStats then
+		local statsApplied, statsMatched = ApplyRaidBestFromCharacterStatistics(raidsStore, RAIDS._catalog, tsNow, self._pendingReason)
+		self._statsLastRunAt = tonumber(tsNow or now() or 0) or self._statsLastRunAt
+		if statsApplied > 0 then
+			LOCAL_LOG("INFO", "Raid best enriched from character statistics", "applied=" .. tostring(statsApplied), "matched=" .. tostring(statsMatched))
+		end
+	else
+		if statsGateReason == "login-grace" or statsGateReason == "startup-reason" then
+			self:_ScheduleDeferredStatsScan("stats-deferred", STATS_ENRICH_LOGIN_GRACE + 2)
+		end
 	end
 
 	store.lastScan = tsNow or now()

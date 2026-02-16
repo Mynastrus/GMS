@@ -328,6 +328,16 @@ Dieses Regelwerk ist **verbindlich und dauerhaft gültig** für das Projekt GMS.
 * Die Release-Baseline für die Zielversion basiert verbindlich auf der **aktuellen Interface-Version** aus `GMS/GMS.toc`.
 * Das Release-Changelog für die Veröffentlichung ist immer **zweisprachig (EN + DE)** und inhaltlich ansprechend/kuratierend zu formulieren.
 * Der automatisierte GitHub-Workflow für CurseForge-Uploads ist Teil des Standard-Release-Prozesses und soll bei Tag-Releases bzw. manuellen Release-Runs genutzt werden.
+### 11.7 Discord-Release-Post (Pflicht)
+
+* Bei **jedem echten Release** sind zusaetzlich zwei Discord-Posts zu veroeffentlichen.
+* Beide Posts **MUESSEN** den CurseForge-Link zur veroeffentlichten Version enthalten.
+* Deutsch (polierter Release-Post auf Deutsch):
+  * Webhook-Secret: `DISCORD_WEBHOOK_RELEASE_DE`
+* Englisch (gleichwertiger, polierter Release-Post auf Englisch):
+  * Webhook-Secret: `DISCORD_WEBHOOK_RELEASE_EN`
+* Roh-Webhook-URLs duerfen nicht im Repository gespeichert werden (nur lokale Secret-Verwaltung oder CI-Secrets).
+
 ## AI Interaction & Artifacts
 The following rules apply to the AI assistant's interaction with artifacts:
 - **Auto-Approval**: `implementation_plan.md` and `walkthrough.md` should generally be set to `ShouldAutoProceed = true` unless major breaking changes or critical design decisions require explicit user confirmation.

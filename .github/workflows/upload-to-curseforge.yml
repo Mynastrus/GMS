@@ -152,6 +152,130 @@ jobs:
           sys.stdout.write(markdown)
           PY
 
+      - name: Build Discord release posts (DE + EN)
+        id: discord_posts
+        shell: bash
+        env:
+          CF_PROJECT_URL: ${{ vars.CF_PROJECT_URL }}
+          CF_PROJECT_ID: ${{ secrets.CF_PROJECT_ID }}
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+          import sys
+
+          def extract_first_release_block(text: str) -> str:
+            marker = "local RELEASES = {"
+            start = text.find(marker)
+            if start == -1:
+              raise ValueError("RELEASES block not found")
+            i = text.find("{", start)
+            if i == -1:
+              raise ValueError("RELEASES opening brace not found")
+            depth = 0
+            in_str = False
+            escape = False
+            first_entry_started = False
+            entry_start = -1
+            for idx in range(i, len(text)):
+              ch = text[idx]
+              if in_str:
+                if escape:
+                  escape = False
+                elif ch == "\\":
+                  escape = True
+                elif ch == '"':
+                  in_str = False
+                continue
+              if ch == '"':
+                in_str = True
+                continue
+              if ch == "{":
+                depth += 1
+                if depth == 2 and not first_entry_started:
+                  first_entry_started = True
+                  entry_start = idx
+                continue
+              if ch == "}":
+                if depth == 2 and first_entry_started:
+                  return text[entry_start:idx + 1]
+                depth -= 1
+            raise ValueError("Could not extract first release entry")
+
+          def field(block: str, key: str, default: str = "") -> str:
+            m = re.search(rf'\b{re.escape(key)}\s*=\s*"([^"]*)"', block)
+            return m.group(1).strip() if m else default
+
+          def notes(block: str, key: str):
+            m = re.search(rf'\b{re.escape(key)}\s*=\s*\{{(.*?)\n\s*\}}', block, re.S)
+            if not m:
+              return []
+            inner = m.group(1)
+            return [x.strip() for x in re.findall(r'"([^"]*)"', inner)]
+
+          path = pathlib.Path("GMS/Core/Changelog.lua")
+          text = path.read_text(encoding="utf-8")
+          block = extract_first_release_block(text)
+
+          version = field(block, "version", "unknown")
+          title_en = field(block, "title_en", "Release")
+          title_de = field(block, "title_de", "Release")
+          notes_en = notes(block, "notes_en")
+          notes_de = notes(block, "notes_de")
+
+          project_url = os.environ.get("CF_PROJECT_URL", "").strip()
+          if not project_url:
+            project_id = os.environ.get("CF_PROJECT_ID", "").strip()
+            project_url = f"https://www.curseforge.com/wow/addons/{project_id}" if project_id else "https://www.curseforge.com/wow/addons"
+
+          max_notes = 6
+          notes_en = notes_en[:max_notes]
+          notes_de = notes_de[:max_notes]
+
+          de_lines = [
+            f"**GMS {version} ist jetzt live auf CurseForge**",
+            "",
+            f"**{title_de}**",
+          ]
+          if notes_de:
+            de_lines.extend([f"- {n}" for n in notes_de])
+          else:
+            de_lines.append("- Wartungsupdate.")
+          de_lines.extend([
+            "",
+            f"CurseForge: {project_url}",
+          ])
+
+          en_lines = [
+            f"**GMS {version} is now live on CurseForge**",
+            "",
+            f"**{title_en}**",
+          ]
+          if notes_en:
+            en_lines.extend([f"- {n}" for n in notes_en])
+          else:
+            en_lines.append("- Maintenance update.")
+          en_lines.extend([
+            "",
+            f"CurseForge: {project_url}",
+          ])
+
+          de_text = "\n".join(de_lines).strip()
+          en_text = "\n".join(en_lines).strip()
+
+          out = pathlib.Path(os.environ["GITHUB_OUTPUT"])
+          with out.open("a", encoding="utf-8") as f:
+            f.write("de<<EOF\n")
+            f.write(de_text)
+            f.write("\nEOF\n")
+            f.write("en<<EOF\n")
+            f.write(en_text)
+            f.write("\nEOF\n")
+
+          sys.stdout.write("[discord/de]\\n" + de_text + "\\n\\n[discord/en]\\n" + en_text + "\\n")
+          PY
+
       - name: Upload to CurseForge
         uses: itsmeow/curseforge-upload@v3
         with:
@@ -163,3 +287,55 @@ jobs:
           display_name: GMS ${{ steps.version.outputs.version }}
           changelog_type: markdown
           changelog: ${{ steps.changelog.outputs.text }}
+
+      - name: Post Discord release announcement (DE)
+        shell: bash
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_RELEASE_DE }}
+          CONTENT: ${{ steps.discord_posts.outputs.de }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          url = (os.environ.get("WEBHOOK_URL") or "").strip()
+          if not url:
+            print("DISCORD_WEBHOOK_RELEASE_DE not set; skipping.")
+            raise SystemExit(0)
+
+          payload = {
+            "content": os.environ.get("CONTENT") or "",
+            "allowed_mentions": {"parse": []},
+          }
+          data = json.dumps(payload).encode("utf-8")
+          req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+          with urllib.request.urlopen(req) as resp:
+            print(f"Discord DE webhook status: {getattr(resp, 'status', 'ok')}")
+          PY
+
+      - name: Post Discord release announcement (EN)
+        shell: bash
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_RELEASE_EN }}
+          CONTENT: ${{ steps.discord_posts.outputs.en }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          url = (os.environ.get("WEBHOOK_URL") or "").strip()
+          if not url:
+            print("DISCORD_WEBHOOK_RELEASE_EN not set; skipping.")
+            raise SystemExit(0)
+
+          payload = {
+            "content": os.environ.get("CONTENT") or "",
+            "allowed_mentions": {"parse": []},
+          }
+          data = json.dumps(payload).encode("utf-8")
+          req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+          with urllib.request.urlopen(req) as resp:
+            print(f"Discord EN webhook status: {getattr(resp, 'status', 'ok')}")
+          PY

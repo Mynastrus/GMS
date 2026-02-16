@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.0.24",
+	VERSION      = "1.0.25",
 }
 
 local LibStub = LibStub
@@ -49,6 +49,10 @@ local GetRealmName               = GetRealmName
 local GetNormalizedRealmName     = GetNormalizedRealmName
 local UnitFactionGroup           = UnitFactionGroup
 local UnitGUID                   = UnitGUID
+local UnitName                   = UnitName
+local UnitFullName               = UnitFullName
+local UnitClass                  = UnitClass
+local UnitLevel                  = UnitLevel
 local GetAverageItemLevel        = GetAverageItemLevel
 local GameTooltip                = GameTooltip
 local UIParent                   = UIParent
@@ -674,6 +678,212 @@ function Roster:SetMemberMeta(guid, meta, seenAt)
 
 	row.seenAt = t
 	return true
+end
+
+local function BuildLocalPlayerNameData()
+	local name, realm = nil, nil
+	if type(UnitFullName) == "function" then
+		local n, r = UnitFullName("player")
+		if type(n) == "string" and n ~= "" then name = n end
+		if type(r) == "string" and r ~= "" then realm = r end
+	end
+	if (not name or name == "") and type(UnitName) == "function" then
+		local n = UnitName("player")
+		if type(n) == "string" and n ~= "" then name = n end
+	end
+	if (not realm or realm == "") and type(GetNormalizedRealmName) == "function" then
+		local r = GetNormalizedRealmName()
+		if type(r) == "string" and r ~= "" then realm = r end
+	end
+	if (not realm or realm == "") and type(GetRealmName) == "function" then
+		local r = GetRealmName()
+		if type(r) == "string" and r ~= "" then realm = r end
+	end
+
+	name = tostring(name or "")
+	realm = tostring(realm or "")
+	if name == "" then
+		return "", "", ""
+	end
+	if realm ~= "" then
+		return name .. "-" .. realm, name, realm
+	end
+	return name, name, realm
+end
+
+local function GetCurrentGuildStorageKeySafe()
+	if not IsInGuild or not IsInGuild() then
+		return "", ""
+	end
+
+	local guildName = ""
+	if type(GetGuildInfo) == "function" then
+		local g = GetGuildInfo("player")
+		if type(g) == "string" then
+			guildName = g
+		end
+	end
+
+	local guildKey = ""
+	if type(GMS.GetGuildStorageKey) == "function" then
+		local ok, key = pcall(GMS.GetGuildStorageKey, GMS)
+		if ok and type(key) == "string" then
+			guildKey = key
+		end
+	end
+
+	if guildKey == "" and guildName ~= "" then
+		local realm = (type(GetRealmName) == "function" and tostring(GetRealmName() or "")) or ""
+		local faction = (type(UnitFactionGroup) == "function" and tostring(UnitFactionGroup("player") or "")) or ""
+		if realm ~= "" and faction ~= "" then
+			guildKey = string.format("%s|%s|%s", realm, faction, guildName)
+		end
+	end
+
+	return guildKey, guildName
+end
+
+function Roster:GetAccountLinkStore()
+	if GMS and type(GMS.InitializeStandardDatabases) == "function" then
+		GMS:InitializeStandardDatabases(false)
+	end
+	if not GMS or type(GMS.db) ~= "table" or type(GMS.db.global) ~= "table" then
+		return nil
+	end
+
+	local global = GMS.db.global
+	global.accountLinks = type(global.accountLinks) == "table" and global.accountLinks or {}
+	local links = global.accountLinks
+	links.chars = type(links.chars) == "table" and links.chars or {}
+	return links
+end
+
+function Roster:TrackLocalAccountCharacter(reason)
+	local guid = (type(UnitGUID) == "function") and tostring(UnitGUID("player") or "") or ""
+	if guid == "" then return false end
+
+	local links = self:GetAccountLinkStore()
+	if type(links) ~= "table" or type(links.chars) ~= "table" then
+		return false
+	end
+
+	local nameFull, name, realm = BuildLocalPlayerNameData()
+	if nameFull == "" then
+		nameFull = guid
+	end
+
+	local className, classFile = nil, nil
+	if type(UnitClass) == "function" then
+		className, classFile = UnitClass("player")
+	end
+	local level = (type(UnitLevel) == "function") and tonumber(UnitLevel("player") or 0) or 0
+
+	local guildKey, guildName = GetCurrentGuildStorageKeySafe()
+	guildKey = tostring(guildKey or "")
+	guildName = tostring(guildName or "")
+
+	links.chars[guid] = links.chars[guid] or {}
+	local row = links.chars[guid]
+	local changed = false
+
+	local function SetTextField(key, value)
+		local v = tostring(value or "")
+		if tostring(row[key] or "") ~= v then
+			row[key] = v
+			changed = true
+		end
+	end
+
+	local function SetNumberField(key, value)
+		local v = tonumber(value) or 0
+		if tonumber(row[key] or -1) ~= v then
+			row[key] = v
+			changed = true
+		end
+	end
+
+	SetTextField("guid", guid)
+	SetTextField("name", name)
+	SetTextField("realm", realm)
+	SetTextField("name_full", nameFull)
+	SetTextField("class", className)
+	SetTextField("classFile", classFile)
+	SetNumberField("level", level)
+	SetTextField("guild", guildName)
+	SetTextField("guildKey", guildKey)
+	SetTextField("lastSeenReason", tostring(reason or "unknown"))
+
+	local nowTs = (type(time) == "function" and time()) or 0
+	local oldSeenAt = tonumber(row.lastSeenAt or 0) or 0
+	if changed or (tonumber(nowTs) or 0) - oldSeenAt >= 60 then
+		row.lastSeenAt = tonumber(nowTs) or 0
+	end
+
+	if changed then
+		LOCAL_LOG("INFO", "Local account character tracked", guid, nameFull, guildKey ~= "" and guildKey or "no-guild")
+	end
+	return true
+end
+
+function Roster:GetLinkedAccountGuildCharactersForGuid(guid)
+	local g = tostring(guid or "")
+	if g == "" then
+		return {}, false, "No character GUID available."
+	end
+
+	self:TrackLocalAccountCharacter("query")
+
+	local links = self:GetAccountLinkStore()
+	if type(links) ~= "table" or type(links.chars) ~= "table" then
+		return {}, false, "Account link store unavailable."
+	end
+
+	local base = links.chars[g]
+	if type(base) ~= "table" then
+		return {}, false, "Selected character is not recorded in local account DB."
+	end
+
+	local guildKey = tostring(base.guildKey or "")
+	if guildKey == "" then
+		return {}, false, "Selected character has no guild link."
+	end
+
+	local currentGuildKey = select(1, GetCurrentGuildStorageKeySafe())
+	if tostring(currentGuildKey or "") == "" or tostring(currentGuildKey or "") ~= guildKey then
+		return {}, false, "Selected character is outside the current guild context."
+	end
+
+	local currentMember = self:GetMemberByGUID(g)
+	if type(currentMember) ~= "table" then
+		return {}, false, "Selected character is not currently in guild roster."
+	end
+
+	local rows = {}
+	for otherGuid, entry in pairs(links.chars) do
+		if tostring(otherGuid or "") ~= g and type(entry) == "table" and tostring(entry.guildKey or "") == guildKey then
+			local member = self:GetMemberByGUID(otherGuid)
+			if type(member) == "table" then
+				rows[#rows + 1] = {
+					guid = tostring(otherGuid),
+					name_full = tostring(member.name_full or entry.name_full or member.name or entry.name or "-"),
+					level = tonumber(member.level or entry.level or 0) or 0,
+					class = tostring(member.class or entry.class or "-"),
+					classFile = tostring(member.classFileName or entry.classFile or ""),
+					online = member.online == true,
+				}
+			end
+		end
+	end
+
+	table.sort(rows, function(a, b)
+		return tostring(a.name_full or "") < tostring(b.name_full or "")
+	end)
+
+	if #rows <= 0 then
+		return rows, false, "No same-account guild characters currently in guild roster."
+	end
+
+	return rows, true, "Local account guild links (guild-verified)"
 end
 
 function Roster:SetMemberGmsVersion(guid, version, seenAt)
@@ -1920,6 +2130,8 @@ end
 -- ###########################################################################
 
 function Roster:OnGuildRosterUpdate(canScan)
+	self:TrackLocalAccountCharacter("guild-roster-update")
+
 	local selfGuid = (type(UnitGUID) == "function") and UnitGUID("player") or nil
 	if type(selfGuid) == "string" and selfGuid ~= "" and type(GetNumGuildMembers) == "function" and type(GetGuildRosterInfo) == "function" then
 		local total = tonumber(GetNumGuildMembers() or 0) or 0
@@ -2353,6 +2565,13 @@ function Roster:OnEnable()
 	self:InitializeOptions()
 	self:TryIntegrateWithUIIfAvailable()
 	self:InitCommMetaSync()
+	self:TrackLocalAccountCharacter("enable")
+
+	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+		C_Timer.After(2.0, function()
+			Roster:TrackLocalAccountCharacter("enable-delay")
+		end)
+	end
 
 	-- Register for live updates
 	self:RegisterEvent("GUILD_ROSTER_UPDATE", "OnGuildRosterUpdate")
@@ -2416,8 +2635,10 @@ function Roster:OnDisable()
 end
 
 function Roster:OnPlayerLogin()
+	self:TrackLocalAccountCharacter("player-login")
 	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
 		C_Timer.After(2.0, function()
+			Roster:TrackLocalAccountCharacter("player-login-delay")
 			Roster:BroadcastMetaHeartbeat(true)
 		end)
 	else
@@ -2426,8 +2647,10 @@ function Roster:OnPlayerLogin()
 end
 
 function Roster:OnPlayerEnteringWorld()
+	self:TrackLocalAccountCharacter("entering-world")
 	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
 		C_Timer.After(1.0, function()
+			Roster:TrackLocalAccountCharacter("entering-world-delay")
 			Roster:BroadcastMetaHeartbeat(false)
 		end)
 	else
@@ -2436,6 +2659,7 @@ function Roster:OnPlayerEnteringWorld()
 end
 
 function Roster:OnPlayerGuildUpdate()
+	self:TrackLocalAccountCharacter("guild-update")
 	self:BroadcastMetaHeartbeat(true)
 end
 

@@ -15,3 +15,7 @@
 ## Release Content Rules (When Release Is Commanded)
 - Use the current interface version from `GMS/GMS.toc` as the release baseline.
 - Provide a clear, polished changelog in both English and German.
+- Post release announcements to Discord webhooks:
+  - German post (with CurseForge link): use secret `DISCORD_WEBHOOK_RELEASE_DE`
+  - English post (with CurseForge link): use secret `DISCORD_WEBHOOK_RELEASE_EN`
+  - Never store raw webhook URLs in repository files.
