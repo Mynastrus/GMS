@@ -1585,16 +1585,16 @@ end
 local function BuildCell_PresenceDot(row, member, ctx)
 	local state = GetPresenceState(member)
 	local iconPath = "Interface\\FriendsFrame\\StatusIcon-Offline"
-	local tooltip = "Offline"
+	local tooltip = (type(GMS.T) == "function" and GMS:T("ROSTER_STATUS_OFFLINE")) or "Offline"
 	if state == "ONLINE" then
 		iconPath = "Interface\\FriendsFrame\\StatusIcon-Online"
-		tooltip = "Online"
+		tooltip = (type(GMS.T) == "function" and GMS:T("ROSTER_STATUS_ONLINE")) or "Online"
 	elseif state == "AFK" then
 		iconPath = "Interface\\FriendsFrame\\StatusIcon-Away"
-		tooltip = "Away"
+		tooltip = (type(GMS.T) == "function" and GMS:T("ROSTER_STATUS_AWAY")) or "Away"
 	elseif state == "DND" then
 		iconPath = "Interface\\FriendsFrame\\StatusIcon-DnD"
-		tooltip = "Busy"
+		tooltip = (type(GMS.T) == "function" and GMS:T("ROSTER_STATUS_BUSY")) or "Busy"
 	end
 
 	local icon = AceGUI:Create("Icon")
@@ -1625,15 +1625,15 @@ local function BuildCell_FactionIcon(row, member, ctx)
 	local faction = tostring(member and member.faction or "")
 	local letter = "N"
 	local color = "AAD372" -- hunter-like green for neutral
-	local tooltip = "Neutral"
+	local tooltip = (type(GMS.T) == "function" and GMS:T("ROSTER_FACTION_NEUTRAL")) or "Neutral"
 	if faction == "Alliance" then
 		letter = "A"
 		color = "3FC7FF" -- alliance blue
-		tooltip = "Alliance"
+		tooltip = (type(GMS.T) == "function" and GMS:T("ROSTER_FACTION_ALLIANCE")) or "Alliance"
 	elseif faction == "Horde" then
 		letter = "H"
 		color = "FF4D4D" -- horde red
-		tooltip = "Horde"
+		tooltip = (type(GMS.T) == "function" and GMS:T("ROSTER_FACTION_HORDE")) or "Horde"
 	end
 
 	local lbl = AceGUI:Create("Label")
@@ -1649,7 +1649,7 @@ local function BuildCell_FactionIcon(row, member, ctx)
 		lbl.frame:SetScript("OnEnter", function(self)
 			if not GameTooltip then return end
 			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-			GameTooltip:SetText("Faction", 1, 1, 1)
+			GameTooltip:SetText((type(GMS.T) == "function" and GMS:T("ROSTER_FACTION_TITLE")) or "Faction", 1, 1, 1)
 			GameTooltip:AddLine(tooltip, 0.8, 0.8, 0.8)
 			GameTooltip:Show()
 		end)
@@ -2152,7 +2152,8 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 							end
 							if rowGuid and rowGuid ~= "" then
 								GameTooltip:AddLine(" ")
-								GameTooltip:AddLine(string.format("|cff888888GUID: %s|r", tostring(rowGuid)), 1, 1, 1)
+								local guidLabel = (type(GMS.T) == "function" and GMS:T("ROSTER_GUID_LABEL", "GUID")) or "GUID"
+								GameTooltip:AddLine(string.format("|cff888888%s: %s|r", guidLabel, tostring(rowGuid)), 1, 1, 1)
 							end
 							GameTooltip:Show()
 						end

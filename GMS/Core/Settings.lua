@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 --	GMS/Core/Settings.lua
 --	SETTINGS EXTENSION
 --	- Global Settings & Module Options UI
@@ -144,7 +144,7 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 			displayName = GMS.REGISTRY.MOD[targetKey].displayName or GMS.REGISTRY.MOD[targetKey].name or targetKey
 		end
 	elseif targetType == "GEN" then
-		displayName = "Zentrale Addon-Einstellungen"
+		displayName = ST("SETTINGS_CORE_TITLE", "Core addon settings")
 		targetKey = "CORE"
 	end
 
@@ -152,7 +152,7 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 
 	if not options or not reg or not reg.defaults then
 		local lbl = AceGUI:Create("Label")
-		lbl:SetText("Keine konfigurierbaren Optionen für dieses Element gefunden.")
+		lbl:SetText(ST("SETTINGS_NO_OPTIONS", "No configurable options found for this item."))
 		lbl:SetFullWidth(true)
 		container:AddChild(lbl)
 		return
@@ -245,11 +245,11 @@ local function BuildDashboardStartPage(container)
 
 	local intro = AceGUI:Create("Label")
 	intro:SetFullWidth(true)
-	intro:SetText("Systemstatus (wie bisher im Dashboard).")
+	intro:SetText(ST("SETTINGS_DASHBOARD_INTRO", "System status (as before in dashboard)."))
 	container:AddChild(intro)
 
 	local extGroup = AceGUI:Create("InlineGroup")
-	extGroup:SetTitle("Extensions (Kernsystem)")
+	extGroup:SetTitle(ST("SETTINGS_EXTENSIONS_TITLE", "Extensions (core system)"))
 	extGroup:SetFullWidth(true)
 	extGroup:SetLayout("Flow")
 	container:AddChild(extGroup)
@@ -284,7 +284,7 @@ local function BuildDashboardStartPage(container)
 	end
 
 	local modGroup = AceGUI:Create("InlineGroup")
-	modGroup:SetTitle("Module (Features)")
+	modGroup:SetTitle(ST("SETTINGS_MODULES_TITLE", "Modules (features)"))
 	modGroup:SetFullWidth(true)
 	modGroup:SetLayout("Flow")
 	container:AddChild(modGroup)
@@ -319,7 +319,7 @@ local function BuildDashboardStartPage(container)
 	end
 
 	local btnRefresh = AceGUI:Create("Button")
-	btnRefresh:SetText("Status aktualisieren")
+	btnRefresh:SetText(ST("SETTINGS_STATUS_REFRESH", "Refresh status"))
 	btnRefresh:SetWidth(180)
 	btnRefresh:SetCallback("OnClick", function()
 		BuildDashboardStartPage(container)
@@ -349,15 +349,15 @@ local function BuildLanguagePage(container)
 		enUS = ST("SETTINGS_LANG_ENUS", "English (US)"),
 		enGB = ST("SETTINGS_LANG_ENGB", "English (UK)"),
 		deDE = ST("SETTINGS_LANG_DEDE", "Deutsch"),
-		frFR = ST("SETTINGS_LANG_FRFR", "Français"),
-		esES = ST("SETTINGS_LANG_ESES", "Español (ES)"),
-		esMX = ST("SETTINGS_LANG_ESMX", "Español (MX)"),
+		frFR = ST("SETTINGS_LANG_FRFR", "FranÃ§ais"),
+		esES = ST("SETTINGS_LANG_ESES", "EspaÃ±ol (ES)"),
+		esMX = ST("SETTINGS_LANG_ESMX", "EspaÃ±ol (MX)"),
 		itIT = ST("SETTINGS_LANG_ITIT", "Italiano"),
-		ptBR = ST("SETTINGS_LANG_PTBR", "Português (BR)"),
-		ruRU = ST("SETTINGS_LANG_RURU", "Русский"),
-		koKR = ST("SETTINGS_LANG_KOKR", "한국어"),
-		zhCN = ST("SETTINGS_LANG_ZHCN", "简体中文"),
-		zhTW = ST("SETTINGS_LANG_ZHTW", "繁體中文"),
+		ptBR = ST("SETTINGS_LANG_PTBR", "PortuguÃªs (BR)"),
+		ruRU = ST("SETTINGS_LANG_RURU", "Ð ÑƒÑÑÐºÐ¸Ð¹"),
+		koKR = ST("SETTINGS_LANG_KOKR", "í•œêµ­ì–´"),
+		zhCN = ST("SETTINGS_LANG_ZHCN", "ç®€ä½“ä¸­æ–‡"),
+		zhTW = ST("SETTINGS_LANG_ZHTW", "ç¹é«”ä¸­æ–‡"),
 	}
 
 	local codes = {}
@@ -429,21 +429,21 @@ local function GetTreeData()
 	local tree = {
 		{
 			value = "GEN_ROOT",
-			text = "Allgemein",
+			text = ST("SETTINGS_TREE_GENERAL", "General"),
 			children = {
-				{ value = "GEN:DASHBOARD", text = "Startseite (Dashboard)" },
+				{ value = "GEN:DASHBOARD", text = ST("SETTINGS_TREE_DASHBOARD", "Home page (dashboard)") },
 				{ value = "GEN:LANGUAGE", text = ST("SETTINGS_LANG_NAV", "Sprache") },
-				{ value = "GEN:CORE", text = "Zentrale Einstellungen" }
+				{ value = "GEN:CORE", text = ST("SETTINGS_TREE_CORE", "Core settings") }
 			},
 		},
 		{
 			value = "EXT_ROOT",
-			text = "Erweiterungen (Extensions)",
+			text = ST("SETTINGS_EXTENSIONS_TITLE", "Extensions (core system)"),
 			children = {},
 		},
 		{
 			value = "MOD_ROOT",
-			text = "Module",
+			text = ST("SETTINGS_MODULES_TITLE", "Modules (features)"),
 			children = {},
 		},
 	}
@@ -522,7 +522,7 @@ local function BuildSettingsPage(root, id, isCached)
 		else
 			self:ReleaseChildren()
 			local lbl = AceGUI:Create("Label")
-			lbl:SetText("Bitte wähle ein Modul oder eine Extension aus der Liste links aus.")
+			lbl:SetText(ST("SETTINGS_SELECT_HINT", "Please select a module or extension from the list on the left."))
 			lbl:SetFullWidth(true)
 			self:AddChild(lbl)
 		end
@@ -558,7 +558,7 @@ local function RegisterSlashCommands()
 		end
 
 		GMS:Slash_RegisterSubCommand("options", handler,
-			{ help = "Öffnet die GMS-Einstellungen", alias = { "settings", "o" }, owner = METADATA.INTERN_NAME })
+			{ help = "Ã–ffnet die GMS-Einstellungen", alias = { "settings", "o" }, owner = METADATA.INTERN_NAME })
 	end
 end
 

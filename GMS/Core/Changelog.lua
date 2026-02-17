@@ -72,6 +72,19 @@ local function LOCAL_LOG(level, msg, ...)
 	end
 end
 
+local function CT(key, fallback, ...)
+	if type(GMS.T) == "function" then
+		local ok, txt = pcall(GMS.T, GMS, key, ...)
+		if ok and type(txt) == "string" and txt ~= "" and txt ~= key then
+			return txt
+		end
+	end
+	if select("#", ...) > 0 then
+		return string.format(tostring(fallback or key), ...)
+	end
+	return tostring(fallback or key)
+end
+
 -- ###########################################################################
 -- #	EXTENSION REGISTRATION
 -- ###########################################################################
@@ -893,7 +906,7 @@ local function BuildChangelogPage(root, id, isCached)
 	end
 
 	if GMS.UI and type(GMS.UI.SetStatusText) == "function" then
-		GMS.UI:SetStatusText("CHANGELOG: " .. tostring(#RELEASES) .. " releases loaded (" .. ResolveLanguageMode() .. ")")
+		GMS.UI:SetStatusText(CT("CHANGELOG_STATUS_LOADED_FMT", "CHANGELOG: %d releases loaded (%s)", #RELEASES, ResolveLanguageMode()))
 	end
 
 	if isCached and type(root.ReleaseChildren) == "function" then

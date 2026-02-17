@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 --	GMS/Core/Permissions.lua
 --	Permissions EXTENSION
 --	- Handles Group-based Permissions (Admin, Officer, User)
@@ -81,6 +81,19 @@ local function LOCAL_LOG(level, msg, ...)
 	end
 end
 
+local function PT(key, fallback, ...)
+	if type(GMS.T) == "function" then
+		local ok, txt = pcall(GMS.T, GMS, key, ...)
+		if ok and type(txt) == "string" and txt ~= "" and txt ~= key then
+			return txt
+		end
+	end
+	if select("#", ...) > 0 then
+		return string.format(tostring(fallback or key), ...)
+	end
+	return tostring(fallback or key)
+end
+
 -- ###########################################################################
 -- #	INTERNAL STATE
 -- ###########################################################################
@@ -94,17 +107,18 @@ Permissions.GROUPS = {
 }
 
 Permissions.CAPABILITIES = {
-	{ id = "MODIFY_PERMISSIONS", name = "Berechtigungen verwalten",
-		desc = "Ermöglicht das Erstellen, Umbenennen und Löschen von Gruppen sowie das Ändern von Berechtigungen." },
-	{ id = "SEND_DATA", name = "Daten senden",
-		desc = "Erlaubt das Senden von Addon-Daten (z.B. Roster-Synchronisation, Raids) an andere Gildenmitglieder." },
-	{ id = "RECEIVE_DATA", name = "Daten empfangen",
-		desc = "Erlaubt den Empfang und die Verarbeitung von Addon-Daten anderer Mitglieder." },
-	{ id = "EDIT_ROSTER", name = "Roster bearbeiten",
-		desc = "Ermöglicht das Bearbeiten von Notizen und Rängen innerhalb des GMS Roster-Moduls." },
-	{ id = "MANAGE_RAIDS", name = "Raids verwalten",
-		desc = "Erlaubt das Erstellen, Starten und Verwalten von Raids und Anmeldungen." },
-	{ id = "VIEW_LOGS", name = "Logs einsehen", desc = "Gewährt Zugriff auf detaillierte Addon-Logs und Historien." },
+	{ id = "MODIFY_PERMISSIONS", nameKey = "PERM_CAP_MODIFY_NAME", nameFallback = "Manage permissions",
+		descKey = "PERM_CAP_MODIFY_DESC", descFallback = "Allows creating, renaming and deleting groups and changing permissions." },
+	{ id = "SEND_DATA", nameKey = "PERM_CAP_SEND_NAME", nameFallback = "Send data",
+		descKey = "PERM_CAP_SEND_DESC", descFallback = "Allows sending addon data (e.g. roster sync, raids) to guild members." },
+	{ id = "RECEIVE_DATA", nameKey = "PERM_CAP_RECEIVE_NAME", nameFallback = "Receive data",
+		descKey = "PERM_CAP_RECEIVE_DESC", descFallback = "Allows receiving and processing addon data from other members." },
+	{ id = "EDIT_ROSTER", nameKey = "PERM_CAP_EDIT_ROSTER_NAME", nameFallback = "Edit roster",
+		descKey = "PERM_CAP_EDIT_ROSTER_DESC", descFallback = "Allows editing notes and ranks in the GMS roster module." },
+	{ id = "MANAGE_RAIDS", nameKey = "PERM_CAP_MANAGE_RAIDS_NAME", nameFallback = "Manage raids",
+		descKey = "PERM_CAP_MANAGE_RAIDS_DESC", descFallback = "Allows creating, starting and managing raids and signups." },
+	{ id = "VIEW_LOGS", nameKey = "PERM_CAP_VIEW_LOGS_NAME", nameFallback = "View logs",
+		descKey = "PERM_CAP_VIEW_LOGS_DESC", descFallback = "Grants access to detailed addon logs and history." },
 }
 
 local DEFAULTS = {
@@ -312,7 +326,7 @@ function Permissions:BuildUI(container)
 
 	if not self:IsAuthorized() then
 		local label = AceGUI:Create("Label")
-		label:SetText("|cffff0000Nur der Gildenleiter kann Berechtigungen verwalten.|r")
+		label:SetText("|cffff0000" .. PT("PERM_ONLY_GM", "Only the guild leader can manage permissions.") .. "|r")
 		label:SetFullWidth(true)
 		container:AddChild(label)
 		return
@@ -375,10 +389,10 @@ function Permissions:RenderGroupContent(parent, groupID)
 	tabGroup:SetFullHeight(true)
 	tabGroup:SetLayout("Fill")
 	tabGroup:SetTabs({
-		{ value = "MEMBERS", text = "Mitglieder" },
-		{ value = "RANKS", text = "Ränge & Rollen" },
-		{ value = "PERMISSIONS", text = "Berechtigungen" },
-		{ value = "SETTINGS", text = "Einstellungen" },
+		{ value = "MEMBERS", text = PT("PERM_TAB_MEMBERS", "Members") },
+		{ value = "RANKS", text = PT("PERM_TAB_RANKS", "Ranks & Roles") },
+		{ value = "PERMISSIONS", text = PT("PERM_TAB_PERMISSIONS", "Permissions") },
+		{ value = "SETTINGS", text = PT("PERM_TAB_SETTINGS", "Settings") },
 	})
 
 	local validTabs = {
@@ -425,7 +439,7 @@ end
 
 function Permissions:RenderMembersTab(container, groupID)
 	local header = AceGUI:Create("Heading")
-	header:SetText("Mitglieder in " .. (self.db.groupNames[groupID] or groupID))
+	header:SetText(PT("PERM_MEMBERS_IN_FMT", "Members in %s", (self.db.groupNames[groupID] or groupID)))
 	header:SetFullWidth(true)
 	container:AddChild(header)
 
@@ -436,12 +450,12 @@ function Permissions:RenderMembersTab(container, groupID)
 	container:AddChild(addRow)
 
 	local addEdit = AceGUI:Create("EditBox")
-	addEdit:SetLabel("Spieler hinzufügen (Name oder GUID)")
+	addEdit:SetLabel(PT("PERM_ADD_PLAYER_LABEL", "Add player (name or GUID)"))
 	addEdit:SetWidth(400)
 
 	-- Suggestion Container
 	local suggestGroup = AceGUI:Create("InlineGroup")
-	suggestGroup:SetTitle("Vorschläge")
+	suggestGroup:SetTitle(PT("PERM_SUGGESTIONS", "Suggestions"))
 	suggestGroup:SetFullWidth(true)
 	suggestGroup:SetLayout("Flow")
 	suggestGroup.frame:Hide() -- Start hidden (Accessing the underlying frame)
@@ -526,7 +540,7 @@ function Permissions:RenderMembersTab(container, groupID)
 	addRow:AddChild(addEdit)
 
 	local listGroup = AceGUI:Create("InlineGroup")
-	listGroup:SetTitle("Aktuelle Mitglieder")
+	listGroup:SetTitle(PT("PERM_CURRENT_MEMBERS", "Current members"))
 	listGroup:SetFullWidth(true)
 	listGroup:SetLayout("Flow")
 	container:AddChild(listGroup)
@@ -558,7 +572,7 @@ function Permissions:RenderMembersTab(container, groupID)
 
 					if isManual and not isGM then
 						local delBtn = AceGUI:Create("Button")
-						delBtn:SetText("Entfernen")
+						delBtn:SetText(PT("PERM_REMOVE", "Remove"))
 						delBtn:SetWidth(100)
 						delBtn:SetCallback("OnClick", function()
 							if self:RemoveMemberFromGroup(guid, groupID) then
@@ -568,7 +582,7 @@ function Permissions:RenderMembersTab(container, groupID)
 						memRow:AddChild(delBtn)
 					elseif isGM then
 						local gmLabel = AceGUI:Create("Label")
-						gmLabel:SetText("|cff00ff00[Gildenleiter]|r")
+						gmLabel:SetText("|cff00ff00[" .. PT("PERM_GUILD_LEADER", "Guild Leader") .. "]|r")
 						gmLabel:SetWidth(100)
 						memRow:AddChild(gmLabel)
 					end
@@ -579,7 +593,7 @@ function Permissions:RenderMembersTab(container, groupID)
 
 	if memberCount == 0 then
 		local emptyLocal = AceGUI:Create("Label")
-		emptyLocal:SetText("|cff888888Keine Mitglieder in dieser Gruppe.|r")
+		emptyLocal:SetText("|cff888888" .. PT("PERM_EMPTY_GROUP", "No members in this group.") .. "|r")
 		emptyLocal:SetFullWidth(true)
 		listGroup:AddChild(emptyLocal)
 	end
@@ -587,7 +601,7 @@ end
 
 function Permissions:RenderRanksTab(container, groupID)
 	local header = AceGUI:Create("Heading")
-	header:SetText("Gildenrang-Zuweisung")
+	header:SetText(PT("PERM_RANK_ASSIGNMENTS", "Guild rank assignments"))
 	header:SetFullWidth(true)
 	container:AddChild(header)
 
@@ -626,7 +640,7 @@ end
 
 function Permissions:RenderPermissionsTab(container, groupID)
 	local header = AceGUI:Create("Heading")
-	header:SetText("Gruppenberechtigungen")
+	header:SetText(PT("PERM_GROUP_PERMISSIONS", "Group permissions"))
 	header:SetFullWidth(true)
 	container:AddChild(header)
 
@@ -634,15 +648,17 @@ function Permissions:RenderPermissionsTab(container, groupID)
 
 	for _, cap in ipairs(self.CAPABILITIES) do
 		local cb = AceGUI:Create("CheckBox")
-		cb:SetLabel(cap.name)
+		local capName = PT(cap.nameKey, cap.nameFallback)
+		local capDesc = PT(cap.descKey, cap.descFallback)
+		cb:SetLabel(capName)
 		cb:SetDescription("|cff888888ID: " .. cap.id .. "|r")
 		cb:SetWidth(200)
 
 		-- Add Tooltip
 		cb:SetCallback("OnEnter", function(widget)
 			GameTooltip:SetOwner(widget.frame, "ANCHOR_TOPRIGHT")
-			GameTooltip:SetText(cap.name, 1, 1, 1)
-			GameTooltip:AddLine(cap.desc, nil, nil, nil, true)
+			GameTooltip:SetText(capName, 1, 1, 1)
+			GameTooltip:AddLine(capDesc, nil, nil, nil, true)
 			GameTooltip:AddLine(" ", 1, 1, 1)
 			GameTooltip:AddLine("|cff888888ID: " .. cap.id .. "|r", 1, 1, 1)
 			GameTooltip:Show()
@@ -672,13 +688,13 @@ function Permissions:RenderSettingsTab(container, groupID)
 	local isFixed = (groupID == "ADMIN" or groupID == "OFFICER" or groupID == "EVERYONE")
 
 	local header = AceGUI:Create("Heading")
-	header:SetText("Gruppeneinstellungen")
+	header:SetText(PT("PERM_GROUP_SETTINGS", "Group settings"))
 	header:SetFullWidth(true)
 	container:AddChild(header)
 
 	-- Rename
 	local edit = AceGUI:Create("EditBox")
-	edit:SetLabel("Gruppenname")
+	edit:SetLabel(PT("PERM_GROUP_NAME", "Group name"))
 	edit:SetText(self.db.groupNames[groupID] or groupID)
 	edit:SetFullWidth(true)
 	-- Renaming allowed for all now
@@ -690,7 +706,7 @@ function Permissions:RenderSettingsTab(container, groupID)
 
 	-- Sort
 	local sortGroup = AceGUI:Create("InlineGroup")
-	sortGroup:SetTitle("Sortierung")
+	sortGroup:SetTitle(PT("PERM_SORTING", "Sorting"))
 	sortGroup:SetFullWidth(true)
 	sortGroup:SetLayout("Flow")
 	container:AddChild(sortGroup)
@@ -701,7 +717,7 @@ function Permissions:RenderSettingsTab(container, groupID)
 	end
 
 	local btnUp = AceGUI:Create("Button")
-	btnUp:SetText("Nach oben")
+	btnUp:SetText(PT("PERM_MOVE_UP", "Move up"))
 	btnUp:SetWidth(150)
 	btnUp:SetDisabled(idx == 1)
 	btnUp:SetCallback("OnClick", function()
@@ -712,7 +728,7 @@ function Permissions:RenderSettingsTab(container, groupID)
 	sortGroup:AddChild(btnUp)
 
 	local btnDown = AceGUI:Create("Button")
-	btnDown:SetText("Nach unten")
+	btnDown:SetText(PT("PERM_MOVE_DOWN", "Move down"))
 	btnDown:SetWidth(150)
 	btnDown:SetDisabled(idx == #self.db.groupsOrder)
 	btnDown:SetCallback("OnClick", function()
@@ -725,7 +741,7 @@ function Permissions:RenderSettingsTab(container, groupID)
 	-- Delete
 	if not isFixed then
 		local delBtn = AceGUI:Create("Button")
-		delBtn:SetText("Gruppe löschen")
+		delBtn:SetText(PT("PERM_DELETE_GROUP", "Delete group"))
 		delBtn:SetFullWidth(true)
 		delBtn:SetCallback("OnClick", function()
 			self.db.groupNames[groupID] = nil
@@ -745,11 +761,11 @@ function Permissions:RenderSettingsTab(container, groupID)
 
 	-- Add Group Button at the bottom (useful here too)
 	local btnAdd = AceGUI:Create("Button")
-	btnAdd:SetText("Völlig neue Gruppe erstellen")
+	btnAdd:SetText(PT("PERM_CREATE_NEW_GROUP", "Create completely new group"))
 	btnAdd:SetFullWidth(true)
 	btnAdd:SetCallback("OnClick", function()
 		local newID = "CUSTOM_" .. GetTime()
-		self.db.groupNames[newID] = "Neue Gruppe"
+		self.db.groupNames[newID] = PT("PERM_NEW_GROUP_NAME", "New group")
 		table.insert(self.db.groupsOrder, newID)
 		self._selectedGroup = newID
 		self:BuildUI(self._container)

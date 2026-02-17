@@ -26,6 +26,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] `GMS/Modules/CharInfo.lua` erweitert (Raid-Spinner in BEST, Tooltip-Status, Lokalisierungs-Lookups für Raid-UI).
 - [x] Locale-Tabellen `GMS/Locales/enUS.lua` und `GMS/Locales/deDE.lua` um neue Keys für RAIDS/CHARINFO ergänzt.
 - [x] Sprachumschaltung in den Einstellungen erweitert (inkl. on-the-fly Apply) und neue Locale-Keys in allen WoW-Sprachen nativ hinterlegt (`GMS/Core/Settings.lua`, `GMS/Locales/*.lua`).
+- [x] Lokalisierungs-Audit umgesetzt: harte UI-/Tooltip-/Status-Texte in `Permissions`, `Settings`, `Dashboard`, `Changelog`, `CharInfo` und `Roster` auf Locale-Keys umgestellt (`GMS/Core/*.lua`, `GMS/Modules/*.lua`, `GMS/Locales/enUS.lua`, `GMS/Locales/deDE.lua`).
 
 ### Fixed
 - [x] CHAR-Store-Bindung in `GMS/Core/Database.lua` stabilisiert (GUID-Wait statt frühem Fallback-Key).
@@ -38,6 +39,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 ### Rules/Infra
 - [x] Unreleased-Abschnitt nach Release `1.4.7` fuer die naechste Iteration zurueckgesetzt.
 - [x] `GMS_PROJECT_RULES.md` erweitert: neue Pflichtregel fuer lokalisierbare Chat-/UI-/Tooltip-/generierte Texte (Ausnahme Eigennamen, Verweis auf `GMS/Locales/`).
+- [x] `GMS_PROJECT_RULES.md` erweitert: neue Pflichtregel fuer Vor-Commit-Lokalisierungspruefung (fehlende Locale-Keys vor Commit pruefen).
 
 ## Last Release Snapshot
 

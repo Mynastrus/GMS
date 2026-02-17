@@ -399,3 +399,16 @@ Die Lokalisierungsdateien befinden sich im Ordner:
 
 * `GMS/Locales/`
 
+### 13.4 Vor-Commit-Prüfung (Pflicht)
+
+Vor **jedem Commit** muss auf fehlende Lokalisierungen geprüft werden.
+
+**Verbindliche Mindestprüfung:**
+
+* Suche nach neu eingeführten, direkt ausgegebenen String-Literalen in Chat/UI/Tooltip-Code.
+* Prüfe, ob jeder neue Text über Locale-Keys (`GMS:T(...)` bzw. modulare Wrapper wie `LT/TR/ST/...`) aufgelöst wird.
+* Prüfe, ob neue Keys mindestens in `GMS/Locales/enUS.lua` und `GMS/Locales/deDE.lua` vorhanden sind.
+* Wenn Keys in anderen Locale-Dateien fehlen, ist ein valider Fallback auf `enUS` sicherzustellen.
+
+Ein Commit ohne diese Prüfung gilt als **regelwidrig**.
+

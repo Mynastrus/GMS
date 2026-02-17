@@ -1917,7 +1917,9 @@ function CHARINFO:TryRegisterPage()
 
 		BuildCharInfoUIHeader(ui2, details, details.isContext and (ctxFrom or "external") or "local")
 		if ui2 and type(ui2.SetStatusText) == "function" then
-			ui2:SetStatusText(details.isContext and "CHARINFO: context active" or "CHARINFO: player only")
+			ui2:SetStatusText(details.isContext
+				and LT("CHARINFO_STATUS_CONTEXT", "CHARINFO: context active")
+				or LT("CHARINFO_STATUS_PLAYER", "CHARINFO: player only"))
 		end
 
 		if type(root.SetLayout) == "function" then
@@ -1985,11 +1987,11 @@ function CHARINFO:TryRegisterPage()
 		end
 
 		local function BuildCard_Mythic(parent)
-			local card = NewCardContainer(parent, "Mythic Dungeons")
-			AddValueLine(card, "Score", (details.mythic.score and tostring(details.mythic.score)) or "-")
-			AddValueLine(card, "Source", details.mythic.source or "-")
+			local card = NewCardContainer(parent, LT("CHARINFO_CARD_MYTHIC", "Mythic Dungeons"))
+			AddValueLine(card, LT("CHARINFO_LABEL_SCORE", "Score"), (details.mythic.score and tostring(details.mythic.score)) or "-")
+			AddValueLine(card, LT("CHARINFO_LABEL_SOURCE", "Source"), details.mythic.source or "-")
 			if #details.mythic.rows <= 0 then
-				AddNoDataHint(card, "No Mythic+ data available for this character.")
+				AddNoDataHint(card, LT("CHARINFO_NO_MYTHIC_DATA", "No Mythic+ data available for this character."))
 				return
 			end
 			local maxRows = math.min(#details.mythic.rows, 10)
@@ -1997,12 +1999,12 @@ function CHARINFO:TryRegisterPage()
 				local row = details.mythic.rows[i]
 				local levelText = (tonumber(row.level) or 0) > 0 and ("+" .. tostring(row.level)) or "-"
 				local scoreText = (tonumber(row.score) or 0) > 0 and tostring(row.score) or "-"
-				AddMutedLine(card, string.format("%s   key: %s   score: %s", tostring(row.name or "-"), levelText, scoreText))
+				AddMutedLine(card, LT("CHARINFO_MYTHIC_ROW_FMT", "%s   key: %s   score: %s", tostring(row.name or "-"), levelText, scoreText))
 			end
 		end
 
 		local function BuildCard_Equipment(parent)
-			local card = NewCardContainer(parent, "Equipment")
+			local card = NewCardContainer(parent, LT("CHARINFO_CARD_EQUIPMENT", "Equipment"))
 			local ilvlText = (details.equipment.ilvl and string.format("%.1f", details.equipment.ilvl)) or "-"
 
 			local equipIconWidth = 20
@@ -2268,7 +2270,7 @@ function CHARINFO:TryRegisterPage()
 					if #encounters > 0 then
 						for i = 1, #encounters do
 							local enc = encounters[i]
-							local ename = tostring(enc and enc.name or ("Boss " .. tostring(i)))
+							local ename = tostring(enc and enc.name or LT("CHARINFO_BOSS_FALLBACK_FMT", "Boss %d", i))
 							local eid = tonumber(enc and enc.id or 0) or 0
 							local bossKilled = false
 							if hasBossMap and eid > 0 then
@@ -2416,29 +2418,29 @@ function CHARINFO:TryRegisterPage()
 		end
 
 		local function BuildCard_Overview(parent)
-			local card = NewCardContainer(parent, "Character Overview")
-			AddValueLine(card, "Name", details.general.name or "-")
-			AddValueLine(card, "GUID", details.general.guid or "-")
-			AddValueLine(card, "Class", details.general.class or "-")
-			AddValueLine(card, "Race", details.general.race or "-")
-			AddValueLine(card, "Level", details.general.level or "-")
-			AddValueLine(card, "Spec", details.general.spec or "-")
-			AddValueLine(card, "Guild", details.general.guild or "-")
-			AddValueLine(card, "GMS Version", details.gmsVersion or "-")
-			AddValueLine(card, "Last Local Update", (lastUpdate > 0 and tostring(lastUpdate) or "-"))
+			local card = NewCardContainer(parent, LT("CHARINFO_CARD_OVERVIEW", "Character Overview"))
+			AddValueLine(card, LT("CHARINFO_LABEL_NAME", "Name"), details.general.name or "-")
+			AddValueLine(card, LT("CHARINFO_LABEL_GUID", "GUID"), details.general.guid or "-")
+			AddValueLine(card, LT("CHARINFO_LABEL_CLASS", "Class"), details.general.class or "-")
+			AddValueLine(card, LT("CHARINFO_LABEL_RACE", "Race"), details.general.race or "-")
+			AddValueLine(card, LT("CHARINFO_LABEL_LEVEL", "Level"), details.general.level or "-")
+			AddValueLine(card, LT("CHARINFO_LABEL_SPEC", "Spec"), details.general.spec or "-")
+			AddValueLine(card, LT("CHARINFO_LABEL_GUILD", "Guild"), details.general.guild or "-")
+			AddValueLine(card, LT("CHARINFO_LABEL_GMS_VERSION", "GMS Version"), details.gmsVersion or "-")
+			AddValueLine(card, LT("CHARINFO_LABEL_LAST_LOCAL_UPDATE", "Last Local Update"), (lastUpdate > 0 and tostring(lastUpdate) or "-"))
 		end
 
 		local function BuildCard_Account(parent)
-			local card = NewCardContainer(parent, "Guild Characters on Same Account")
-			AddValueLine(card, "Source", details.accountChars.source or "-")
+			local card = NewCardContainer(parent, LT("CHARINFO_CARD_ACCOUNT", "Guild Characters on Same Account"))
+			AddValueLine(card, LT("CHARINFO_LABEL_SOURCE", "Source"), details.accountChars.source or "-")
 			if #details.accountChars.rows <= 0 then
-				AddNoDataHint(card, "No linked account characters currently verified in guild roster.")
+				AddNoDataHint(card, LT("CHARINFO_NO_ACCOUNT_CHARS", "No linked account characters currently verified in guild roster."))
 				return
 			end
 
 			local hint = AceGUI:Create("Label")
 			hint:SetFullWidth(true)
-			hint:SetText("|cff7f7f7fClick a character to open CharInfo.|r")
+			hint:SetText("|cff7f7f7f" .. LT("CHARINFO_ACCOUNT_CLICK_HINT", "Click a character to open CharInfo.") .. "|r")
 			if hint.label then
 				hint.label:SetFontObject(GameFontNormalSmallOutline)
 			end
@@ -2463,7 +2465,7 @@ function CHARINFO:TryRegisterPage()
 
 				local nameText = rowNameFull
 				if rowLevel > 0 then
-					nameText = string.format("%s |cff9d9d9d(Lv %d)|r", rowNameFull, rowLevel)
+					nameText = string.format("%s |cff9d9d9d(" .. LT("CHARINFO_LEVEL_SHORT_FMT", "Lv %d", rowLevel) .. ")|r", rowNameFull)
 				end
 
 				local row = AceGUI:Create("SimpleGroup")
@@ -2497,21 +2499,23 @@ function CHARINFO:TryRegisterPage()
 
 				local statusLabel = AceGUI:Create("Label")
 				statusLabel:SetWidth(accountStateWidth)
-				statusLabel:SetText(rowOnline and "|cff4caf50Online|r" or "|cff7f7f7fOffline|r")
+				statusLabel:SetText(rowOnline
+					and ("|cff4caf50" .. LT("CHARINFO_STATUS_ONLINE", "Online") .. "|r")
+					or ("|cff7f7f7f" .. LT("CHARINFO_STATUS_OFFLINE", "Offline") .. "|r"))
 				row:AddChild(statusLabel)
 			end
 		end
 
 		local function BuildCard_Talents(parent)
-			local card = NewCardContainer(parent, "Talents")
-			AddValueLine(card, "Summary", details.talents.summary or "-")
-			AddValueLine(card, "Source", details.talents.source or "-")
+			local card = NewCardContainer(parent, LT("CHARINFO_CARD_TALENTS", "Talents"))
+			AddValueLine(card, LT("CHARINFO_LABEL_SUMMARY", "Summary"), details.talents.summary or "-")
+			AddValueLine(card, LT("CHARINFO_LABEL_SOURCE", "Source"), details.talents.source or "-")
 		end
 
 		local function BuildCard_PvP(parent)
-			local card = NewCardContainer(parent, "PvP")
-			AddValueLine(card, "Summary", details.pvp.summary or "-")
-			AddValueLine(card, "Source", details.pvp.source or "-")
+			local card = NewCardContainer(parent, LT("CHARINFO_CARD_PVP", "PvP"))
+			AddValueLine(card, LT("CHARINFO_LABEL_SUMMARY", "Summary"), details.pvp.summary or "-")
+			AddValueLine(card, LT("CHARINFO_LABEL_SOURCE", "Source"), details.pvp.source or "-")
 		end
 
 		local cardBuilders = {

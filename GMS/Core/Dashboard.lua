@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 --	GMS/Core/Dashboard.lua
 --	DASHBOARD EXTENSION
 --	- Central landing page for GMS
@@ -72,6 +72,18 @@ local function LOCAL_LOG(level, msg, ...)
 	end
 end
 
+local function DT(key, fallback, ...)
+	if type(GMS.T) == "function" then
+		local ok, txt = pcall(GMS.T, GMS, key, ...)
+		if ok and type(txt) == "string" and txt ~= "" and txt ~= key then
+			return txt
+		end
+	end
+	if select("#", ...) > 0 then
+		return string.format(tostring(fallback or key), ...)
+	end
+	return tostring(fallback or key)
+end
 -- ###########################################################################
 -- #	EXTENSION REGISTRATION
 -- ###########################################################################
@@ -93,7 +105,7 @@ local function RenderDashboard(root, id, isCached)
 
 	-- Header (Always Rebuild)
 	GMS.UI:Header_BuildDefault()
-	GMS.UI:SetStatusText("DASHBOARD: Systemstatus geladen")
+	GMS.UI:SetStatusText(DT("DASHBOARD_STATUS_LOADED", "DASHBOARD: system status loaded"))
 
 	-- If cached, only update Header/Footer (done above) and return
 	if isCached then return end
@@ -106,7 +118,7 @@ local function RenderDashboard(root, id, isCached)
 
 	-- Info Block
 	local infoGroup = AceGUI:Create("InlineGroup")
-	infoGroup:SetTitle("Allgemeine Informationen")
+	infoGroup:SetTitle(DT("DASHBOARD_INFO_TITLE", "General information"))
 	infoGroup:SetFullWidth(true)
 	infoGroup:SetLayout("Flow")
 	scroll:AddChild(infoGroup)
@@ -115,11 +127,11 @@ local function RenderDashboard(root, id, isCached)
 	local guild = (guildInfoMod and type(guildInfoMod.GetSnapshot) == "function")
 		and guildInfoMod:GetSnapshot() or nil
 
-	local guildText = "Keine Gildeninformationen verfügbar."
+	local guildText = DT("DASHBOARD_GUILD_INFO_MISSING", "No guild information available.")
 	if type(guild) == "table" then
 		if guild.inGuild then
 			guildText = string.format(
-				"Guild: |cffffcc00%s|r\nRealm/Faction: |cffd7d7d7%s / %s|r\nRang: |cffd7d7d7%s (%s)|r\nMitglieder online: |cffd7d7d7%d/%d|r",
+				DT("DASHBOARD_GUILD_SUMMARY_FMT", "Guild: |cffffcc00%s|r\nRealm/Faction: |cffd7d7d7%s / %s|r\nRank: |cffd7d7d7%s (%s)|r\nMembers online: |cffd7d7d7%d/%d|r"),
 				tostring(guild.name or "-"),
 				tostring(guild.realm or "-"),
 				tostring(guild.faction or "-"),
@@ -129,15 +141,14 @@ local function RenderDashboard(root, id, isCached)
 				tonumber(guild.memberCount) or 0
 			)
 		else
-			guildText = "Aktuell in keiner Gilde."
+			guildText = DT("DASHBOARD_GUILD_NONE", "Currently not in a guild.")
 		end
 	end
 
 	local lblInfo = AceGUI:Create("Label")
 	lblInfo:SetFullWidth(true)
 	lblInfo:SetText(string.format(
-		"Willkommen bei |cff03A9F4GMS – Guild Management System|r.\n" ..
-		"Version: |cffffcc00%s|r\n\n%s",
+		DT("DASHBOARD_WELCOME_FMT", "Welcome to |cff03A9F4GMS - Guild Management System|r.\nVersion: |cffffcc00%s|r\n\n%s"),
 		GMS.VERSION or "?.?.?",
 		guildText
 	))
@@ -145,7 +156,7 @@ local function RenderDashboard(root, id, isCached)
 
 	local hint = AceGUI:Create("Label")
 	hint:SetFullWidth(true)
-	hint:SetText("Den technischen Systemstatus findest du jetzt unter: Einstellungen -> Startseite (Dashboard).")
+	hint:SetText(DT("DASHBOARD_HINT_SETTINGS", "You can now find technical system status under: Settings -> Home page (Dashboard)."))
 	scroll:AddChild(hint)
 end
 
