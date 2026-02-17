@@ -25,6 +25,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] `GMS/Modules/Raids.lua` auf zentrale Raid-ID-Quelle (`GMS_RAIDIDS`) umgestellt; Slash-Ausgaben lokalisiert.
 - [x] `GMS/Modules/CharInfo.lua` erweitert (Raid-Spinner in BEST, Tooltip-Status, Lokalisierungs-Lookups für Raid-UI).
 - [x] Locale-Tabellen `GMS/Locales/enUS.lua` und `GMS/Locales/deDE.lua` um neue Keys für RAIDS/CHARINFO ergänzt.
+- [x] Sprachumschaltung in den Einstellungen erweitert (inkl. on-the-fly Apply) und neue Locale-Keys in allen WoW-Sprachen nativ hinterlegt (`GMS/Core/Settings.lua`, `GMS/Locales/*.lua`).
 
 ### Fixed
 - [x] CHAR-Store-Bindung in `GMS/Core/Database.lua` stabilisiert (GUID-Wait statt frühem Fallback-Key).

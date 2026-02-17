@@ -26,7 +26,7 @@ local METADATA = {
 	INTERN_NAME  = "SETTINGS",
 	SHORT_NAME   = "Settings",
 	DISPLAY_NAME = "Einstellungen",
-	VERSION      = "1.1.2",
+	VERSION      = "1.1.4",
 }
 
 -- Blizzard Globals
@@ -69,6 +69,19 @@ local function LOCAL_LOG(level, msg, ...)
 	if type(GMS._LOG_NOTIFY) == "function" then
 		pcall(GMS._LOG_NOTIFY, entry, idx)
 	end
+end
+
+local function ST(key, fallback, ...)
+	if type(GMS.T) == "function" then
+		local ok, txt = pcall(GMS.T, GMS, key, ...)
+		if ok and type(txt) == "string" and txt ~= "" and txt ~= key then
+			return txt
+		end
+	end
+	if select("#", ...) > 0 then
+		return string.format(tostring(fallback or key), ...)
+	end
+	return tostring(fallback or key)
 end
 
 -- ###########################################################################
@@ -314,6 +327,100 @@ local function BuildDashboardStartPage(container)
 	container:AddChild(btnRefresh)
 end
 
+local function BuildLanguagePage(container)
+	container:ReleaseChildren()
+	container:SetLayout("Flow")
+
+	local intro = AceGUI:Create("Label")
+	intro:SetFullWidth(true)
+	intro:SetText(ST("SETTINGS_LANG_INTRO", "Waehle die Addon-Sprache aus und klicke auf Anwenden."))
+	container:AddChild(intro)
+
+	local modeCurrent = "AUTO"
+	if type(GMS.db) == "table" and type(GMS.db.profile) == "table" then
+		modeCurrent = string.upper(tostring(GMS.db.profile.addonLanguageMode or "AUTO"))
+	end
+
+	local list = {
+		AUTO = ST("SETTINGS_LANG_AUTO", "Automatisch (Clientsprache)"),
+	}
+
+	local localeLabelByCode = {
+		enUS = ST("SETTINGS_LANG_ENUS", "English (US)"),
+		enGB = ST("SETTINGS_LANG_ENGB", "English (UK)"),
+		deDE = ST("SETTINGS_LANG_DEDE", "Deutsch"),
+		frFR = ST("SETTINGS_LANG_FRFR", "Français"),
+		esES = ST("SETTINGS_LANG_ESES", "Español (ES)"),
+		esMX = ST("SETTINGS_LANG_ESMX", "Español (MX)"),
+		itIT = ST("SETTINGS_LANG_ITIT", "Italiano"),
+		ptBR = ST("SETTINGS_LANG_PTBR", "Português (BR)"),
+		ruRU = ST("SETTINGS_LANG_RURU", "Русский"),
+		koKR = ST("SETTINGS_LANG_KOKR", "한국어"),
+		zhCN = ST("SETTINGS_LANG_ZHCN", "简体中文"),
+		zhTW = ST("SETTINGS_LANG_ZHTW", "繁體中文"),
+	}
+
+	local codes = {}
+	local data = GMS.LOCALE and GMS.LOCALE.data or nil
+	if type(data) == "table" then
+		for code, strings in pairs(data) do
+			if type(code) == "string" and type(strings) == "table" then
+				codes[#codes + 1] = code
+			end
+		end
+	end
+	table.sort(codes, function(a, b) return tostring(a) < tostring(b) end)
+	for i = 1, #codes do
+		local code = codes[i]
+		list[code] = localeLabelByCode[code] or code
+	end
+
+	local dd = AceGUI:Create("Dropdown")
+	dd:SetLabel(ST("SETTINGS_LANG_LABEL", "Sprache"))
+	dd:SetList(list)
+	dd:SetValue(list[modeCurrent] and modeCurrent or "AUTO")
+	dd:SetWidth(320)
+	container:AddChild(dd)
+
+	local apply = AceGUI:Create("Button")
+	apply:SetText(ST("SETTINGS_LANG_APPLY", "Anwenden"))
+	apply:SetWidth(180)
+	apply:SetCallback("OnClick", function()
+		local selected = tostring(dd:GetValue() or "AUTO")
+		if selected == "" then selected = "AUTO" end
+		local ok = (type(GMS.SetLanguageMode) == "function") and GMS:SetLanguageMode(selected) or false
+		if ok then
+			LOCAL_LOG("INFO", "Language mode changed", selected)
+			if type(GMS.Print) == "function" then
+				local shown = list[selected] or selected
+				GMS:Print(ST("SETTINGS_LANG_APPLIED_FMT", "Sprache angewendet: %s", shown))
+			end
+			if GMS.UI then
+				-- Force page rebuild so cached pages pick up new locale strings instantly.
+				local cache = GMS.UI._pageContainers
+				if type(cache) == "table" then
+					for pageID, container in pairs(cache) do
+						if type(container) == "table" and container.frame then
+							container.frame:Hide()
+						end
+						cache[pageID] = nil
+					end
+				end
+				GMS.UI._lastNavTime = nil
+				if type(GMS.UI.Navigate) == "function" then
+					local page = tostring(GMS.UI._page or "SETTINGS")
+					GMS.UI:Navigate(page)
+				end
+			end
+		else
+			if type(GMS.Print) == "function" then
+				GMS:Print(ST("SETTINGS_LANG_APPLY_FAILED", "Sprache konnte nicht angewendet werden."))
+			end
+		end
+	end)
+	container:AddChild(apply)
+end
+
 -- ###########################################################################
 -- #	UI: TREE DATA BUILDER
 -- ###########################################################################
@@ -325,6 +432,7 @@ local function GetTreeData()
 			text = "Allgemein",
 			children = {
 				{ value = "GEN:DASHBOARD", text = "Startseite (Dashboard)" },
+				{ value = "GEN:LANGUAGE", text = ST("SETTINGS_LANG_NAV", "Sprache") },
 				{ value = "GEN:CORE", text = "Zentrale Einstellungen" }
 			},
 		},
@@ -406,6 +514,8 @@ local function BuildSettingsPage(root, id, isCached)
 		if targetType and targetKey then
 			if targetType == "GEN" and targetKey == "DASHBOARD" then
 				BuildDashboardStartPage(self)
+			elseif targetType == "GEN" and targetKey == "LANGUAGE" then
+				BuildLanguagePage(self)
 			else
 				BuildOptionsForTarget(self, targetType, targetKey)
 			end
