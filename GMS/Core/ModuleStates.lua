@@ -347,5 +347,13 @@ function GMS:ModuleStates_InstallAceModuleHooks()
 	end
 end
 
+-- Register self metadata after API functions exist.
+GMS:RegisterExtension({
+	key = METADATA.INTERN_NAME,
+	name = METADATA.SHORT_NAME,
+	displayName = METADATA.DISPLAY_NAME,
+	version = METADATA.VERSION,
+})
+
 GMS:SetReady("EXT:" .. METADATA.INTERN_NAME)
 LOCAL_LOG("INFO", "ModuleStates extension loaded", METADATA.VERSION)

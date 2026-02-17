@@ -717,28 +717,39 @@ local function BuildLogRow(entry, totalWidth)
 		local s = tostring(srcName or "")
 		if s == "" then return "-" end
 
-		local reg = nil
-		if GMS and GMS.REGISTRY then
-			if t == "EXT" then reg = GMS.REGISTRY.EXT end
-			if t == "MOD" then reg = GMS.REGISTRY.MOD end
-		end
-		if type(reg) ~= "table" then
+		local registry = (GMS and GMS.REGISTRY) or nil
+		if type(registry) ~= "table" then
 			return s
 		end
 
 		local su = s:upper()
-		for _, meta in pairs(reg) do
-			local key = tostring(meta.key or ""):upper()
-			local name = tostring(meta.name or ""):upper()
-			local short = tostring(meta.shortName or ""):upper()
-			local display = (type(GMS.ResolveRegistryDisplayName) == "function")
-				and tostring(GMS:ResolveRegistryDisplayName(meta, s))
-				or tostring(meta.displayName or "")
-			local displayU = display:upper()
-			if su == key or su == name or su == short or su == displayU then
-				return (display ~= "" and display) or s
+		local function MatchIn(reg)
+			if type(reg) ~= "table" then return nil end
+			for _, meta in pairs(reg) do
+				local key = tostring(meta.key or ""):upper()
+				local name = tostring(meta.name or ""):upper()
+				local short = tostring(meta.shortName or ""):upper()
+				local display = (type(GMS.ResolveRegistryDisplayName) == "function")
+					and tostring(GMS:ResolveRegistryDisplayName(meta, s))
+					or tostring(meta.displayName or "")
+				local displayU = display:upper()
+				if su == key or su == name or su == short or su == displayU then
+					return (display ~= "" and display) or s
+				end
 			end
+			return nil
 		end
+
+		if t == "EXT" then
+			local hit = MatchIn(registry.EXT)
+			if hit then return hit end
+		elseif t == "MOD" then
+			local hit = MatchIn(registry.MOD)
+			if hit then return hit end
+		end
+
+		local hit = MatchIn(registry.EXT) or MatchIn(registry.MOD)
+		if hit then return hit end
 		return s
 	end
 

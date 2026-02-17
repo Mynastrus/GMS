@@ -1,5 +1,9 @@
 # Release Rules
 
+## Global Project Rules (Mandatory)
+- Always read and follow `GMS_PROJECT_RULES.md` for every task in this repository.
+- If any instruction conflicts appears, treat `GMS_PROJECT_RULES.md` and this `AGENTS.md` as mandatory project policy and ask the user for clarification before proceeding.
+
 ## Command Gating (Mandatory)
 - `commit` only on explicit user command.
 - `release` only on explicit user command.
