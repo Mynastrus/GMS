@@ -33,6 +33,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] GuildLog-Initialanzeige korrigiert (`GMS/Modules/GuildLog.lua`: zuerst Sync, dann UI-Lesen).
 - [x] Raidnamen/BEST-Darstellung in `GMS/Modules/CharInfo.lua` korrigiert (keine reinen IDs mehr, BEST-Farbformat robust).
 - [x] Crash im Raid-Spinner behoben (`labelWidget` nil-guard in `GMS/Modules/CharInfo.lua`).
+- [x] Lua-Diagnostics in `GMS/Core/RaidIds.lua` und `GMS/Modules/Raids.lua` reduziert (safe `_G`-Zugriffe via `rawget/rawset`, `DevTools_Dump`-Guard, `dID`-Typfluss bereinigt).
 
 ### Rules/Infra
 - [x] Unreleased-Abschnitt nach Release `1.4.7` fuer die naechste Iteration zurueckgesetzt.

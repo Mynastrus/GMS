@@ -546,16 +546,16 @@ end
 local function RefreshEJApiBindings()
 	-- Rebind globals after Blizzard_EncounterJournal load; locals captured at file load
 	-- may still be nil otherwise.
-	C_EncounterJournal         = (_G and _G.C_EncounterJournal) or C_EncounterJournal
-	EJ_GetNumTiers             = (_G and _G.EJ_GetNumTiers) or EJ_GetNumTiers
-	EJ_SelectTier              = (_G and _G.EJ_SelectTier) or EJ_SelectTier
-	EJ_GetInstanceByIndex      = (_G and _G.EJ_GetInstanceByIndex) or EJ_GetInstanceByIndex
-	EJ_SelectInstance          = (_G and _G.EJ_SelectInstance) or EJ_SelectInstance
-	EJ_GetInstanceInfo         = (_G and _G.EJ_GetInstanceInfo) or EJ_GetInstanceInfo
-	EJ_GetNumEncounters        = (_G and _G.EJ_GetNumEncounters) or EJ_GetNumEncounters
-	EJ_GetEncounterInfoByIndex = (_G and _G.EJ_GetEncounterInfoByIndex) or EJ_GetEncounterInfoByIndex
-	EJ_GetTierInfo             = (_G and _G.EJ_GetTierInfo) or EJ_GetTierInfo
-	EJ_GetCurrentTier          = (_G and _G.EJ_GetCurrentTier) or EJ_GetCurrentTier
+	C_EncounterJournal         = rawget(_G, "C_EncounterJournal") or C_EncounterJournal
+	EJ_GetNumTiers             = rawget(_G, "EJ_GetNumTiers") or EJ_GetNumTiers
+	EJ_SelectTier              = rawget(_G, "EJ_SelectTier") or EJ_SelectTier
+	EJ_GetInstanceByIndex      = rawget(_G, "EJ_GetInstanceByIndex") or EJ_GetInstanceByIndex
+	EJ_SelectInstance          = rawget(_G, "EJ_SelectInstance") or EJ_SelectInstance
+	EJ_GetInstanceInfo         = rawget(_G, "EJ_GetInstanceInfo") or EJ_GetInstanceInfo
+	EJ_GetNumEncounters        = rawget(_G, "EJ_GetNumEncounters") or EJ_GetNumEncounters
+	EJ_GetEncounterInfoByIndex = rawget(_G, "EJ_GetEncounterInfoByIndex") or EJ_GetEncounterInfoByIndex
+	EJ_GetTierInfo             = rawget(_G, "EJ_GetTierInfo") or EJ_GetTierInfo
+	EJ_GetCurrentTier          = rawget(_G, "EJ_GetCurrentTier") or EJ_GetCurrentTier
 end
 
 local function ejApiPresent()
@@ -632,7 +632,7 @@ local function parseStatisticValueToNumber(raw)
 end
 
 local function GetRaidIdsMapByInstance()
-	local lib = _G and _G.GMS_RAIDIDS or nil
+	local lib = rawget(_G, "GMS_RAIDIDS")
 	local map = lib and lib.MAP_TO_BOSS_STATS or nil
 	if type(map) == "table" then
 		return map
@@ -641,7 +641,7 @@ local function GetRaidIdsMapByInstance()
 end
 
 local function GetRaidIdsDiffIndexToID()
-	local lib = _G and _G.GMS_RAIDIDS or nil
+	local lib = rawget(_G, "GMS_RAIDIDS")
 	local map = lib and lib.DIFF_INDEX_TO_ID or nil
 	if type(map) == "table" then
 		return map
@@ -1695,11 +1695,11 @@ function RAIDS:OnUpdateInstanceInfo()
 					killed = progress
 				end
 
-				local dID = tonumber(diffID) or diffID
-				if type(dID) ~= "number" then
+				local dID = tonumber(diffID)
+				if not dID then
 					local dn = string.lower(tostring(difficultyName or ""))
 					dID = parseDifficultyIDFromLowerText(dn)
-					if type(dID) ~= "number" then
+					if not dID then
 						-- API 12.x fallback: if diffID is missing, keep progress by assigning LFR bucket.
 						dID = 17
 					end

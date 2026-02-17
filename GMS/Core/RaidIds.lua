@@ -45,8 +45,11 @@ local function LOCAL_LOG(level, msg, ...)
 	end
 end
 
-local RAID_IDS = _G.GMS_RAIDIDS or {}
-_G.GMS_RAIDIDS = RAID_IDS
+local RAID_IDS = rawget(_G, "GMS_RAIDIDS")
+if type(RAID_IDS) ~= "table" then
+	RAID_IDS = {}
+	rawset(_G, "GMS_RAIDIDS", RAID_IDS)
+end
 
 RAID_IDS.VERSION = METADATA.VERSION
 
@@ -183,15 +186,16 @@ function RAID_IDS:Validate()
 	return report
 end
 
-function _G.GMS_RAIDIDS_VALIDATE_DUMP()
-	local lib = _G.GMS_RAIDIDS
+rawset(_G, "GMS_RAIDIDS_VALIDATE_DUMP", function()
+	local lib = rawget(_G, "GMS_RAIDIDS")
 	if type(lib) ~= "table" or type(lib.Validate) ~= "function" then
 		print("GMS_RAIDIDS unavailable")
 		return
 	end
 	local report = lib:Validate()
-	if type(_G.DevTools_Dump) == "function" then
-		_G.DevTools_Dump(report)
+	local devDump = rawget(_G, "DevTools_Dump")
+	if type(devDump) == "function" then
+		devDump(report)
 		return
 	end
 	print("GMS_RAIDIDS ok=" .. tostring(report.ok))
@@ -200,7 +204,7 @@ function _G.GMS_RAIDIDS_VALIDATE_DUMP()
 	print("invalid_rows=" .. tostring(#report.invalid_rows))
 	print("invalid_ids=" .. tostring(#report.invalid_ids))
 	print("duplicate_stat_ids=" .. tostring(#report.duplicate_stat_ids))
-end
+end)
 
 LOCAL_LOG("INFO", "RaidIds extension loaded", METADATA.VERSION)
 GMS:SetReady("EXT:" .. METADATA.INTERN_NAME)
