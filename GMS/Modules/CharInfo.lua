@@ -157,7 +157,7 @@ local OPTIONS_DEFAULTS = {
 }
 
 -- Icon: nimm einen, der bei dir existiert (du kannst ihn per /run testen)
-local ICON = "Interface\\Icons\\INV_Misc_Head_Human_01"
+local ICON = "Interface\\Icons\\Achievement_character_human_male"
 
 -- ###########################################################################
 -- #	HELPERS (style aligned)
@@ -2622,7 +2622,8 @@ function CHARINFO:TryRegisterDockIcon()
 		selectable = true,
 		icon = ICON,
 		tooltipTitle = DISPLAY_NAME,
-		tooltipText = "Ã–ffnet die Charakter-Info",
+		tooltipTitleKey = "NAME_CHARINFO",
+		tooltipText = LT("CHARINFO_DOCK_TOOLTIP", "Opens character info"),
 		onClick = function()
 			local u = UIRef()
 			if u and type(u.Open) == "function" then

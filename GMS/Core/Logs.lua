@@ -731,7 +731,9 @@ local function BuildLogRow(entry, totalWidth)
 			local key = tostring(meta.key or ""):upper()
 			local name = tostring(meta.name or ""):upper()
 			local short = tostring(meta.shortName or ""):upper()
-			local display = tostring(meta.displayName or "")
+			local display = (type(GMS.ResolveRegistryDisplayName) == "function")
+				and tostring(GMS:ResolveRegistryDisplayName(meta, s))
+				or tostring(meta.displayName or "")
 			local displayU = display:upper()
 			if su == key or su == name or su == short or su == displayU then
 				return (display ~= "" and display) or s
@@ -1071,7 +1073,8 @@ local function RegisterLogsSlash()
 		GMS:Slash_RegisterSubCommand("logs", function()
 			UI_Open("LOGS")
 		end, {
-			help = (type(GMS.T) == "function" and GMS:T("LOGS_SLASH_HELP")) or "/gms logs - opens the logs UI",
+			helpKey = "LOGS_SLASH_HELP",
+			helpFallback = "/gms logs - opens the logs UI",
 			alias = { "log" },
 			owner = "LOGS",
 		})
@@ -1087,7 +1090,7 @@ local function RegisterLogsSlash()
 	if type(SC.RegisterSubCommand) == "function" then
 		SC:RegisterSubCommand("logs", {
 			title = "Logs",
-			help = (type(GMS.T) == "function" and GMS:T("LOGS_SLASH_HELP")) or "/gms logs - opens the logs UI",
+			help = "/gms logs - opens the logs UI",
 			handler = function() UI_Open("LOGS") end,
 		})
 		LOGS._slashRegistered = true

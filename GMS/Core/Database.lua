@@ -564,7 +564,8 @@ local function RegisterDatabaseSlashCommand()
 	GMS:Slash_RegisterSubCommand("dbwipe", function()
 		GMS:Database_ResetAll()
 	end, {
-		help = "/gms dbwipe - hard reset all GMS saved variables and reload UI",
+		helpKey = "DB_SLASH_WIPE_HELP",
+		helpFallback = "/gms dbwipe - hard reset all GMS saved variables and reload UI",
 		alias = { "dbreset", "resetdb", "wipe" },
 		owner = "DB",
 	})

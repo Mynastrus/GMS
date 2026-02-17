@@ -304,7 +304,7 @@ local function MergeEntries(runtimeEntries, scopedEntries, maxEntries)
 
 	table.sort(merged, function(a, b)
 		return (tonumber(a.ts) or 0) < (tonumber(b.ts) or 0)
-	end)
+	end, "GA_PAGE_TITLE")
 
 	local limit = ClampMaxEntries(maxEntries)
 	while #merged > limit do
@@ -583,6 +583,61 @@ local function PushEntry(kind, msg, data)
 			GuildLog._ui.render()
 		end
 	end
+end
+
+local function BuildLocalizedEntryMessage(entry)
+	if type(entry) ~= "table" then
+		return ""
+	end
+	local kind = tostring(entry.kind or "")
+	local data = type(entry.data) == "table" and entry.data or {}
+	local fallback = tostring(entry.msg or "")
+	local guessedName = fallback:match("^([^ ]+)")
+
+	if kind == "JOIN" then
+		return T("GA_JOIN", "%s joined the guild.", tostring(data.name or guessedName or "?"))
+	elseif kind == "REJOIN" then
+		return T("GA_REJOIN", "%s rejoined the guild.", tostring(data.name or guessedName or "?"))
+	elseif kind == "LEAVE" then
+		return T("GA_LEAVE", "%s left the guild.", tostring(data.name or guessedName or "?"))
+	elseif kind == "PROMOTE" then
+		if data.oldRank == nil or data.newRank == nil then return fallback end
+		return T("GA_PROMOTE", "%s promoted (%s -> %s).", tostring(data.name or guessedName or "?"), tostring(data.oldRank or "-"), tostring(data.newRank or "-"))
+	elseif kind == "DEMOTE" then
+		if data.oldRank == nil or data.newRank == nil then return fallback end
+		return T("GA_DEMOTE", "%s demoted (%s -> %s).", tostring(data.name or guessedName or "?"), tostring(data.oldRank or "-"), tostring(data.newRank or "-"))
+	elseif kind == "NAME_CHANGE" then
+		return T("GA_NAME_CHANGED", "%s changed character name to %s.", tostring(data.oldName or "?"), tostring(data.newName or "?"))
+	elseif kind == "REALM_CHANGE" then
+		return T("GA_REALM_CHANGED", "%s changed realm from %s to %s.", tostring(data.name or "?"), tostring(data.oldRealm or "-"), tostring(data.newRealm or "-"))
+	elseif kind == "FACTION_CHANGE" then
+		return T("GA_FACTION_CHANGED", "%s changed faction from %s to %s.", tostring(data.name or "?"), tostring(data.oldFaction or "-"), tostring(data.newFaction or "-"))
+	elseif kind == "RACE_CHANGE" then
+		return T("GA_RACE_CHANGED", "%s changed race from %s to %s.", tostring(data.name or "?"), tostring(data.oldRace or "-"), tostring(data.newRace or "-"))
+	elseif kind == "LEVEL_CHANGE" then
+		return T("GA_LEVEL_CHANGED", "%s changed level from %d to %d.", tostring(data.name or "?"), tonumber(data.oldLevel) or 0, tonumber(data.newLevel) or 0)
+	elseif kind == "ONLINE" then
+		return T("GA_ONLINE", "%s is now online.", tostring(data.name or guessedName or "?"))
+	elseif kind == "OFFLINE" then
+		return T("GA_OFFLINE", "%s went offline.", tostring(data.name or guessedName or "?"))
+	elseif kind == "NOTE" then
+		if data.oldNote ~= nil and data.newNote ~= nil then
+			return T("GA_NOTE_CHANGED_DETAIL", "%s updated public note (%s -> %s).", tostring(data.name or guessedName or "?"), tostring(data.oldNote or "-"), tostring(data.newNote or "-"))
+		end
+		return fallback
+	elseif kind == "OFFICER_NOTE" then
+		if data.oldOfficerNote ~= nil and data.newOfficerNote ~= nil then
+			return T("GA_OFFICER_NOTE_CHANGED_DETAIL", "%s updated officer note (%s -> %s).", tostring(data.name or guessedName or "?"), tostring(data.oldOfficerNote or "-"), tostring(data.newOfficerNote or "-"))
+		end
+		return fallback
+	elseif kind == "BASELINE" then
+		local members = tonumber(data.members) or tonumber((fallback:match("(%d+)"))) or 0
+		return T("GA_BASELINE", "Initial guild snapshot captured (%d members).", members)
+	elseif kind == "HISTORY" then
+		return T("GA_HISTORY_SUMMARY_FMT", "%s | joins:%d leaves:%d rejoins:%d", tostring(data.name or "?"), tonumber(data.joinCount) or 0, tonumber(data.leftCount) or 0, tonumber(data.rejoinCount) or 0)
+	end
+
+	return fallback
 end
 
 local function BuildEventSignature(kind, msg, data)
@@ -924,11 +979,13 @@ local function DiffRosterAndLog(prev, curr)
 			if isRejoin then
 				QueueEvent("REJOIN", T("GA_REJOIN", "%s rejoined the guild.", tostring(newM.name or newKey)), {
 					guid = newKey,
+					name = newM.nameShort or newM.name,
 					history = history,
 				})
 			else
 				QueueEvent("JOIN", T("GA_JOIN", "%s joined the guild.", tostring(newM.name or newKey)), {
 					guid = newKey,
+					name = newM.nameShort or newM.name,
 					history = history,
 				})
 			end
@@ -1004,16 +1061,32 @@ local function DiffRosterAndLog(prev, curr)
 			end
 			if oldM.rankIndex ~= newM.rankIndex then
 				if newM.rankIndex < oldM.rankIndex then
-					QueueEvent("PROMOTE", T("GA_PROMOTE", "%s promoted (%s -> %s).", tostring(newM.name or newKey), tostring(oldM.rank or oldM.rankIndex), tostring(newM.rank or newM.rankIndex)))
+					QueueEvent("PROMOTE", T("GA_PROMOTE", "%s promoted (%s -> %s).", tostring(newM.name or newKey), tostring(oldM.rank or oldM.rankIndex), tostring(newM.rank or newM.rankIndex)), {
+						guid = newKey,
+						name = newM.nameShort or newM.name,
+						oldRank = tostring(oldM.rank or oldM.rankIndex),
+						newRank = tostring(newM.rank or newM.rankIndex),
+					})
 				else
-					QueueEvent("DEMOTE", T("GA_DEMOTE", "%s demoted (%s -> %s).", tostring(newM.name or newKey), tostring(oldM.rank or oldM.rankIndex), tostring(newM.rank or newM.rankIndex)))
+					QueueEvent("DEMOTE", T("GA_DEMOTE", "%s demoted (%s -> %s).", tostring(newM.name or newKey), tostring(oldM.rank or oldM.rankIndex), tostring(newM.rank or newM.rankIndex)), {
+						guid = newKey,
+						name = newM.nameShort or newM.name,
+						oldRank = tostring(oldM.rank or oldM.rankIndex),
+						newRank = tostring(newM.rank or newM.rankIndex),
+					})
 				end
 			end
 			if oldM.online ~= newM.online then
 				if newM.online then
-					QueueEvent("ONLINE", T("GA_ONLINE", "%s is now online.", tostring(newM.name or newKey)))
+					QueueEvent("ONLINE", T("GA_ONLINE", "%s is now online.", tostring(newM.name or newKey)), {
+						guid = newKey,
+						name = newM.nameShort or newM.name,
+					})
 				else
-					QueueEvent("OFFLINE", T("GA_OFFLINE", "%s went offline.", tostring(newM.name or newKey)))
+					QueueEvent("OFFLINE", T("GA_OFFLINE", "%s went offline.", tostring(newM.name or newKey)), {
+						guid = newKey,
+						name = newM.nameShort or newM.name,
+					})
 				end
 			end
 			if oldM.note ~= newM.note then
@@ -1023,7 +1096,12 @@ local function DiffRosterAndLog(prev, curr)
 					tostring(newM.name or newKey),
 					tostring(oldM.note or "-"),
 					tostring(newM.note or "-")
-				))
+				), {
+					guid = newKey,
+					name = newM.nameShort or newM.name,
+					oldNote = tostring(oldM.note or "-"),
+					newNote = tostring(newM.note or "-"),
+				})
 			end
 			if oldM.officerNote ~= newM.officerNote then
 				QueueEvent("OFFICER_NOTE", T(
@@ -1032,7 +1110,12 @@ local function DiffRosterAndLog(prev, curr)
 					tostring(newM.name or newKey),
 					tostring(oldM.officerNote or "-"),
 					tostring(newM.officerNote or "-")
-				))
+				), {
+					guid = newKey,
+					name = newM.nameShort or newM.name,
+					oldOfficerNote = tostring(oldM.officerNote or "-"),
+					newOfficerNote = tostring(newM.officerNote or "-"),
+				})
 			end
 		end
 	end
@@ -1042,6 +1125,7 @@ local function DiffRosterAndLog(prev, curr)
 			local history = MarkLeave(oldKey, oldM.name)
 			QueueEvent("LEAVE", T("GA_LEAVE", "%s left the guild.", tostring(oldM.name or oldKey)), {
 				guid = oldKey,
+				name = oldM.nameShort or oldM.name,
 				history = history,
 			})
 		end
@@ -1067,7 +1151,8 @@ function GuildLog:ScanGuildChanges()
 			self._baselineLogged = true
 			local entries = Entries() or {}
 			if #entries == 0 then
-				PushEntry("BASELINE", T("GA_BASELINE", "Initial guild snapshot captured (%d members).", tonumber(GetNumGuildMembers and GetNumGuildMembers() or 0)))
+				local memberCount = tonumber(GetNumGuildMembers and GetNumGuildMembers() or 0) or 0
+				PushEntry("BASELINE", T("GA_BASELINE", "Initial guild snapshot captured (%d members).", memberCount), { members = memberCount })
 			end
 		end
 		LOCAL_LOG("DEBUG", "GuildLog baseline snapshot initialized", tostring(#(Entries() or {})))
@@ -1270,7 +1355,13 @@ local function RegisterPage()
 							ts = firstTs,
 							time = tostring(h.firstTrackedTime or "-"),
 							kind = "HISTORY",
-							msg = string.format("%s | joins:%d leaves:%d rejoins:%d", name, joinCount, leftCount, rejoinCount),
+							msg = T("GA_HISTORY_SUMMARY_FMT", "%s | joins:%d leaves:%d rejoins:%d", name, joinCount, leftCount, rejoinCount),
+							data = {
+								name = name,
+								joinCount = joinCount,
+								leftCount = leftCount,
+								rejoinCount = rejoinCount,
+							},
 						}
 					end
 				end
@@ -1314,7 +1405,7 @@ local function RegisterPage()
 
 					local msg = AceGUI:Create("Label")
 					msg:SetWidth(760)
-					msg:SetText("|cffffffff" .. tostring(e.msg or "") .. "|r")
+					msg:SetText("|cffffffff" .. BuildLocalizedEntryMessage(e) .. "|r")
 					row:AddChild(msg)
 
 					scroller:AddChild(row)
@@ -1349,9 +1440,11 @@ local function RegisterDock()
 		id = MODULE_NAME,
 		order = 70,
 		selectable = true,
-		icon = "Interface\\Icons\\Achievement_Guildperk_EverybodysFriend",
+		icon = "Interface\\Icons\\INV_Misc_Book_09",
 		tooltipTitle = T("GA_PAGE_TITLE", "Guild Activity"),
+		tooltipTitleKey = "GA_PAGE_TITLE",
 		tooltipText = T("GA_DOCK_TOOLTIP", "Open guild activity log"),
+		tooltipTextKey = "GA_DOCK_TOOLTIP",
 		onClick = function()
 			if GMS.UI and type(GMS.UI.Open) == "function" then
 				GMS.UI:Open(MODULE_NAME)
@@ -1370,7 +1463,8 @@ local function RegisterSlash()
 			GMS.UI:Open(MODULE_NAME)
 		end
 	end, {
-		help = T("GA_SLASH_HELP", "/gms guildlog - opens guild activity log"),
+		helpKey = "GA_SLASH_HELP",
+		helpFallback = "/gms guildlog - opens guild activity log",
 		alias = { "glog" },
 		owner = MODULE_NAME,
 	})
@@ -1414,6 +1508,18 @@ function GuildLog:OnEnable()
 		end)
 		GMS:OnReady("EXT:SLASH", function()
 			RegisterSlash()
+		end)
+	end
+
+	if type(self.RegisterMessage) == "function" then
+		self:RegisterMessage("GMS_LOCALE_CHANGED", function()
+			GuildLog._pageRegistered = false
+			RegisterPage()
+			GuildLog._dockRegistered = false
+			RegisterDock()
+			if GuildLog._ui and type(GuildLog._ui.render) == "function" then
+				GuildLog._ui.render()
+			end
 		end)
 	end
 

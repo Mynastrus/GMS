@@ -358,7 +358,8 @@ local function RegisterRaidsSlash()
 			GMS:Print(TR("RAIDS_SLASH_USAGE", "Usage: /gms raids scan"))
 		end
 	end, {
-		help = TR("RAIDS_SLASH_HELP", "/gms raids scan - trigger a raid lockout scan now"),
+		helpKey = "RAIDS_SLASH_HELP",
+		helpFallback = "/gms raids scan - trigger a raid lockout scan now",
 	})
 
 	RAIDS._slashRegistered = true

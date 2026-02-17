@@ -74,6 +74,42 @@ local function normExtKey(k)
 	return k:upper()
 end
 
+local function buildDisplayNameKey(meta)
+	if type(meta) ~= "table" then
+		return nil
+	end
+	local explicit = meta.DISPLAY_NAME_KEY or meta.displayNameKey
+	if type(explicit) == "string" and explicit ~= "" then
+		return explicit
+	end
+	local intern = meta.INTERN_NAME or meta.internName or meta.key or meta.name
+	intern = tostring(intern or ""):gsub("[^%w]+", "_"):upper()
+	if intern == "" then
+		return nil
+	end
+	return "NAME_" .. intern
+end
+
+function GMS:ResolveDisplayName(displayNameKey, fallback)
+	local key = tostring(displayNameKey or "")
+	if key ~= "" and type(self.T) == "function" then
+		local ok, text = pcall(self.T, self, key)
+		if ok and type(text) == "string" and text ~= "" and text ~= key then
+			return text
+		end
+	end
+	return tostring(fallback or "")
+end
+
+function GMS:ResolveRegistryDisplayName(entry, fallback)
+	if type(entry) ~= "table" then
+		return tostring(fallback or "")
+	end
+	local rawFallback = entry.displayName or entry.name or entry.key or fallback or ""
+	local key = entry.displayNameKey
+	return self:ResolveDisplayName(key, rawFallback)
+end
+
 -- Local-only logger for this file (project standard)
 local function LOCAL_LOG(level, msg, ...)
 	local entry = {
@@ -159,7 +195,8 @@ function GMS:RegisterExtension(meta)
 	entry.key = key
 	entry.name = (meta and (meta.NAME or meta.name)) or key
 	entry.shortName = (meta and (meta.SHORT_NAME or meta.shortName)) or entry.shortName
-	entry.displayName = (meta and (meta.DISPLAY_NAME or meta.displayName)) or entry.name
+	entry.displayNameKey = buildDisplayNameKey(meta) or entry.displayNameKey
+	entry.displayName = GMS:ResolveDisplayName(entry.displayNameKey, (meta and (meta.DISPLAY_NAME or meta.displayName)) or entry.name)
 	entry.version = (meta and (meta.VERSION or meta.version)) or entry.version or "1.0.0"
 	entry.desc = meta.DESC or meta.desc
 	entry.author = meta.AUTHOR or meta.author
@@ -180,7 +217,8 @@ function GMS:RegisterModule(mod, meta)
 	entry.key = key
 	entry.name = (meta and (meta.NAME or meta.name)) or key
 	entry.shortName = (meta and (meta.SHORT_NAME or meta.shortName)) or entry.shortName
-	entry.displayName = (meta and (meta.DISPLAY_NAME or meta.displayName)) or entry.name
+	entry.displayNameKey = buildDisplayNameKey(meta) or entry.displayNameKey
+	entry.displayName = GMS:ResolveDisplayName(entry.displayNameKey, (meta and (meta.DISPLAY_NAME or meta.displayName)) or entry.name)
 	entry.version = (meta and (meta.VERSION or meta.version)) or entry.version or "1.0.0"
 	entry.desc = meta and (meta.DESC or meta.desc)
 	entry.author = meta and (meta.AUTHOR or meta.author)

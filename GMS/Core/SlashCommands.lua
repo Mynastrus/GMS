@@ -105,7 +105,9 @@ GMS.SlashCommands = GMS.SlashCommands or {}
 local SlashCommands = GMS.SlashCommands
 
 local EXT_NAME = METADATA.INTERN_NAME
-local DISPLAY_NAME = (type(GMS.T) == "function" and GMS:T("SLASH_DISPLAY_NAME")) or "Chateingabe"
+local function GetDisplayName()
+	return (type(GMS.T) == "function" and GMS:T("SLASH_DISPLAY_NAME")) or "Chat Input"
+end
 
 SlashCommands.SUBCOMMAND_REGISTRY = SlashCommands.SUBCOMMAND_REGISTRY or {}
 SlashCommands.PRIMARY_COMMAND = SlashCommands.PRIMARY_COMMAND or "gms"
@@ -185,11 +187,20 @@ local function PrintGmsHelp(registry, header)
 
 	for _, key in ipairs(keys) do
 		local e = registry[key]
-		if e.help and e.help ~= "" then
+		local helpText = tostring(e.help or "")
+		if e.helpKey and type(GMS.T) == "function" then
+			local translated = GMS:T(tostring(e.helpKey))
+			if type(translated) == "string" and translated ~= "" and translated ~= tostring(e.helpKey) then
+				helpText = translated
+			elseif e.helpFallback and e.helpFallback ~= "" then
+				helpText = tostring(e.helpFallback)
+			end
+		end
+		if helpText ~= "" then
 			if type(GMS.Printf) == "function" then
-				GMS:Printf(" - %s: %s", key, e.help)
+				GMS:Printf(" - %s: %s", key, helpText)
 			else
-				GMS:Print((" - %s: %s"):format(key, e.help))
+				GMS:Print((" - %s: %s"):format(key, helpText))
 			end
 		else
 			GMS:Print(" - " .. key)
@@ -221,13 +232,13 @@ local function HandleGmsSlashCommandInput(input)
 	end
 
 	if sub == "help" or sub == "?" then
-		return PrintGmsHelp(SlashCommands.SUBCOMMAND_REGISTRY, DISPLAY_NAME)
+		return PrintGmsHelp(SlashCommands.SUBCOMMAND_REGISTRY, GetDisplayName())
 	end
 
 	local entry = FindSubCommandEntry(SlashCommands.SUBCOMMAND_REGISTRY, sub)
 	if not entry or type(entry.handlerFn) ~= "function" then
-		local unknown = (type(GMS.T) == "function" and GMS:T("SLASH_UNKNOWN_SUBCOMMAND", tostring(sub))) or ("Unknown subcommand: " .. tostring(sub))
-		return PrintGmsHelp(SlashCommands.SUBCOMMAND_REGISTRY, unknown)
+	local unknown = (type(GMS.T) == "function" and GMS:T("SLASH_UNKNOWN_SUBCOMMAND", tostring(sub))) or ("Unknown subcommand: " .. tostring(sub))
+	return PrintGmsHelp(SlashCommands.SUBCOMMAND_REGISTRY, unknown)
 	end
 
 	local ok, err = pcall(entry.handlerFn, args)
@@ -252,6 +263,8 @@ function GMS:Slash_RegisterSubCommand(key, handlerFn, opts)
 		key = norm,
 		handlerFn = handlerFn,
 		help = tostring(opts.help or ""),
+		helpKey = tostring(opts.helpKey or ""),
+		helpFallback = tostring(opts.helpFallback or ""),
 		alias = opts.alias,
 		owner = tostring(opts.owner or ""),
 	}
@@ -271,7 +284,7 @@ function GMS:Slash_UnregisterSubCommand(key)
 end
 
 function GMS:Slash_PrintHelp()
-	PrintGmsHelp(SlashCommands.SUBCOMMAND_REGISTRY, DISPLAY_NAME)
+	PrintGmsHelp(SlashCommands.SUBCOMMAND_REGISTRY, GetDisplayName())
 end
 
 function GMS:SlashCommand(input)
@@ -293,7 +306,8 @@ if not SlashCommands._defaultsLoaded then
 	GMS:Slash_RegisterSubCommand("reload", function()
 		if ReloadUI then ReloadUI() end
 	end, {
-		help = (type(GMS.T) == "function" and GMS:T("SLASH_HELP_RELOAD")) or "Laedt die UI neu.",
+		helpKey = "SLASH_HELP_RELOAD",
+		helpFallback = "Reloads the UI.",
 		alias = { "rl" },
 		owner = EXT_NAME,
 	})

@@ -1813,6 +1813,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 	Roster:API_RegisterRosterColumnDefinition({
 		id = "level",
 		title = "Lvl",
+		titleKey = "ROSTER_COL_LEVEL",
 		width = 24,
 		order = 15,
 		sortable = true,
@@ -1823,6 +1824,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 	Roster:API_RegisterRosterColumnDefinition({
 		id = "name",
 		title = "Name",
+		titleKey = "ROSTER_COL_NAME",
 		width = 125,
 		order = 20,
 		sortable = true,
@@ -1833,6 +1835,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 	Roster:API_RegisterRosterColumnDefinition({
 		id = "realm",
 		title = "Realm",
+		titleKey = "ROSTER_COL_REALM",
 		width = 90,
 		order = 30,
 		sortable = true,
@@ -1842,7 +1845,8 @@ local function EnsureDefaultRosterColumnsRegistered()
 
 	Roster:API_RegisterRosterColumnDefinition({
 		id = "lastOnline",
-		title = "Zuletzt online",
+		title = "Last online",
+		titleKey = "ROSTER_COL_LAST_ONLINE",
 		width = 80,
 		order = 40,
 		sortable = true,
@@ -1853,6 +1857,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 	Roster:API_RegisterRosterColumnDefinition({
 		id = "ilvl",
 		title = "iLvl",
+		titleKey = "ROSTER_COL_ILVL",
 		width = 45,
 		order = 50,
 		sortable = true,
@@ -1863,6 +1868,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 	Roster:API_RegisterRosterColumnDefinition({
 		id = "mplus",
 		title = "M+",
+		titleKey = "ROSTER_COL_MPLUS",
 		width = 45,
 		order = 60,
 		sortable = true,
@@ -1873,6 +1879,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 	Roster:API_RegisterRosterColumnDefinition({
 		id = "raidStatus",
 		title = "Raid",
+		titleKey = "ROSTER_COL_RAID",
 		width = 70,
 		order = 70,
 		sortable = true,
@@ -1883,6 +1890,7 @@ local function EnsureDefaultRosterColumnsRegistered()
 	Roster:API_RegisterRosterColumnDefinition({
 		id = "gmsVersion",
 		title = "GMS",
+		titleKey = "ROSTER_COL_GMS",
 		width = 60,
 		order = 80,
 		sortable = true,
@@ -1924,6 +1932,12 @@ local function BuildRosterHeaderRow(parent, rebuildFn)
 		local def = Roster._columns.map[colId]
 		if def then
 			local title = tostring(def.title or colId)
+			if type(def.titleKey) == "string" and def.titleKey ~= "" and type(GMS.T) == "function" then
+				local localized = tostring(GMS:T(def.titleKey))
+				if localized ~= "" and localized ~= def.titleKey then
+					title = localized
+				end
+			end
 			local w = tonumber(def.width) or 80
 
 			if def.sortable == true and type(def.sortKey) == "string" and def.sortKey ~= "" then

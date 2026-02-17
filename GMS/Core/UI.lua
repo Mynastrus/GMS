@@ -1035,7 +1035,8 @@ function UI:RegisterUiSlashCommandIfAvailable()
 		rest = TRIM(rest)
 		UI:Open((rest ~= "" and rest) or nil)
 	end, {
-		help = (type(GMS.T) == "function" and GMS:T("UI_CMD_OPEN_HELP")) or "Opens the GMS UI (/gms ui [page])",
+		helpKey = "UI_CMD_OPEN_HELP",
+		helpFallback = "Opens the GMS UI (/gms ui [page])",
 		alias = { "open" },
 		owner = EXT_NAME,
 	})

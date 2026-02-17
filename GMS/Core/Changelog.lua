@@ -752,11 +752,31 @@ local function EnsureOptions()
 end
 
 local function ResolveLanguageMode()
-	local locale = tostring((GetLocale and GetLocale()) or "")
+	local locale = ""
+	if type(GMS.GetLanguage) == "function" then
+		locale = tostring(GMS:GetLanguage() or "")
+	elseif type(GetLocale) == "function" then
+		locale = tostring(GetLocale() or "")
+	end
+
 	if locale == "deDE" then
 		return "DE"
 	end
 	return "EN"
+end
+
+local function IsEnglishFallbackActive()
+	local locale = ""
+	if type(GMS.GetLanguage) == "function" then
+		locale = tostring(GMS:GetLanguage() or "")
+	elseif type(GetLocale) == "function" then
+		locale = tostring(GetLocale() or "")
+	end
+
+	if locale == "deDE" or locale == "enUS" or locale == "enGB" then
+		return false
+	end
+	return true
 end
 
 local function FormatDateByLanguage(isoDate, languageMode)
@@ -866,6 +886,18 @@ local function RenderNotes(lines)
 	return table.concat(out, "\n")
 end
 
+local function SplitFirstSentence(text)
+	local t = tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	if t == "" then
+		return "", ""
+	end
+	local first, rest = t:match("^(.-%.)(%s+.+)$")
+	if first then
+		return first, rest:gsub("^%s+", "")
+	end
+	return t, ""
+end
+
 local function BuildReleaseBlock(parent, release, isNew)
 	local mode = ResolveLanguageMode()
 	local formattedDate = FormatDateByLanguage(release.date, mode)
@@ -921,6 +953,32 @@ local function BuildChangelogPage(root, id, isCached)
 	scroll:SetFullHeight(true)
 	root:AddChild(scroll)
 
+	if IsEnglishFallbackActive() then
+		local fallbackText = CT(
+			"CHANGELOG_FALLBACK_NOTICE",
+			"Language fallback: This changelog is currently shown in English. Sorry, but providing release notes in all languages would be too much effort right now, so only English and German are available."
+		)
+		local firstSentence, restText = SplitFirstSentence(fallbackText)
+
+		local fallbackGroup = AceGUI:Create("InlineGroup")
+		fallbackGroup:SetTitle("")
+		fallbackGroup:SetFullWidth(true)
+		fallbackGroup:SetLayout("Flow")
+		scroll:AddChild(fallbackGroup)
+
+		local fallbackHeading = AceGUI:Create("Label")
+		fallbackHeading:SetFullWidth(true)
+		fallbackHeading:SetText("|cff03A9F4" .. firstSentence .. "|r")
+		fallbackGroup:AddChild(fallbackHeading)
+
+		if restText ~= "" then
+			local fallbackNotice = AceGUI:Create("Label")
+			fallbackNotice:SetFullWidth(true)
+			fallbackNotice:SetText(restText)
+			fallbackGroup:AddChild(fallbackNotice)
+		end
+	end
+
 	for i = 1, #RELEASES do
 		local release = RELEASES[i]
 		local isNew = IsReleaseNewForSeenVersion(release.version, seenBeforeOpen)
@@ -966,7 +1024,8 @@ local function RegisterSlash()
 			GMS.UI:Open(METADATA.INTERN_NAME)
 		end
 	end, {
-		help = "Opens release notes (/gms changelog)",
+		helpKey = "CHANGELOG_SLASH_HELP",
+		helpFallback = "/gms changelog - opens release notes",
 		alias = { "notes", "releases" },
 		owner = METADATA.INTERN_NAME,
 	})

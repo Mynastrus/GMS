@@ -242,6 +242,7 @@ function Permissions:Initialize()
 		self._eventFrame:SetScript("OnEvent", function(f, event)
 			-- Always check GM status on guild events
 			self:AutoAssignGM()
+			self:TryRegisterUI()
 
 			-- Refresh UI with throttling
 			if GMS.UI and GMS.UI._page == "PERMISSIONS" and self._container then
@@ -279,20 +280,33 @@ function Permissions:TryRegisterUI()
 	-- 1. Register Page
 	GMS.UI:RegisterPage("PERMISSIONS", 100, METADATA.DISPLAY_NAME, function(...) self:BuildUI(...) end)
 
-	-- 2. Register Dock Icon
+	local canManage = self:IsAuthorized()
+	if not canManage then
+		if type(GMS.UI.SetRightDockIconHidden) == "function" then
+			GMS.UI:SetRightDockIconHidden("PERMISSIONS", true)
+		end
+		return true
+	end
+
+	-- 2. Register/Show Dock Icon (authorized only)
 	GMS.UI:AddRightDockIconTop({
-		id           = "PERMISSIONS",
-		order        = 90, -- Kurz vor Settings
-		selectable   = true,
-		icon         = "Interface\\Icons\\INV_Misc_Key_04",
-		tooltipTitle = METADATA.DISPLAY_NAME,
-		tooltipText  = "Verwalte Gruppen und Berechtigungen",
-		onClick      = function()
+		id              = "PERMISSIONS",
+		order           = 90, -- Kurz vor Settings
+		selectable      = true,
+		icon            = "Interface\\Icons\\INV_Misc_Key_04",
+		tooltipTitle    = METADATA.DISPLAY_NAME,
+		tooltipTitleKey = "NAME_PERMISSIONS",
+		tooltipText     = PT("PERM_DOCK_TOOLTIP", "Manage groups and permissions"),
+		tooltipTextKey  = "PERM_DOCK_TOOLTIP",
+		onClick         = function()
 			if GMS.UI and type(GMS.UI.Navigate) == "function" then
 				GMS.UI:Navigate("PERMISSIONS")
 			end
 		end,
 	})
+	if type(GMS.UI.SetRightDockIconHidden) == "function" then
+		GMS.UI:SetRightDockIconHidden("PERMISSIONS", false)
+	end
 	return true
 end
 

@@ -84,6 +84,16 @@ local function ST(key, fallback, ...)
 	return tostring(fallback or key)
 end
 
+local function ResolveMetaName(entry, fallback)
+	if type(GMS.ResolveRegistryDisplayName) == "function" then
+		return GMS:ResolveRegistryDisplayName(entry, fallback)
+	end
+	if type(entry) == "table" then
+		return tostring(entry.displayName or entry.name or entry.key or fallback or "")
+	end
+	return tostring(fallback or "")
+end
+
 -- ###########################################################################
 -- #	EXTENSION REGISTRATION
 -- ###########################################################################
@@ -137,11 +147,11 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 
 	if targetType == "EXT" then
 		if GMS.REGISTRY and GMS.REGISTRY.EXT and GMS.REGISTRY.EXT[targetKey] then
-			displayName = GMS.REGISTRY.EXT[targetKey].displayName or GMS.REGISTRY.EXT[targetKey].name or targetKey
+			displayName = ResolveMetaName(GMS.REGISTRY.EXT[targetKey], targetKey)
 		end
 	elseif targetType == "MOD" then
 		if GMS.REGISTRY and GMS.REGISTRY.MOD and GMS.REGISTRY.MOD[targetKey] then
-			displayName = GMS.REGISTRY.MOD[targetKey].displayName or GMS.REGISTRY.MOD[targetKey].name or targetKey
+			displayName = ResolveMetaName(GMS.REGISTRY.MOD[targetKey], targetKey)
 		end
 	elseif targetType == "GEN" then
 		displayName = ST("SETTINGS_CORE_TITLE", "Core addon settings")
@@ -265,7 +275,7 @@ local function BuildDashboardStartPage(container)
 			row:SetLayout("Flow")
 
 			local lblName = AceGUI:Create("Label")
-			lblName:SetText("- |cff03A9F4" .. tostring(e.displayName or e.key or k) .. "|r")
+			lblName:SetText("- |cff03A9F4" .. ResolveMetaName(e, k) .. "|r")
 			lblName:SetWidth(240)
 			row:AddChild(lblName)
 
@@ -300,7 +310,7 @@ local function BuildDashboardStartPage(container)
 			row:SetLayout("Flow")
 
 			local lblName = AceGUI:Create("Label")
-			lblName:SetText("- |cffffcc00" .. tostring(m.displayName or m.key or k) .. "|r")
+			lblName:SetText("- |cffffcc00" .. ResolveMetaName(m, k) .. "|r")
 			lblName:SetWidth(240)
 			row:AddChild(lblName)
 
@@ -349,11 +359,11 @@ local function BuildLanguagePage(container)
 		enUS = ST("SETTINGS_LANG_ENUS", "English (US)"),
 		enGB = ST("SETTINGS_LANG_ENGB", "English (UK)"),
 		deDE = ST("SETTINGS_LANG_DEDE", "Deutsch"),
-		frFR = ST("SETTINGS_LANG_FRFR", "FranÃ§ais"),
-		esES = ST("SETTINGS_LANG_ESES", "EspaÃ±ol (ES)"),
-		esMX = ST("SETTINGS_LANG_ESMX", "EspaÃ±ol (MX)"),
+		frFR = ST("SETTINGS_LANG_FRFR", "Franzoesisch"),
+		esES = ST("SETTINGS_LANG_ESES", "Spanisch (ES)"),
+		esMX = ST("SETTINGS_LANG_ESMX", "Spanisch (MX)"),
 		itIT = ST("SETTINGS_LANG_ITIT", "Italiano"),
-		ptBR = ST("SETTINGS_LANG_PTBR", "PortuguÃªs (BR)"),
+		ptBR = ST("SETTINGS_LANG_PTBR", "Portugiesisch (BR)"),
 		ruRU = ST("SETTINGS_LANG_RURU", "Ð ÑƒÑÑÐºÐ¸Ð¹"),
 		koKR = ST("SETTINGS_LANG_KOKR", "í•œêµ­ì–´"),
 		zhCN = ST("SETTINGS_LANG_ZHCN", "ç®€ä½“ä¸­æ–‡"),
@@ -453,15 +463,15 @@ local function GetTreeData()
 		local extKeys = {}
 		for k in pairs(GMS.REGISTRY.EXT) do table.insert(extKeys, k) end
 		table.sort(extKeys, function(a, b)
-			local da = GMS.REGISTRY.EXT[a].displayName or a
-			local db = GMS.REGISTRY.EXT[b].displayName or b
+			local da = ResolveMetaName(GMS.REGISTRY.EXT[a], a)
+			local db = ResolveMetaName(GMS.REGISTRY.EXT[b], b)
 			return da < db
 		end)
 		for _, k in ipairs(extKeys) do
 			local ext = GMS.REGISTRY.EXT[k]
 			table.insert(tree[2].children, {
 				value = "EXT:" .. k,
-				text = ext.displayName or ext.name or k,
+				text = ResolveMetaName(ext, k),
 			})
 		end
 	end
@@ -471,15 +481,15 @@ local function GetTreeData()
 		local modKeys = {}
 		for k in pairs(GMS.REGISTRY.MOD) do table.insert(modKeys, k) end
 		table.sort(modKeys, function(a, b)
-			local da = GMS.REGISTRY.MOD[a].displayName or a
-			local db = GMS.REGISTRY.MOD[b].displayName or b
+			local da = ResolveMetaName(GMS.REGISTRY.MOD[a], a)
+			local db = ResolveMetaName(GMS.REGISTRY.MOD[b], b)
 			return da < db
 		end)
 		for _, k in ipairs(modKeys) do
 			local mod = GMS.REGISTRY.MOD[k]
 			table.insert(tree[3].children, {
 				value = "MOD:" .. k,
-				text = mod.displayName or mod.name or k,
+				text = ResolveMetaName(mod, k),
 			})
 		end
 	end
@@ -558,7 +568,7 @@ local function RegisterSlashCommands()
 		end
 
 		GMS:Slash_RegisterSubCommand("options", handler,
-			{ help = "Ã–ffnet die GMS-Einstellungen", alias = { "settings", "o" }, owner = METADATA.INTERN_NAME })
+			{ helpKey = "SETTINGS_SLASH_HELP", helpFallback = "/gms options - opens GMS settings", alias = { "settings", "o" }, owner = METADATA.INTERN_NAME })
 	end
 end
 

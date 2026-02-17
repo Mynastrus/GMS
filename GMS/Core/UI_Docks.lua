@@ -44,6 +44,16 @@ local METADATA = {
 
 GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
 
+local function TT(key, fallback)
+	if type(GMS.T) == "function" and type(key) == "string" and key ~= "" then
+		local txt = tostring(GMS:T(key))
+		if txt ~= "" and txt ~= key then
+			return txt
+		end
+	end
+	return tostring(fallback or "")
+end
+
 local function now()
 	return type(GetTime) == "function" and GetTime() or nil
 end
@@ -181,6 +191,22 @@ function UI:SetRightDockSelected(id, selected, exclusive)
 	self:RightDockSetSelected(entry, selected)
 end
 
+function UI:SetRightDockIconHidden(id, hidden)
+	self:RightDockEnsure()
+	local entry = self._rightDock and self._rightDock.all and self._rightDock.all[id] or nil
+	if not entry then return false end
+	local isHidden = hidden and true or false
+	entry.hidden = isHidden
+	if entry.slot and entry.slot.SetShown then
+		entry.slot:SetShown(not isHidden)
+	end
+	if entry.button and entry.button.SetShown then
+		entry.button:SetShown(not isHidden)
+	end
+	self:ReflowRightDock()
+	return true
+end
+
 function UI:ReflowRightDock()
 	if not self._frame then return end
 
@@ -196,16 +222,18 @@ function UI:ReflowRightDock()
 	local function placeTop()
 		local st = self._rightDock.top
 		sortLane(st)
+		local visibleIndex = 0
 		for i, item in ipairs(st.order) do
 			local entry = st.entries[item.id]
-			if entry and entry.slot then
+			if entry and entry.slot and not entry.hidden then
+				visibleIndex = visibleIndex + 1
 				entry.slot:ClearAllPoints()
 				entry.slot:SetPoint(
 					"TOPLEFT",
 					self._rightDock.parent,
 					"TOPRIGHT",
 					cfg.offsetX,
-					-(cfg.topOffsetY + (i - 1) * (cfg.slotHeight + cfg.slotGap))
+					-(cfg.topOffsetY + (visibleIndex - 1) * (cfg.slotHeight + cfg.slotGap))
 				)
 			end
 		end
@@ -214,16 +242,18 @@ function UI:ReflowRightDock()
 	local function placeBottom()
 		local st = self._rightDock.bottom
 		sortLane(st)
+		local visibleIndex = 0
 		for i, item in ipairs(st.order) do
 			local entry = st.entries[item.id]
-			if entry and entry.slot then
+			if entry and entry.slot and not entry.hidden then
+				visibleIndex = visibleIndex + 1
 				entry.slot:ClearAllPoints()
 				entry.slot:SetPoint(
 					"BOTTOMLEFT",
 					self._rightDock.parent,
 					"BOTTOMRIGHT",
 					cfg.offsetX,
-					(cfg.bottomOffsetY + (i - 1) * (cfg.slotHeight + cfg.slotGap))
+					(cfg.bottomOffsetY + (visibleIndex - 1) * (cfg.slotHeight + cfg.slotGap))
 				)
 			end
 		end
@@ -245,7 +275,17 @@ function UI:AddRightDockIcon(lane, opts)
 	if id == "" then return nil end
 
 	if self._rightDock.all[id] then
-		return self._rightDock.all[id]
+		local existing = self._rightDock.all[id]
+		if existing and existing.button then
+			existing.button._gmsDockOpts = opts
+			if opts.icon and existing.button._icon then
+				existing.button._icon:SetTexture(opts.icon)
+			end
+		end
+		if existing and existing.slot and existing.slot.SetShown then
+			existing.slot:SetShown(not (opts.hidden and true or false))
+		end
+		return existing
 	end
 
 	local st = (lane == "bottom") and self._rightDock.bottom or self._rightDock.top
@@ -287,6 +327,7 @@ function UI:AddRightDockIcon(lane, opts)
 	local tc = cfg.iconTexCoord
 	icon:SetTexCoord(tc[1], tc[2], tc[3], tc[4])
 	btn._icon = icon
+	btn._gmsDockOpts = opts
 
 	local glow = btn:CreateTexture(nil, "OVERLAY")
 	glow:SetPoint("CENTER", btn, "CENTER", 0, 0)
@@ -298,13 +339,22 @@ function UI:AddRightDockIcon(lane, opts)
 	btn._glow = glow
 
 	btn:SetScript("OnEnter", function()
-		if opts.tooltipTitle or opts.tooltipText then
+		local current = btn._gmsDockOpts or opts
+		local title = current.tooltipTitle
+		if type(current.tooltipTitleKey) == "string" and current.tooltipTitleKey ~= "" then
+			title = TT(current.tooltipTitleKey, current.tooltipTitle)
+		end
+		local text = current.tooltipText
+		if type(current.tooltipTextKey) == "string" and current.tooltipTextKey ~= "" then
+			text = TT(current.tooltipTextKey, current.tooltipText)
+		end
+		if title or text then
 			GameTooltip:SetOwner(slot, "ANCHOR_LEFT")
-			if opts.tooltipTitle and opts.tooltipTitle ~= "" then
-				GameTooltip:AddLine(opts.tooltipTitle, 1, 1, 1)
+			if title and title ~= "" then
+				GameTooltip:AddLine(title, 1, 1, 1)
 			end
-			if opts.tooltipText and opts.tooltipText ~= "" then
-				GameTooltip:AddLine(opts.tooltipText, 0.9, 0.9, 0.9, true)
+			if text and text ~= "" then
+				GameTooltip:AddLine(text, 0.9, 0.9, 0.9, true)
 			end
 			GameTooltip:Show()
 		end
@@ -315,15 +365,17 @@ function UI:AddRightDockIcon(lane, opts)
 	end)
 
 	btn:SetScript("OnClick", function(_, mouseButton)
-		if opts.selectable then
-			self:SetRightDockSelected(id, true, (opts.exclusive ~= false))
+		local current = btn._gmsDockOpts or opts
+		if current.selectable then
+			self:SetRightDockSelected(id, true, (current.exclusive ~= false))
 		end
-		if type(opts.onClick) == "function" then
-			pcall(opts.onClick, id, btn, mouseButton)
+		if type(current.onClick) == "function" then
+			pcall(current.onClick, id, btn, mouseButton)
 		end
 	end)
 
 	local entry = { id = id, lane = lane, slot = slot, button = btn }
+	entry.hidden = opts.hidden and true or false
 	self._rightDock.all[id] = entry
 	st.entries[id] = entry
 
@@ -334,6 +386,9 @@ function UI:AddRightDockIcon(lane, opts)
 	end
 
 	self:ReflowRightDock()
+	if entry.hidden and entry.slot and entry.slot.SetShown then
+		entry.slot:SetShown(false)
+	end
 	return entry
 end
 
@@ -342,12 +397,14 @@ function UI:AddRightDockIconTop(opts) return self:AddRightDockIcon("top", opts) 
 function UI:AddRightDockIconBottom(opts) return self:AddRightDockIcon("bottom", opts) end
 
 function UI:SeedRightDockPlaceholders()
-	local dashName = (
-		GMS.REGISTRY and GMS.REGISTRY.EXT and GMS.REGISTRY.EXT["DASHBOARD"] and GMS.REGISTRY.EXT["DASHBOARD"].displayName) or
-		"Dashboard"
-	local optsName = (
-		GMS.REGISTRY and GMS.REGISTRY.EXT and GMS.REGISTRY.EXT["SETTINGS"] and GMS.REGISTRY.EXT["SETTINGS"].displayName) or
-		"Optionen"
+	local dashMeta = GMS.REGISTRY and GMS.REGISTRY.EXT and GMS.REGISTRY.EXT["DASHBOARD"] or nil
+	local optsMeta = GMS.REGISTRY and GMS.REGISTRY.EXT and GMS.REGISTRY.EXT["SETTINGS"] or nil
+	local dashName = (type(GMS.ResolveRegistryDisplayName) == "function")
+		and GMS:ResolveRegistryDisplayName(dashMeta, "Dashboard")
+		or ((dashMeta and dashMeta.displayName) or "Dashboard")
+	local optsName = (type(GMS.ResolveRegistryDisplayName) == "function")
+		and GMS:ResolveRegistryDisplayName(optsMeta, "Settings")
+		or ((optsMeta and optsMeta.displayName) or "Settings")
 
 	self:AddRightDockIconTop({
 		id = "DASHBOARD",
@@ -356,7 +413,9 @@ function UI:SeedRightDockPlaceholders()
 		selected = true,
 		icon = "Interface\\Icons\\INV_Misc_Note_05",
 		tooltipTitle = dashName,
-		tooltipText = "Zeigt das Dashboard des Addons an",
+		tooltipTitleKey = "NAME_DASHBOARD",
+		tooltipText = TT("UI_DOCK_DASHBOARD_TOOLTIP", "Shows the addon dashboard"),
+		tooltipTextKey = "UI_DOCK_DASHBOARD_TOOLTIP",
 		onClick = function()
 			if type(UI.Navigate) == "function" then
 				UI:Navigate("DASHBOARD")
@@ -370,7 +429,9 @@ function UI:SeedRightDockPlaceholders()
 		selectable = true,
 		icon = "Interface\\Icons\\Trade_Engineering",
 		tooltipTitle = optsName,
-		tooltipText = "Einstellungen",
+		tooltipTitleKey = "NAME_SETTINGS",
+		tooltipText = TT("UI_DOCK_SETTINGS_TOOLTIP", "Settings"),
+		tooltipTextKey = "UI_DOCK_SETTINGS_TOOLTIP",
 		onClick = function()
 			if type(UI.Open) == "function" then
 				UI:Open("SETTINGS")

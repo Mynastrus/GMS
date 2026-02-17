@@ -112,7 +112,7 @@ local function SortPages()
 	end)
 end
 
-function UI:RegisterPage(id, order, title, buildFn)
+function UI:RegisterPage(id, order, title, buildFn, titleKey)
 	id = tostring(id or "")
 	if id == "" then return false end
 
@@ -120,6 +120,7 @@ function UI:RegisterPage(id, order, title, buildFn)
 		order = tonumber(order) or 9999,
 		title = tostring(title or id),
 		build = buildFn,
+		titleKey = (type(titleKey) == "string" and titleKey ~= "") and titleKey or nil,
 	}
 
 	SortPages()
@@ -138,6 +139,45 @@ local function GetActivePage()
 		return UI:GetActivePage()
 	end
 	return "DASHBOARD"
+end
+
+local function ResolvePageTitle(id, page)
+	local fallback = (type(page) == "table" and page.title) or tostring(id or "")
+
+	if type(page) == "table" and type(page.titleKey) == "string" and page.titleKey ~= "" and type(GMS.T) == "function" then
+		local localized = tostring(GMS:T(page.titleKey))
+		if localized ~= "" and localized ~= page.titleKey then
+			return localized
+		end
+	end
+
+	if GMS and GMS.REGISTRY then
+		local ext = GMS.REGISTRY.EXT and GMS.REGISTRY.EXT[tostring(id or ""):upper()] or nil
+		if type(ext) == "table" then
+			if type(GMS.ResolveRegistryDisplayName) == "function" then
+				return GMS:ResolveRegistryDisplayName(ext, fallback)
+			end
+			return tostring(ext.displayName or ext.name or fallback)
+		end
+
+		local uid = tostring(id or ""):upper()
+		local mods = GMS.REGISTRY.MOD
+		if type(mods) == "table" then
+			for _, meta in pairs(mods) do
+				local k = tostring(meta.key or ""):upper()
+				local n = tostring(meta.name or ""):upper()
+				local s = tostring(meta.shortName or ""):upper()
+				if uid == k or uid == n or uid == s then
+					if type(GMS.ResolveRegistryDisplayName) == "function" then
+						return GMS:ResolveRegistryDisplayName(meta, fallback)
+					end
+					return tostring(meta.displayName or meta.name or fallback)
+				end
+			end
+		end
+	end
+
+	return tostring(fallback)
 end
 
 function UI:Navigate(id)
@@ -192,7 +232,7 @@ function UI:Navigate(id)
 	local p = self._pages and self._pages[id] or nil
 	if type(self.SetWindowTitle) == "function" then
 		local mainTitle = self.DISPLAY_NAME or "GMS"
-		local pageTitle = (p and p.title) or id
+		local pageTitle = ResolvePageTitle(id, p)
 		self:SetWindowTitle(mainTitle .. "   |cffCCCCCC" .. tostring(pageTitle) .. "|r")
 	end
 
