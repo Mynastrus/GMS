@@ -86,6 +86,7 @@ Core\Logs.lua
 # =========================
 
 Modules/Roster.lua
+Modules/GuildInfo.lua
 Modules/GuildLog.lua
 Modules/CharInfo.lua
 Modules/Equipment.lua

@@ -2763,7 +2763,7 @@ function Roster:InitializeOptions()
 		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "ROSTER")
 		if ok and type(opts) == "table" then
 			local moduleOptions = opts
-			moduleOptions.showOnline = true
+			if moduleOptions.showOnline == nil then moduleOptions.showOnline = true end
 			if moduleOptions.showOffline == nil then moduleOptions.showOffline = true end
 			if moduleOptions.searchQuery == nil then moduleOptions.searchQuery = "" end
 

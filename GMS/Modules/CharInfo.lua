@@ -58,6 +58,10 @@ local HandleModifiedItemClick    = HandleModifiedItemClick
 local GameFontNormalSmallOutline = GameFontNormalSmallOutline
 local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
 local LoadAddOn                  = LoadAddOn
+local EJ_SelectInstance          = EJ_SelectInstance
+local ToggleEncounterJournal     = ToggleEncounterJournal
+local EncounterJournal_OpenJournal = EncounterJournal_OpenJournal
+local ShowUIPanel                = ShowUIPanel
 local EasyMenu                   = EasyMenu
 local CreateFrame                = CreateFrame
 local UIParent                   = UIParent
@@ -124,6 +128,8 @@ CHARINFO._ticker         = CHARINFO._ticker or nil
 CHARINFO._uiDataTicker   = CHARINFO._uiDataTicker or nil
 CHARINFO._uiDataLastSig  = CHARINFO._uiDataLastSig or nil
 CHARINFO._resizeRefreshPending = CHARINFO._resizeRefreshPending or false
+CHARINFO._raidWaitAnimTicker = CHARINFO._raidWaitAnimTicker or nil
+CHARINFO._raidWaitAnimStep = CHARINFO._raidWaitAnimStep or 0
 
 ---@class GMSTickerHandle
 ---@field Cancel fun(self: GMSTickerHandle)
@@ -701,41 +707,299 @@ local function BuildMythicRows(dungeons)
 	return rows
 end
 
-local function BuildRaidRows(all)
-	if type(all) ~= "table" then return {} end
+local RAID_DIFF_ORDER = { 17, 14, 15, 16 } -- LFR, N, H, M
+local RAID_DIFF_LABEL = {
+	[17] = "LFR",
+	[14] = "N",
+	[15] = "H",
+	[16] = "M",
+}
 
-	local function PickShort(entry)
-		local function consider(node, best)
-			if type(node) ~= "table" then return best end
-			local short = tostring(node.short or "")
-			if short == "" or short == "-" then return best end
-			local diff = tonumber(node.diffID) or 0
-			local killed = tonumber(node.killed) or 0
-			if not best or diff > best.diff or (diff == best.diff and killed > best.killed) then
-				return { diff = diff, killed = killed, short = short }
-			end
-			return best
+local function FormatRaidProgress(killed, total)
+	local k = tonumber(killed) or 0
+	local t = tonumber(total) or 0
+	if t <= 0 then
+		return "- / -"
+	end
+	return string.format("%d / %d", k, t)
+end
+
+local function FormatBestShort(best)
+	if type(best) ~= "table" then
+		return "- / -"
+	end
+	local diffID = tonumber(best.diffID)
+	local diffTag = RAID_DIFF_LABEL[diffID] or tostring(best.diffTag or "?")
+	local k = tonumber(best.killed) or 0
+	local t = tonumber(best.total) or 0
+	if t <= 0 then
+		return "- / -"
+	end
+	return string.format("%s  %d / %d", diffTag, k, t)
+end
+
+local function GetBestColorByDiffID(diffID)
+	local function NormalizeColor8(hex)
+		local c = tostring(hex or ""):gsub("|c", ""):gsub("|r", ""):gsub("#", "")
+		if c:match("^[0-9a-fA-F]+$") then
+			if #c == 6 then return "ff" .. string.lower(c) end
+			if #c == 8 then return string.lower(c) end
 		end
-		local best = nil
-		best = consider(entry and entry.best, best)
-		if type(entry) == "table" and type(entry.current) == "table" then
-			for _, cur in pairs(entry.current) do
-				best = consider(cur, best)
-			end
-		end
-		return (best and best.short) or "-"
+		return "ffffffff"
 	end
 
+	local classByDiff = {
+		[16] = "WARLOCK", -- M
+		[15] = "WARLOCK", -- H (requested: purple)
+		[14] = "HUNTER",  -- N
+		[17] = "ROGUE",   -- LFR
+	}
+	local classToken = classByDiff[tonumber(diffID) or 0]
+	if classToken and GMS and type(GMS.GET_CLASS_COLOR) == "function" then
+		local c = tostring(GMS:GET_CLASS_COLOR(classToken) or "")
+		if c ~= "" then return NormalizeColor8(c) end
+	end
+	return "ffffffff"
+end
+
+local function GetBestColorByTag(tag)
+	local t = string.upper(tostring(tag or ""))
+	if t == "M" then return GetBestColorByDiffID(16) end
+	if t == "H" then return GetBestColorByDiffID(15) end
+	if t == "N" then return GetBestColorByDiffID(14) end
+	if t == "LFR" then return GetBestColorByDiffID(17) end
+	return "ffffffff"
+end
+
+local function ColorizeBestText(raw)
+	local txt = tostring(raw or "")
+	if txt == "" or txt == "-" or txt == "- / -" then
+		return txt
+	end
+
+	local leadTag = txt:match("^%s*(LFR|M|H|N)%s+")
+	if leadTag then
+		return "|c" .. GetBestColorByTag(leadTag) .. txt .. "|r"
+	end
+
+	local trailTag = txt:match("%s+(LFR|M|H|N)%s*$")
+	if trailTag then
+		return "|c" .. GetBestColorByTag(trailTag) .. txt .. "|r"
+	end
+
+	return txt
+end
+
+local function BuildRaidCatalogLookup()
+	local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true)) or nil
+	if type(raids) ~= "table" or type(raids.GetCatalog) ~= "function" then
+		return nil
+	end
+	local ok, cat = pcall(raids.GetCatalog, raids)
+	if not ok or type(cat) ~= "table" or type(cat.byInstanceID) ~= "table" then
+		return nil
+	end
+	return cat
+end
+
+local function BuildRaidRows(all, catalog)
+	if type(all) ~= "table" then all = {} end
+	if type(catalog) ~= "table" then
+		catalog = BuildRaidCatalogLookup()
+	end
+
+	local STATIC_RAID_NAME_BY_INSTANCE = {
+		[2657] = "Palast der Nerub'ar",
+		[2769] = "Befreiung von Lorenhall",
+		[2810] = "Manaschmiede Omega",
+	}
+	local KNOWN_RAID_INSTANCE_IDS = { 2657, 2769, 2810 }
+
+	local function IsNumericOnlyText(v)
+		local s = tostring(v or "")
+		if s == "" then return false end
+		return s:match("^%d+$") ~= nil
+	end
+
+	local function ResolveRaidDisplayName(instanceID, rawName, catEntry, key)
+		local fromCatalog = type(catEntry) == "table" and tostring(catEntry.name or "") or ""
+		if fromCatalog ~= "" then
+			return fromCatalog
+		end
+
+		local iid = tonumber(instanceID)
+		if iid and STATIC_RAID_NAME_BY_INSTANCE[iid] then
+			return STATIC_RAID_NAME_BY_INSTANCE[iid]
+		end
+
+		local rn = tostring(rawName or "")
+		if rn ~= "" and not IsNumericOnlyText(rn) then
+			return rn
+		end
+
+		return "Raid " .. tostring(key or instanceID or "?")
+	end
+
+	local rowsByID = {}
 	local rows = {}
+
+	local function ensureRow(instanceID, raidName, total, encounters, description, icon)
+		local key = tostring(instanceID or raidName or "")
+		if key == "" then
+			key = tostring(#rows + 1)
+		end
+		local row = rowsByID[key]
+		if row then return row end
+
+		row = {
+			instanceID = tonumber(instanceID) or nil,
+			name = tostring(raidName or ("Raid " .. key)),
+			description = tostring(description or ""),
+			icon = tonumber(icon) or 0,
+			total = tonumber(total) or 0,
+			encounters = (type(encounters) == "table") and encounters or {},
+			current = {},
+			best = "- / -",
+		}
+		for i = 1, #RAID_DIFF_ORDER do
+			row.current[RAID_DIFF_ORDER[i]] = {
+				text = "- / -",
+				killed = 0,
+				total = row.total,
+				bosses = {},
+			}
+		end
+
+		rowsByID[key] = row
+		rows[#rows + 1] = row
+		return row
+	end
+
+	if type(catalog) == "table" and type(catalog.byInstanceID) == "table" then
+		for instanceID, meta in pairs(catalog.byInstanceID) do
+			if type(meta) == "table" then
+				local row = ensureRow(instanceID, meta.name, meta.total, meta.encounters, meta.description, meta.icon)
+				row.description = tostring(meta.description or row.description or "")
+				row.icon = tonumber(meta.icon or row.icon or 0) or 0
+			end
+		end
+	end
+
+	-- Ensure current known raids are always listed even before EJ catalog is ready.
+	for i = 1, #KNOWN_RAID_INSTANCE_IDS do
+		local iid = KNOWN_RAID_INSTANCE_IDS[i]
+		ensureRow(iid, STATIC_RAID_NAME_BY_INSTANCE[iid], 0, nil, "", 0)
+	end
+
 	for key, entry in pairs(all) do
 		if type(entry) == "table" then
-			local name = tostring(entry.name or ("Raid " .. tostring(key)))
-			local short = PickShort(entry)
-			rows[#rows + 1] = { name = name, short = short }
+			local instanceID = tonumber(entry.instanceID) or tonumber(key) or nil
+			local raidName = tostring(entry.name or "")
+			local total = tonumber(entry.total) or 0
+
+			local catEntry = nil
+			if type(catalog) == "table" and type(catalog.byInstanceID) == "table" and instanceID then
+				catEntry = catalog.byInstanceID[instanceID]
+			end
+			local row = ensureRow(
+				instanceID,
+				ResolveRaidDisplayName(instanceID, raidName, catEntry, key),
+				(total > 0 and total) or (catEntry and catEntry.total) or 0,
+				(catEntry and catEntry.encounters) or nil,
+				(catEntry and catEntry.description) or nil,
+				(catEntry and catEntry.icon) or nil
+			)
+			if type(catEntry) == "table" then
+				if tostring(catEntry.description or "") ~= "" then
+					row.description = tostring(catEntry.description or "")
+				end
+				local catIcon = tonumber(catEntry.icon or 0) or 0
+				if catIcon > 0 then
+					row.icon = catIcon
+				end
+			end
+
+			if type(entry.current) == "table" then
+				for i = 1, #RAID_DIFF_ORDER do
+					local diffID = RAID_DIFF_ORDER[i]
+					local cur = entry.current[diffID]
+					if type(cur) == "table" then
+						local cKilled = tonumber(cur.killed) or 0
+						local cTotal = tonumber(cur.total) or tonumber(row.total) or 0
+						row.current[diffID] = {
+							text = FormatRaidProgress(cKilled, cTotal),
+							killed = cKilled,
+							total = cTotal,
+							bosses = type(cur.bosses) == "table" and cur.bosses or {},
+						}
+					end
+				end
+			end
+
+			row.best = FormatBestShort(entry.best)
 		end
 	end
-	table.sort(rows, function(a, b) return tostring(a.name) < tostring(b.name) end)
+
+	table.sort(rows, function(a, b)
+		return tostring(a.name or "") < tostring(b.name or "")
+	end)
 	return rows
+end
+
+local function BuildSelfRaidWaitingText(details)
+	local selectedGuid = tostring(details and details.general and details.general.guid or "")
+	local ownGuid = tostring((type(UnitGUID) == "function" and UnitGUID("player")) or "")
+	if selectedGuid == "" or ownGuid == "" or selectedGuid ~= ownGuid then
+		return nil
+	end
+
+	local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true)) or nil
+	if type(raids) ~= "table" then
+		return "Warte auf RAIDS-Modulinitialisierung..."
+	end
+
+	if raids._storePollActive == true then
+		return "Warte auf Charakter-Speicherbindung..."
+	end
+	if raids._pendingScan == true then
+		local reason = tostring(raids._pendingReason or "initial")
+		return "Warte auf Raidscan (" .. reason .. ")..."
+	end
+	if raids._statsDeferredScheduled == true then
+		return "Warte auf verzögerten Raid-Statistikscan..."
+	end
+	local cursor = tonumber(raids._statsCategoryCursor or 1) or 1
+	if cursor > 1 then
+		return "Raid-Statistikscan läuft..."
+	end
+	if raids._ejUnsupported == true then
+		return "Warte auf SavedInstances-Raiddaten..."
+	end
+	if raids._ejReady == false then
+		return "Warte auf Encounter-Journal-Initialisierung..."
+	end
+
+	return "Warte auf erste Raid-Daten..."
+end
+
+local function OpenRaidInEncounterJournal(instanceID)
+	local iid = tonumber(instanceID)
+	if not iid or iid <= 0 then return end
+
+	if type(LoadAddOn) == "function" then
+		pcall(LoadAddOn, "Blizzard_EncounterJournal")
+	end
+
+	if type(ShowUIPanel) == "function" and type(_G.EncounterJournal) == "table" then
+		pcall(ShowUIPanel, _G.EncounterJournal)
+	end
+	local openJournal = EncounterJournal_OpenJournal or (_G and _G.EncounterJournal_OpenJournal)
+	if type(openJournal) == "function" then
+		pcall(openJournal, 3, iid)
+	end
+	if type(EJ_SelectInstance) == "function" then
+		pcall(EJ_SelectInstance, iid)
+	end
 end
 
 local function GetRosterMemberByGuid(guid)
@@ -976,14 +1240,15 @@ local function BuildCharData(player, ctxGuid, ctxName)
 
 		local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true)) or nil
 		local raidStore = raids and raids._options and raids._options.raids or nil
+		local raidCatalog = (type(raids) == "table" and type(raids.GetCatalog) == "function") and raids:GetCatalog() or nil
 		data.raids.summary = BuildRaidStatusFromRaidsStore(raidStore)
-		data.raids.rows = BuildRaidRows(raidStore)
+		data.raids.rows = BuildRaidRows(raidStore, raidCatalog)
 		data.raids.hasData = (#data.raids.rows > 0) or (data.raids.summary ~= "-" and data.raids.summary ~= "")
 		data.raids.source = "Local module data"
 		if not data.raids.hasData and playerGuid ~= "" then
 			local recRLocal = GetLatestDomainRecordForGuid("RAIDS_V1", playerGuid)
 			if recRLocal and type(recRLocal.payload) == "table" and type(recRLocal.payload.raids) == "table" then
-				local rowsLocal = BuildRaidRows(recRLocal.payload.raids)
+				local rowsLocal = BuildRaidRows(recRLocal.payload.raids, raidCatalog)
 				local summaryLocal = BuildRaidStatusFromRaidsStore(recRLocal.payload.raids)
 				if summaryLocal ~= "" and summaryLocal ~= "-" then
 					data.raids.summary = summaryLocal
@@ -1114,7 +1379,8 @@ local function BuildCharData(player, ctxGuid, ctxName)
 
 		local recR = GetLatestDomainRecordForGuid("RAIDS_V1", targetGuid)
 		if recR and type(recR.payload) == "table" then
-			local rows = BuildRaidRows(recR.payload.raids)
+			local raidCatalog = BuildRaidCatalogLookup()
+			local rows = BuildRaidRows(recR.payload.raids, raidCatalog)
 			local summary = BuildRaidStatusFromRaidsStore(recR.payload.raids)
 			if summary ~= "" and summary ~= "-" then
 				data.raids.summary = summary
@@ -1214,6 +1480,30 @@ local function AddNoDataHint(parent, text)
 	parent:AddChild(line)
 end
 
+local function AddNoDataHintCentered(parent, text)
+	local spacerTop = AceGUI:Create("Label")
+	spacerTop:SetFullWidth(true)
+	spacerTop:SetText(" ")
+	parent:AddChild(spacerTop)
+
+	local line = AceGUI:Create("Label")
+	line:SetFullWidth(true)
+	line:SetText("|c99ffb366" .. tostring(text or "No data available.") .. "|r")
+	if line.label then
+		line.label:SetFontObject(GameFontNormalSmallOutline)
+		line.label:SetJustifyH("CENTER")
+		line.label:SetWordWrap(false)
+	end
+	parent:AddChild(line)
+
+	local spacerBottom = AceGUI:Create("Label")
+	spacerBottom:SetFullWidth(true)
+	spacerBottom:SetText(" ")
+	parent:AddChild(spacerBottom)
+
+	return line
+end
+
 local function AddValueLine(parent, leftText, rightText)
 	local row = AceGUI:Create("SimpleGroup")
 	row:SetFullWidth(true)
@@ -1227,7 +1517,12 @@ local function AddValueLine(parent, leftText, rightText)
 
 	local right = AceGUI:Create("Label")
 	right:SetWidth(280)
-	right:SetText("|cffffffff" .. tostring(rightText or "-") .. "|r")
+	local rt = tostring(rightText or "-")
+	if rt:find("|c", 1, true) then
+		right:SetText(rt)
+	else
+		right:SetText("|cffffffff" .. rt .. "|r")
+	end
 	row:AddChild(right)
 end
 
@@ -1406,7 +1701,13 @@ local function BuildDetailsSignature(details)
 	for i = 1, #raidRows do
 		local r = raidRows[i]
 		out[#out + 1] = tostring(r.name or "")
-		out[#out + 1] = tostring(r.short or "")
+		out[#out + 1] = tostring(r.best or "")
+		local cur = type(r.current) == "table" and r.current or {}
+		for j = 1, #RAID_DIFF_ORDER do
+			local diffID = RAID_DIFF_ORDER[j]
+			local node = cur[diffID]
+			out[#out + 1] = tostring(node and node.text or "")
+		end
 	end
 
 	local eqRows = details.equipment and details.equipment.rows or {}
@@ -1440,6 +1741,58 @@ local function StopUIDataTicker()
 		pcall(function() t:Cancel() end)
 	end
 	CHARINFO._uiDataTicker = nil
+end
+
+local function StopRaidWaitAnimTicker()
+	local t = CHARINFO._raidWaitAnimTicker
+	if t and type(t.Cancel) == "function" then
+		pcall(function() t:Cancel() end)
+	end
+	CHARINFO._raidWaitAnimTicker = nil
+	CHARINFO._raidWaitAnimStep = 0
+end
+
+local function StartRaidWaitAnimTicker(labelWidget, baseText, spinnerWidgets)
+	StopRaidWaitAnimTicker()
+	if not C_Timer or type(C_Timer.NewTicker) ~= "function" then return end
+	local hasMainLabel = (type(labelWidget) == "table" and type(labelWidget.SetText) == "function")
+	local hasSpinnerWidgets = (type(spinnerWidgets) == "table" and #spinnerWidgets > 0)
+	if not hasMainLabel and not hasSpinnerWidgets then return end
+
+	local base = tostring(baseText or "Warte auf Raidscan")
+	base = base:gsub("[%.%s]+$", "")
+	local frames = { "|", "/", "-", "\\" }
+	CHARINFO._raidWaitAnimStep = 0
+	CHARINFO._raidWaitAnimTicker = C_Timer.NewTicker(0.45, function()
+		local ui = UIRef()
+		if not ui or ui._page ~= "CHARINFO" then
+			StopRaidWaitAnimTicker()
+			return
+		end
+		if type(labelWidget.SetText) ~= "function" then
+			StopRaidWaitAnimTicker()
+			return
+		end
+
+		local step = ((tonumber(CHARINFO._raidWaitAnimStep) or 0) % #frames) + 1
+		CHARINFO._raidWaitAnimStep = step
+		local spin = frames[step] or "|"
+		if hasMainLabel then
+			pcall(function()
+				labelWidget:SetText("|c99ffb366" .. base .. "  " .. spin .. "|r")
+			end)
+		end
+		if hasSpinnerWidgets then
+			for i = 1, #spinnerWidgets do
+				local w = spinnerWidgets[i]
+				if type(w) == "table" and type(w.SetText) == "function" then
+					pcall(function()
+						w:SetText("|c99ffb366" .. spin .. "|r")
+					end)
+				end
+			end
+		end
+	end)
 end
 
 function CHARINFO:StartUIDataTicker(ctxState)
@@ -1805,21 +2158,234 @@ function CHARINFO:TryRegisterPage()
 		end
 
 		local function BuildCard_Raids(parent)
+			StopRaidWaitAnimTicker()
+
 			local card = NewCardContainer(parent, "Raid Data")
-			AddValueLine(card, "Best", details.raids.summary or "-")
+			AddValueLine(card, "Best", ColorizeBestText(details.raids.summary or "-"))
 			AddValueLine(card, "Source", details.raids.source or "-")
+			local raidPending = (BuildSelfRaidWaitingText(details) ~= nil)
+
+			local cardWidth = colWidth - 32
+			if card and card.content and type(card.content.GetWidth) == "function" then
+				local cw = tonumber(card.content:GetWidth()) or 0
+				if cw > 0 then cardWidth = cw end
+			end
+			if cardWidth < 240 then cardWidth = 240 end
+			local availW = cardWidth - 16
+			local bestW = 56
+			local iconW = 16
+			local nameW = 110
+			local cellW = math.floor((availW - bestW - nameW) / 4)
+			if cellW < 24 then cellW = 24 end
+			nameW = availW - bestW - (cellW * 4)
+			if nameW < 70 then
+				nameW = 70
+				cellW = math.floor((availW - bestW - nameW) / 4)
+				if cellW < 20 then cellW = 20 end
+			end
+
+			local function AddHeadCell(row, width, text, center)
+				local lbl = AceGUI:Create("Label")
+				lbl:SetWidth(width)
+				lbl:SetText("|cff9d9d9d" .. tostring(text or "") .. "|r")
+				if lbl.label then
+					lbl.label:SetFontObject(GameFontNormalSmallOutline)
+					lbl.label:SetJustifyH(center and "CENTER" or "LEFT")
+					lbl.label:SetWordWrap(false)
+				end
+				row:AddChild(lbl)
+			end
+
+			local function IsBossKilled(bosses, encounterID)
+				if type(bosses) ~= "table" then return false end
+				if bosses[encounterID] == true then return true end
+				if bosses[tostring(encounterID)] == true then return true end
+				return false
+			end
+
+			local function ClassColor(classToken, fallback)
+				if GMS and type(GMS.GET_CLASS_COLOR) == "function" then
+					local c = tostring(GMS:GET_CLASS_COLOR(classToken) or "")
+					if c ~= "" then return c end
+				end
+				return tostring(fallback or "ffffffff")
+			end
+
+			local killedColor = ClassColor("DEATHKNIGHT", "ffff4040")
+			local availableColor = ClassColor("HUNTER", "ff40ff40")
+
+			local function AttachRaidTooltip(widget, raidRow, diffID)
+				if type(widget) ~= "table" or type(widget.SetCallback) ~= "function" then return end
+				widget:SetCallback("OnEnter", function(w)
+					if not GameTooltip or not w or not w.frame then return end
+					GameTooltip:SetOwner(w.frame, "ANCHOR_RIGHT")
+
+					local diffLabel = RAID_DIFF_LABEL[diffID] or tostring(diffID)
+					GameTooltip:AddLine(tostring(raidRow.name or "-") .. " - " .. diffLabel, 1, 0.82, 0.2)
+
+					local current = type(raidRow.current) == "table" and raidRow.current[diffID] or nil
+					if type(current) ~= "table" or (tonumber(current.total) or 0) <= 0 then
+						GameTooltip:AddLine("Kein aktueller Lockout.", 0.75, 0.75, 0.75)
+						GameTooltip:Show()
+						return
+					end
+
+					local killed = tonumber(current.killed) or 0
+					local total = tonumber(current.total) or 0
+					GameTooltip:AddLine(string.format("Lockout: %d / %d", killed, total), 0.85, 0.85, 0.85)
+
+					local encounters = type(raidRow.encounters) == "table" and raidRow.encounters or {}
+					local bosses = type(current.bosses) == "table" and current.bosses or {}
+					local hasBossMap = false
+					for _ in pairs(bosses) do
+						hasBossMap = true
+						break
+					end
+					if #encounters > 0 then
+						for i = 1, #encounters do
+							local enc = encounters[i]
+							local ename = tostring(enc and enc.name or ("Boss " .. tostring(i)))
+							local eid = tonumber(enc and enc.id or 0) or 0
+							local bossKilled = false
+							if hasBossMap and eid > 0 then
+								bossKilled = IsBossKilled(bosses, eid)
+							elseif not hasBossMap then
+								bossKilled = i <= killed
+							end
+							local statusText = bossKilled and ("|c" .. killedColor .. "Besiegt|r") or ("|c" .. availableColor .. "Verfügbar|r")
+							GameTooltip:AddDoubleLine(ename, statusText, 1, 1, 1, 1, 1, 1)
+						end
+					else
+						GameTooltip:AddLine("Bossliste nicht verfügbar.", 0.75, 0.75, 0.75)
+					end
+
+					GameTooltip:Show()
+				end)
+				widget:SetCallback("OnLeave", function()
+					if GameTooltip then GameTooltip:Hide() end
+				end)
+			end
+
+			local header = AceGUI:Create("SimpleGroup")
+			header:SetFullWidth(true)
+			header:SetLayout("Flow")
+			card:AddChild(header)
+
+			AddHeadCell(header, nameW, "", false)
+			AddHeadCell(header, cellW, "LFR", true)
+			AddHeadCell(header, cellW, "N", true)
+			AddHeadCell(header, cellW, "H", true)
+			AddHeadCell(header, cellW, "M", true)
+			AddHeadCell(header, bestW, "BEST", true)
+
 			if #details.raids.rows <= 0 then
 				if tostring(details.raids.summary or "-") == "-" then
-					AddNoDataHint(card, "No raid progress data available for this character.")
+					local waitText = BuildSelfRaidWaitingText(details)
+					if waitText then
+						local waitLabel = AddNoDataHintCentered(card, waitText)
+						StartRaidWaitAnimTicker(waitLabel, waitText)
+					else
+						AddNoDataHint(card, "No raid progress data available for this character.")
+					end
 				else
 					AddMutedLine(card, "Detailed per-raid rows are not available yet.")
 				end
 				return
 			end
-			local maxRows = math.min(#details.raids.rows, 8)
-			for i = 1, maxRows do
-				local row = details.raids.rows[i]
-				AddMutedLine(card, string.format("%s: %s", tostring(row.name or "-"), tostring(row.short or "-")))
+
+			local pendingBestWidgets = {}
+			for i = 1, #details.raids.rows do
+				local rowData = details.raids.rows[i]
+				local row = AceGUI:Create("SimpleGroup")
+				row:SetFullWidth(true)
+				row:SetLayout("Flow")
+				card:AddChild(row)
+
+				local nameLabel = AceGUI:Create("InteractiveLabel")
+				local nameTextW = nameW - iconW - 4
+				if nameTextW < 60 then nameTextW = 60 end
+
+				local icon = AceGUI:Create("Icon")
+				icon:SetWidth(iconW)
+				icon:SetHeight(14)
+				local iconTexture = tonumber(rowData.icon or 0) or 0
+				if iconTexture > 0 then
+					icon:SetImage(iconTexture)
+				else
+					icon:SetImage("Interface\\EncounterJournal\\UI-EJ-LOOTTRAP-ICON")
+				end
+				icon:SetImageSize(14, 14)
+				row:AddChild(icon)
+
+				nameLabel:SetWidth(nameTextW)
+				nameLabel:SetText("|cff03A9F4" .. tostring(rowData.name or "-") .. "|r")
+				if nameLabel.label then
+					nameLabel.label:SetFontObject(GameFontNormalSmallOutline)
+					nameLabel.label:SetJustifyH("LEFT")
+					nameLabel.label:SetWordWrap(false)
+				end
+				nameLabel:SetCallback("OnEnter", function(w)
+					if not GameTooltip or not w or not w.frame then return end
+					GameTooltip:SetOwner(w.frame, "ANCHOR_RIGHT")
+					GameTooltip:AddLine(tostring(rowData.name or "-"), 1, 0.82, 0.2)
+					local desc = tostring(rowData.description or "")
+					if desc ~= "" then
+						GameTooltip:AddLine(desc, 0.9, 0.9, 0.9, true)
+					else
+						GameTooltip:AddLine("Keine Raidbeschreibung verfügbar.", 0.75, 0.75, 0.75)
+					end
+					GameTooltip:Show()
+				end)
+				nameLabel:SetCallback("OnLeave", function()
+					if GameTooltip then GameTooltip:Hide() end
+				end)
+				if tonumber(rowData.instanceID) and tonumber(rowData.instanceID) > 0 then
+					nameLabel:SetCallback("OnClick", function()
+						OpenRaidInEncounterJournal(tonumber(rowData.instanceID))
+					end)
+				end
+				row:AddChild(nameLabel)
+
+				for j = 1, #RAID_DIFF_ORDER do
+					local diffID = RAID_DIFF_ORDER[j]
+					local node = (type(rowData.current) == "table") and rowData.current[diffID] or nil
+					local txt = (type(node) == "table" and tostring(node.text or "- / -")) or "- / -"
+
+					local cell = AceGUI:Create("InteractiveLabel")
+					cell:SetWidth(cellW)
+					cell:SetText("|cffffffff" .. txt .. "|r")
+					if cell.label then
+						cell.label:SetFontObject(GameFontNormalSmallOutline)
+						cell.label:SetJustifyH("CENTER")
+						cell.label:SetWordWrap(false)
+					end
+					AttachRaidTooltip(cell, rowData, diffID)
+					row:AddChild(cell)
+				end
+
+				local best = AceGUI:Create("Label")
+				best:SetWidth(bestW)
+				local bestRaw = tostring(rowData.best or "- / -")
+				if raidPending and (bestRaw == "- / -" or bestRaw == "-") then
+					best:SetText("|c99ffb366|r")
+					pendingBestWidgets[#pendingBestWidgets + 1] = best
+				else
+					best:SetText(ColorizeBestText(bestRaw))
+				end
+				if best.label then
+					best.label:SetFontObject(GameFontNormalSmallOutline)
+					best.label:SetJustifyH("CENTER")
+					best.label:SetWordWrap(false)
+				end
+				row:AddChild(best)
+
+				local spacer = AceGUI:Create("Label")
+				spacer:SetFullWidth(true)
+				spacer:SetText(" ")
+				card:AddChild(spacer)
+			end
+			if raidPending and #pendingBestWidgets > 0 then
+				StartRaidWaitAnimTicker(nil, nil, pendingBestWidgets)
 			end
 		end
 
@@ -2147,6 +2713,7 @@ end
 
 function CHARINFO:OnDisable()
 	StopUIDataTicker()
+	StopRaidWaitAnimTicker()
 	if self._ticker then
 		local ticker = self._ticker
 		---@cast ticker GMSTickerHandle

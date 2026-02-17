@@ -1239,9 +1239,8 @@ local function RegisterPage()
 		end
 
 		local function render()
-			EnsureOptionsCompat()
-			local entries = Entries() or {}
 			local opts = SyncOptionsToScoped() or EnsureOptionsCompat() or {}
+			local entries = (type(opts) == "table" and type(opts.entries) == "table") and opts.entries or {}
 			applyingChatState = true
 			cbChat:SetValue(GetEffectiveChatEcho())
 			applyingChatState = false

@@ -146,7 +146,8 @@ local STORE_POLL_INTERVAL = 1.0
 local STATS_ENRICH_LOGIN_GRACE = 30
 local STATS_ENRICH_MIN_INTERVAL = 900
 local STATS_ENRICH_MAX_CATEGORIES = 120
-local STATS_ENRICH_MAX_ACHIEVEMENTS = 1400
+local STATS_ENRICH_MAX_ACHIEVEMENTS = 180
+local STATS_ENRICH_CATEGORY_BATCH = 2
 
 local RAID_STATS_CATEGORY_KEYWORDS = {
 	"raid",
@@ -613,6 +614,151 @@ local function parseStatisticValueToNumber(raw)
 	return n
 end
 
+-- Deterministic fallback for raids where statistic label parsing may vary by locale/client.
+-- Format per boss: { LFR_ID, N_ID, H_ID, M_ID }
+local STATIC_BOSS_STATS_BY_INSTANCE = {
+	-- InstanceID 2657 = Palast von Nerub'Ar / Palace of Nerub-ar
+	[2657] = {
+		aliases = {
+			"palastvonnerubar",
+			"palaceofnerubar",
+		},
+		bosses = {
+			{ 40267, 40268, 40269, 40270 },
+			{ 40271, 40272, 40273, 40274 },
+			{ 40275, 40276, 40277, 40278 },
+			{ 40279, 40280, 40281, 40282 },
+			{ 40283, 40284, 40285, 40286 },
+			{ 40287, 40288, 40289, 40290 },
+			{ 40291, 40292, 40293, 40294 },
+			{ 40295, 40296, 40297, 40298 },
+		},
+	},
+	-- InstanceID 2769 = Befreiung von Lorenhall / Liberation of Undermine
+	[2769] = {
+		aliases = {
+			"befreiungvonlorenhall",
+			"liberationofundermine",
+		},
+		bosses = {
+			{ 41299, 41300, 41301, 41302 },
+			{ 41303, 41304, 41305, 41306 },
+			{ 41307, 41308, 41309, 41310 },
+			{ 41311, 41312, 41313, 41314 },
+			{ 41315, 41316, 41317, 41318 },
+			{ 41319, 41320, 41321, 41322 },
+			{ 41323, 41324, 41325, 41326 },
+			{ 41327, 41328, 41329, 41330 },
+		},
+	},
+	-- InstanceID 2810 = Manaschmiede Omega / Manaforge Omega
+	[2810] = {
+		aliases = {
+			"manaschmiedeomega",
+			"manaforgeomega",
+		},
+		bosses = {
+			{ 41633, 41634, 41635, 41636 },
+			{ 41637, 41638, 41639, 41640 },
+			{ 41641, 41642, 41643, 41644 },
+			{ 41645, 41646, 41647, 41648 },
+			{ 41649, 41650, 41651, 41652 },
+			{ 41653, 41654, 41655, 41656 },
+			{ 41657, 41658, 41659, 41660 },
+			{ 41661, 41662, 41663, 41664 },
+		},
+	},
+}
+
+local STATIC_DIFF_INDEX_TO_ID = {
+	[1] = 17, -- LFR
+	[2] = 14, -- N
+	[3] = 15, -- H
+	[4] = 16, -- M
+}
+
+local STATIC_INSTANCE_BY_RAID_NORM = nil
+
+local function EnsureStaticRaidAliasIndex()
+	if STATIC_INSTANCE_BY_RAID_NORM then
+		return STATIC_INSTANCE_BY_RAID_NORM
+	end
+
+	local idx = {}
+	for instanceID, cfg in pairs(STATIC_BOSS_STATS_BY_INSTANCE) do
+		if type(cfg) == "table" and type(cfg.aliases) == "table" then
+			for i = 1, #cfg.aliases do
+				local alias = normalizeRaidName(cfg.aliases[i])
+				if alias ~= "" then
+					idx[alias] = tonumber(instanceID) or instanceID
+				end
+			end
+		end
+	end
+	STATIC_INSTANCE_BY_RAID_NORM = idx
+	return idx
+end
+
+local function BuildStaticRaidStatFallback(catalog)
+	local out = {}
+	local matched = 0
+	if type(GetStatistic) ~= "function" then
+		return out, matched
+	end
+
+	local function applyRows(targetInstanceID, bossStatRows)
+		if type(bossStatRows) ~= "table" or #bossStatRows <= 0 then
+			return
+		end
+		local totalBosses = #bossStatRows
+		out[targetInstanceID] = out[targetInstanceID] or {}
+		for statDiffIndex = 1, 4 do
+			local diffID = STATIC_DIFF_INDEX_TO_ID[statDiffIndex]
+			local killed = 0
+			for bossIdx = 1, totalBosses do
+				local ids = bossStatRows[bossIdx]
+				local statID = type(ids) == "table" and tonumber(ids[statDiffIndex]) or nil
+				if statID and statID > 0 then
+					local okStat, rawStat = pcall(GetStatistic, statID)
+					local count = okStat and parseStatisticValueToNumber(rawStat) or nil
+					if count and count > 0 then
+						killed = killed + 1
+					end
+				end
+			end
+			if killed > 0 then
+				out[targetInstanceID][diffID] = {
+					killed = killed,
+					total = totalBosses,
+				}
+				matched = matched + killed
+			end
+		end
+	end
+
+	local staticByName = EnsureStaticRaidAliasIndex()
+	if type(catalog) == "table" and type(catalog.byInstanceID) == "table" then
+		for instanceID, raid in pairs(catalog.byInstanceID) do
+			local raidNameNorm = normalizeRaidName(raid and raid.name or "")
+			local staticInstanceID = staticByName[raidNameNorm]
+			if staticInstanceID and type(STATIC_BOSS_STATS_BY_INSTANCE[staticInstanceID]) == "table" then
+				local rows = STATIC_BOSS_STATS_BY_INSTANCE[staticInstanceID].bosses
+				applyRows(instanceID, rows)
+			end
+		end
+	end
+
+	-- Always run direct instance-ID fallback as well (works even when EJ catalog is not ready).
+	for instanceID, cfg in pairs(STATIC_BOSS_STATS_BY_INSTANCE) do
+		local iid = tonumber(instanceID) or instanceID
+		if type(out[iid]) ~= "table" then
+			applyRows(iid, cfg and cfg.bosses)
+		end
+	end
+
+	return out, matched
+end
+
 local function parseRaidStatisticLabel(label)
 	local txt = tostring(label or "")
 	if txt == "" then return nil, nil, nil end
@@ -623,12 +769,37 @@ local function parseRaidStatisticLabel(label)
 		return nil, nil, nil
 	end
 
-	local diffText, raidName = descriptor:match("^([^:]+):%s*(.+)$")
-	if type(diffText) ~= "string" or type(raidName) ~= "string" then
-		return nil, nil, nil
+	descriptor = tostring(descriptor):gsub("^%s+", ""):gsub("%s+$", "")
+
+	local function parseDescriptorPair(left, right)
+		left = tostring(left or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		right = tostring(right or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if left == "" or right == "" then return nil, nil end
+
+		local dLeft = parseDifficultyIDFromText(left)
+		local dRight = parseDifficultyIDFromText(right)
+		if dLeft and not dRight then
+			return dLeft, right
+		end
+		if dRight and not dLeft then
+			return dRight, left
+		end
+		return nil, nil
 	end
 
-	local diffID = parseDifficultyIDFromText(diffText)
+	local diffID, raidName = nil, nil
+
+	local l1, r1 = descriptor:match("^([^:]+):%s*(.+)$")
+	diffID, raidName = parseDescriptorPair(l1, r1)
+	if not diffID then
+		local l2, r2 = descriptor:match("^(.+)%s+%-%s+(.+)$")
+		diffID, raidName = parseDescriptorPair(l2, r2)
+	end
+	if not diffID then
+		local l3, r3 = descriptor:match("^([^,]+),%s*(.+)$")
+		diffID, raidName = parseDescriptorPair(l3, r3)
+	end
+
 	if not diffID then
 		return nil, nil, nil
 	end
@@ -788,78 +959,35 @@ local function GetCategoryAchievementCount(categoryID)
 	return 0
 end
 
-local function BuildBestByRaidFromCharacterStatistics(catalog)
+local function BuildBestByRaidFromCharacterStatistics(catalog, startCategoryIndex, categoryBatchSize)
 	local out = {}
 	local matched = 0
+	local completed = true
+	local nextCategoryIndex = 1
+	local startIdx = 0
+	local endIdx = 0
+	local totalCategories = 0
 
-	if type(GetCategoryList) ~= "function"
-		or type(GetCategoryNumAchievements) ~= "function"
-		or type(GetAchievementInfo) ~= "function"
-		or type(GetStatistic) ~= "function" then
-		return out, matched
+	if type(GetStatistic) ~= "function" then
+		return out, matched, completed, nextCategoryIndex, startIdx, endIdx, totalCategories
 	end
 
-	local categories = BuildAchievementCategoryIDs(catalog)
-	local scannedCategories = 0
-	local scannedAchievements = 0
-	local hitBudget = false
-
-	for i = 1, #categories do
-		if scannedCategories >= STATS_ENRICH_MAX_CATEGORIES then
-			hitBudget = true
-			break
-		end
-		scannedCategories = scannedCategories + 1
-
-		local categoryID = categories[i]
-		local num = GetCategoryAchievementCount(categoryID)
-		for idx = 1, num do
-			scannedAchievements = scannedAchievements + 1
-			if scannedAchievements > STATS_ENRICH_MAX_ACHIEVEMENTS then
-				hitBudget = true
-				break
-			end
-
-			local okInfo, id, name, _, _, _, _, _, _, _, _, _, _, _, isStatistic = pcall(GetAchievementInfo, categoryID, idx)
-			if okInfo and id and isStatistic then
-				local okStat, rawStat = pcall(GetStatistic, id)
-				local statCount = okStat and parseStatisticValueToNumber(rawStat) or nil
-				if statCount and statCount > 0 then
-					local diffID, raidName, bossName = parseRaidStatisticLabel(name)
-					if diffID and raidName and bossName then
-						local instanceID = resolveInstanceIDFromRaidName(catalog, raidName)
-						if instanceID then
-							out[instanceID] = out[instanceID] or {}
-							local perRaid = out[instanceID]
-							local bucket = perRaid[diffID]
-							if type(bucket) ~= "table" then
-								local catRaid = type(catalog) == "table" and type(catalog.byInstanceID) == "table" and catalog.byInstanceID[instanceID] or nil
-								bucket = {
-									killed = 0,
-									total = tonumber(catRaid and catRaid.total or 0) or 0,
-									bosses = {},
-								}
-								perRaid[diffID] = bucket
-							end
-							local bossKey = string.lower(tostring(bossName))
-							if bossKey ~= "" and not bucket.bosses[bossKey] then
-								bucket.bosses[bossKey] = true
-								bucket.killed = (tonumber(bucket.killed) or 0) + 1
-								matched = matched + 1
-							end
-						end
-					end
+	local staticOut, staticMatched = BuildStaticRaidStatFallback(catalog)
+	if type(staticOut) == "table" then
+		for instanceID, perRaid in pairs(staticOut) do
+			out[instanceID] = out[instanceID] or {}
+			if type(perRaid) == "table" then
+				for diffID, node in pairs(perRaid) do
+					out[instanceID][diffID] = {
+						killed = tonumber(node and node.killed or 0) or 0,
+						total = tonumber(node and node.total or 0) or 0,
+						bosses = {},
+					}
 				end
 			end
 		end
-		if hitBudget then
-			break
-		end
 	end
-
-	if hitBudget then
-		LOCAL_LOG("WARN", "Raid statistics scan budget reached", "categories=" .. tostring(scannedCategories), "achievements=" .. tostring(scannedAchievements))
-	end
+	matched = matched + (tonumber(staticMatched) or 0)
 
 	for _, perRaid in pairs(out) do
 		for _, bucket in pairs(perRaid) do
@@ -869,16 +997,19 @@ local function BuildBestByRaidFromCharacterStatistics(catalog)
 		end
 	end
 
-	return out, matched
+	return out, matched, completed, nextCategoryIndex, startIdx, endIdx, totalCategories
 end
 
 local function ApplyRaidBestFromCharacterStatistics(raidsStore, catalog, tsNow, reason)
-	if type(raidsStore) ~= "table" then return 0, 0 end
+	if type(raidsStore) ~= "table" then return 0, 0, true end
 
-	local statsByRaid, matched = BuildBestByRaidFromCharacterStatistics(catalog)
+	local startCategoryIndex = tonumber(RAIDS._statsCategoryCursor) or 1
+	local statsByRaid, matched, completed, nextCategoryIndex, batchStart, batchEnd, totalCategories =
+		BuildBestByRaidFromCharacterStatistics(catalog, startCategoryIndex, STATS_ENRICH_CATEGORY_BATCH)
 	if type(statsByRaid) ~= "table" then
-		return 0, matched
+		return 0, matched, true
 	end
+	RAIDS._statsCategoryCursor = tonumber(nextCategoryIndex) or 1
 
 	local applied = 0
 	for instanceID, perRaid in pairs(statsByRaid) do
@@ -921,7 +1052,11 @@ local function ApplyRaidBestFromCharacterStatistics(raidsStore, catalog, tsNow, 
 		end
 	end
 
-	return applied, matched
+	if not completed then
+		LOCAL_LOG("INFO", "Raid statistics chunk processed", "batch=" .. tostring(batchStart or 0) .. "-" .. tostring(batchEnd or 0), "totalCategories=" .. tostring(totalCategories or 0))
+	end
+
+	return applied, matched, completed
 end
 
 local function buildExpansionRaidCatalog()
@@ -985,7 +1120,7 @@ local function buildExpansionRaidCatalog()
 
 			EJ_SelectInstance(instanceID)
 
-			local raidName = EJ_GetInstanceInfo()
+			local raidName, raidDescription, bgImage, buttonImage1, _, buttonImage2 = EJ_GetInstanceInfo()
 			local total = tonumber(EJ_GetNumEncounters()) or 0
 
 			if type(raidName) == "string" and raidName ~= "" and total > 0 then
@@ -1003,6 +1138,8 @@ local function buildExpansionRaidCatalog()
 				catalog.byInstanceID[instanceID] = {
 					instanceID = instanceID,
 					name       = raidName,
+					description = tostring(raidDescription or ""),
+					icon       = tonumber(buttonImage2 or buttonImage1 or bgImage or 0) or 0,
 					total      = total,
 					encounters = encounters,
 				}
@@ -1246,10 +1383,15 @@ function RAIDS:_RunStandaloneStatisticsEnrichment(reason)
 
 	self:_EnsureCatalogReady()
 
-	local applied, matched = ApplyRaidBestFromCharacterStatistics(raidsStore, RAIDS._catalog, tsNow, reason)
-	self._statsLastRunAt = tonumber(tsNow or now() or 0) or self._statsLastRunAt
+	local applied, matched, completed = ApplyRaidBestFromCharacterStatistics(raidsStore, RAIDS._catalog, tsNow, reason)
+	if completed then
+		self._statsLastRunAt = tonumber(tsNow or now() or 0) or self._statsLastRunAt
+	end
 	if applied > 0 then
 		LOCAL_LOG("INFO", "Raid best enriched from character statistics", "applied=" .. tostring(applied), "matched=" .. tostring(matched), "reason=" .. tostring(reason or "standalone"))
+	end
+	if not completed then
+		self:_ScheduleDeferredStatsScan("stats-batch-continue", 0.9)
 	end
 
 	store.lastScan = tsNow or now()
@@ -1273,6 +1415,12 @@ function RAIDS:_RunStandaloneStatisticsEnrichment(reason)
 end
 
 function RAIDS:_ShouldRunStatisticsEnrichment(reason, tsNow)
+	local r = string.lower(tostring(reason or ""))
+	local isChunkContinuation = (r:find("stats-batch", 1, true) == 1)
+	if isChunkContinuation then
+		return true, "chunk-continue"
+	end
+
 	local nowTs = tonumber(tsNow or now() or 0) or 0
 	local loginAt = tonumber(self._loginSeenAt or 0) or 0
 	if nowTs > 0 and loginAt > 0 and (nowTs - loginAt) < STATS_ENRICH_LOGIN_GRACE then
@@ -1284,7 +1432,6 @@ function RAIDS:_ShouldRunStatisticsEnrichment(reason, tsNow)
 		return false, "cooldown"
 	end
 
-	local r = string.lower(tostring(reason or ""))
 	if r == "login"
 		or r == "entering_world"
 		or r == "enable-fallback"
@@ -1315,6 +1462,7 @@ function RAIDS:OnInitialize()
 	self._loginSeenAt = tonumber(now() or 0) or 0
 	self._statsLastRunAt = 0
 	self._statsDeferredScheduled = false
+	self._statsCategoryCursor = 1
 end
 
 function RAIDS:OnEnable()
@@ -1692,8 +1840,12 @@ function RAIDS:OnUpdateInstanceInfo()
 
 	local runStats, statsGateReason = self:_ShouldRunStatisticsEnrichment(self._pendingReason, tsNow)
 	if runStats then
-		local statsApplied, statsMatched = ApplyRaidBestFromCharacterStatistics(raidsStore, RAIDS._catalog, tsNow, self._pendingReason)
-		self._statsLastRunAt = tonumber(tsNow or now() or 0) or self._statsLastRunAt
+		local statsApplied, statsMatched, statsCompleted = ApplyRaidBestFromCharacterStatistics(raidsStore, RAIDS._catalog, tsNow, self._pendingReason)
+		if statsCompleted then
+			self._statsLastRunAt = tonumber(tsNow or now() or 0) or self._statsLastRunAt
+		else
+			self:_ScheduleDeferredStatsScan("stats-batch-continue", 0.9)
+		end
 		if statsApplied > 0 then
 			LOCAL_LOG("INFO", "Raid best enriched from character statistics", "applied=" .. tostring(statsApplied), "matched=" .. tostring(statsMatched))
 		end

@@ -97,6 +97,16 @@ local function CreateHeading(parent, text)
 	return label
 end
 
+local function GetStatusColor(ready, enabled)
+	if ready then
+		return "|cff00ff00READY|r"
+	elseif enabled then
+		return "|cffffff00ENABLED (Waiting for Ready)|r"
+	else
+		return "|cffff0000INACTIVE|r"
+	end
+end
+
 -- ###########################################################################
 -- #	UI: OPTIONS BUILDER (Right Pane)
 -- ###########################################################################
@@ -216,6 +226,94 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 	end
 end
 
+local function BuildDashboardStartPage(container)
+	container:ReleaseChildren()
+	container:SetLayout("Flow")
+
+	local intro = AceGUI:Create("Label")
+	intro:SetFullWidth(true)
+	intro:SetText("Systemstatus (wie bisher im Dashboard).")
+	container:AddChild(intro)
+
+	local extGroup = AceGUI:Create("InlineGroup")
+	extGroup:SetTitle("Extensions (Kernsystem)")
+	extGroup:SetFullWidth(true)
+	extGroup:SetLayout("Flow")
+	container:AddChild(extGroup)
+
+	if GMS.REGISTRY and GMS.REGISTRY.EXT then
+		local extKeys = {}
+		for k in pairs(GMS.REGISTRY.EXT) do table.insert(extKeys, k) end
+		table.sort(extKeys)
+		for _, k in ipairs(extKeys) do
+			local e = GMS.REGISTRY.EXT[k]
+			local row = AceGUI:Create("SimpleGroup")
+			row:SetFullWidth(true)
+			row:SetLayout("Flow")
+
+			local lblName = AceGUI:Create("Label")
+			lblName:SetText("- |cff03A9F4" .. tostring(e.displayName or e.key or k) .. "|r")
+			lblName:SetWidth(240)
+			row:AddChild(lblName)
+
+			local lblVer = AceGUI:Create("Label")
+			lblVer:SetText("[v" .. tostring(e.version or "1.0.0") .. "]")
+			lblVer:SetWidth(90)
+			row:AddChild(lblVer)
+
+			local lblState = AceGUI:Create("Label")
+			lblState:SetText(GetStatusColor(e.state and e.state.READY, e.state and e.state.ENABLED))
+			lblState:SetWidth(180)
+			row:AddChild(lblState)
+
+			extGroup:AddChild(row)
+		end
+	end
+
+	local modGroup = AceGUI:Create("InlineGroup")
+	modGroup:SetTitle("Module (Features)")
+	modGroup:SetFullWidth(true)
+	modGroup:SetLayout("Flow")
+	container:AddChild(modGroup)
+
+	if GMS.REGISTRY and GMS.REGISTRY.MOD then
+		local modKeys = {}
+		for k in pairs(GMS.REGISTRY.MOD) do table.insert(modKeys, k) end
+		table.sort(modKeys)
+		for _, k in ipairs(modKeys) do
+			local m = GMS.REGISTRY.MOD[k]
+			local row = AceGUI:Create("SimpleGroup")
+			row:SetFullWidth(true)
+			row:SetLayout("Flow")
+
+			local lblName = AceGUI:Create("Label")
+			lblName:SetText("- |cffffcc00" .. tostring(m.displayName or m.key or k) .. "|r")
+			lblName:SetWidth(240)
+			row:AddChild(lblName)
+
+			local lblVer = AceGUI:Create("Label")
+			lblVer:SetText("[v" .. tostring(m.version or "1.0.0") .. "]")
+			lblVer:SetWidth(90)
+			row:AddChild(lblVer)
+
+			local lblState = AceGUI:Create("Label")
+			lblState:SetText(GetStatusColor(m.state and m.state.READY, m.state and m.state.ENABLED))
+			lblState:SetWidth(180)
+			row:AddChild(lblState)
+
+			modGroup:AddChild(row)
+		end
+	end
+
+	local btnRefresh = AceGUI:Create("Button")
+	btnRefresh:SetText("Status aktualisieren")
+	btnRefresh:SetWidth(180)
+	btnRefresh:SetCallback("OnClick", function()
+		BuildDashboardStartPage(container)
+	end)
+	container:AddChild(btnRefresh)
+end
+
 -- ###########################################################################
 -- #	UI: TREE DATA BUILDER
 -- ###########################################################################
@@ -226,6 +324,7 @@ local function GetTreeData()
 			value = "GEN_ROOT",
 			text = "Allgemein",
 			children = {
+				{ value = "GEN:DASHBOARD", text = "Startseite (Dashboard)" },
 				{ value = "GEN:CORE", text = "Zentrale Einstellungen" }
 			},
 		},
@@ -300,16 +399,16 @@ local function BuildSettingsPage(root, id, isCached)
 	treeGroup:SetLayout("List")
 
 	treeGroup:SetCallback("OnGroupSelected", function(self, _, group)
-		local parts = {}
-		for p in string.gmatch(group, "([^:]+)") do
-			table.insert(parts, p)
-		end
-
-		local targetType = parts[1]
-		local targetKey = parts[2]
+		local rawGroup = tostring(group or "")
+		local leaf = rawGroup:match("([^\001]+)$") or rawGroup
+		local targetType, targetKey = leaf:match("^([^:]+):(.+)$")
 
 		if targetType and targetKey then
-			BuildOptionsForTarget(self, targetType, targetKey)
+			if targetType == "GEN" and targetKey == "DASHBOARD" then
+				BuildDashboardStartPage(self)
+			else
+				BuildOptionsForTarget(self, targetType, targetKey)
+			end
 		else
 			self:ReleaseChildren()
 			local lbl = AceGUI:Create("Label")
@@ -322,7 +421,7 @@ local function BuildSettingsPage(root, id, isCached)
 	root:AddChild(treeGroup)
 
 	-- Select first logical group if available
-	treeGroup:SelectByPath("GEN_ROOT", "GEN:CORE")
+	treeGroup:SelectByPath("GEN_ROOT", "GEN:DASHBOARD")
 end
 
 -- ###########################################################################

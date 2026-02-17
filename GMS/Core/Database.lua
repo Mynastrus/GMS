@@ -458,7 +458,10 @@ local function GetScopeRoot(self, scope)
 		return global
 	elseif scope == "CHAR" then
 		global.characters = type(global.characters) == "table" and global.characters or {}
-		local cKey = self:GetCharacterGUID()
+		local cKey = type(UnitGUID) == "function" and UnitGUID("player") or nil
+		if type(cKey) ~= "string" or cKey == "" then
+			return nil
+		end
 		global.characters[cKey] = type(global.characters[cKey]) == "table" and global.characters[cKey] or {}
 		return global.characters[cKey]
 	elseif scope == "GUILD" then

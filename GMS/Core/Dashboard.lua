@@ -85,20 +85,6 @@ GMS:RegisterExtension({
 })
 
 -- ###########################################################################
--- #	HELPERS
--- ###########################################################################
-
-local function GetStatusColor(ready, enabled)
-	if ready then
-		return "|cff00ff00READY|r"
-	elseif enabled then
-		return "|cffffff00ENABLED (Waiting for Ready)|r"
-	else
-		return "|cffff0000INACTIVE|r"
-	end
-end
-
--- ###########################################################################
 -- #	UI RENDERING
 -- ###########################################################################
 
@@ -125,101 +111,46 @@ local function RenderDashboard(root, id, isCached)
 	infoGroup:SetLayout("Flow")
 	scroll:AddChild(infoGroup)
 
+	local guildInfoMod = (type(GMS.GetModule) == "function") and GMS:GetModule("GuildInfo", true) or nil
+	local guild = (guildInfoMod and type(guildInfoMod.GetSnapshot) == "function")
+		and guildInfoMod:GetSnapshot() or nil
+
+	local guildText = "Keine Gildeninformationen verfügbar."
+	if type(guild) == "table" then
+		if guild.inGuild then
+			guildText = string.format(
+				"Guild: |cffffcc00%s|r\nRealm/Faction: |cffd7d7d7%s / %s|r\nRang: |cffd7d7d7%s (%s)|r\nMitglieder online: |cffd7d7d7%d/%d|r",
+				tostring(guild.name or "-"),
+				tostring(guild.realm or "-"),
+				tostring(guild.faction or "-"),
+				tostring(guild.rankName or "-"),
+				tostring(guild.rankIndex or "-"),
+				tonumber(guild.memberOnline) or 0,
+				tonumber(guild.memberCount) or 0
+			)
+		else
+			guildText = "Aktuell in keiner Gilde."
+		end
+	end
+
 	local lblInfo = AceGUI:Create("Label")
 	lblInfo:SetFullWidth(true)
 	lblInfo:SetText(string.format(
 		"Willkommen bei |cff03A9F4GMS – Guild Management System|r.\n" ..
-		"Version: |cffffcc00%s|r\n\n" ..
-		"Dieses Dashboard gibt eine Übersicht über alle aktiven Komponenten des Systems.",
-		GMS.VERSION or "?.?.?"
+		"Version: |cffffcc00%s|r\n\n%s",
+		GMS.VERSION or "?.?.?",
+		guildText
 	))
 	infoGroup:AddChild(lblInfo)
 
-	-- Extensions Block
-	local extGroup = AceGUI:Create("InlineGroup")
-	extGroup:SetTitle("Extensions (Kernsystem)")
-	extGroup:SetFullWidth(true)
-	extGroup:SetLayout("Flow")
-	scroll:AddChild(extGroup)
-
-	if GMS.REGISTRY and GMS.REGISTRY.EXT then
-		local keys = {}
-		for k in pairs(GMS.REGISTRY.EXT) do table.insert(keys, k) end
-		table.sort(keys)
-
-		for _, k in ipairs(keys) do
-			local e = GMS.REGISTRY.EXT[k]
-			local row = AceGUI:Create("SimpleGroup")
-			row:SetFullWidth(true)
-			row:SetLayout("Flow")
-
-			local lblName = AceGUI:Create("Label")
-			lblName:SetText("- |cff03A9F4" .. (e.displayName or e.key) .. "|r")
-			lblName:SetWidth(200)
-
-			local lblVer = AceGUI:Create("Label")
-			lblVer:SetText("[v" .. (e.version or "1.0.0") .. "]")
-			lblVer:SetWidth(80)
-
-			local status = GetStatusColor(e.state and e.state.READY)
-			local lblStatus = AceGUI:Create("Label")
-			lblStatus:SetText(status)
-			lblStatus:SetWidth(100)
-
-			row:AddChild(lblName)
-			row:AddChild(lblVer)
-			row:AddChild(lblStatus)
-			extGroup:AddChild(row)
-		end
-	end
-
-	-- Modules Block
-	local modGroup = AceGUI:Create("InlineGroup")
-	modGroup:SetTitle("Module (Features)")
-	modGroup:SetFullWidth(true)
-	modGroup:SetLayout("Flow")
-	scroll:AddChild(modGroup)
-
-	if GMS.REGISTRY and GMS.REGISTRY.MOD then
-		local keys = {}
-		for k in pairs(GMS.REGISTRY.MOD) do table.insert(keys, k) end
-		table.sort(keys)
-
-		for _, k in ipairs(keys) do
-			local m = GMS.REGISTRY.MOD[k]
-			local row = AceGUI:Create("SimpleGroup")
-			row:SetFullWidth(true)
-			row:SetLayout("Flow")
-
-			local lblName = AceGUI:Create("Label")
-			lblName:SetText("- |cffffcc00" .. (m.displayName or m.key) .. "|r")
-			lblName:SetWidth(200)
-
-			local lblVer = AceGUI:Create("Label")
-			lblVer:SetText("[v" .. (m.version or "1.0.0") .. "]")
-			lblVer:SetWidth(80)
-
-			local status = GetStatusColor(m.state and m.state.READY, m.state and m.state.ENABLED)
-			local lblStatus = AceGUI:Create("Label")
-			lblStatus:SetText(status)
-			lblStatus:SetWidth(100)
-
-			row:AddChild(lblName)
-			row:AddChild(lblVer)
-			row:AddChild(lblStatus)
-			modGroup:AddChild(row)
-		end
-	end
-
-	-- Refresh Button
-	local btnRefresh = AceGUI:Create("Button")
-	btnRefresh:SetText("Status aktualisieren")
-	btnRefresh:SetWidth(180)
-	btnRefresh:SetCallback("OnClick", function()
-		GMS.UI:Navigate(METADATA.INTERN_NAME)
-	end)
-	scroll:AddChild(btnRefresh)
+	local hint = AceGUI:Create("Label")
+	hint:SetFullWidth(true)
+	hint:SetText("Den technischen Systemstatus findest du jetzt unter: Einstellungen -> Startseite (Dashboard).")
+	scroll:AddChild(hint)
 end
+
+GMS.Dashboard = GMS.Dashboard or {}
+GMS.Dashboard.Render = RenderDashboard
 
 -- ###########################################################################
 -- #	INITIALIZATION
