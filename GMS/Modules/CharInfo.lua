@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.14",
+	VERSION      = "1.0.15",
 }
 
 local LibStub = LibStub
@@ -102,6 +102,19 @@ local function LOCAL_LOG(level, msg, ...)
 	end
 end
 
+local function LT(key, fallback, ...)
+	if type(GMS.T) == "function" then
+		local ok, localized = pcall(GMS.T, GMS, key, ...)
+		if ok and type(localized) == "string" and localized ~= "" and localized ~= key then
+			return localized
+		end
+	end
+	if select("#", ...) > 0 then
+		return string.format(tostring(fallback or key), ...)
+	end
+	return tostring(fallback or key)
+end
+
 -- ###########################################################################
 -- #	MODULE
 -- ###########################################################################
@@ -156,7 +169,7 @@ local function SafeCall(fn, ...)
 	if not ok then
 		LOCAL_LOG("ERROR", "CharInfo error: %s", tostring(err))
 		if type(GMS.Print) == "function" then
-			GMS:Print("CharInfo Fehler: " .. tostring(err))
+			GMS:Print(LT("CHARINFO_ERROR_FMT", "CharInfo Fehler: %s", tostring(err)))
 		end
 	end
 	return ok
@@ -813,7 +826,18 @@ local function BuildRaidRows(all, catalog)
 		[2769] = "Befreiung von Lorenhall",
 		[2810] = "Manaschmiede Omega",
 	}
-	local KNOWN_RAID_INSTANCE_IDS = { 2657, 2769, 2810 }
+	local KNOWN_RAID_INSTANCE_IDS = {}
+	local raidIdsLib = _G and _G.GMS_RAIDIDS or nil
+	if type(raidIdsLib) == "table" and type(raidIdsLib.MAP_TO_BOSS_STATS) == "table" then
+		for mapID in pairs(raidIdsLib.MAP_TO_BOSS_STATS) do
+			KNOWN_RAID_INSTANCE_IDS[#KNOWN_RAID_INSTANCE_IDS + 1] = tonumber(mapID) or mapID
+		end
+		table.sort(KNOWN_RAID_INSTANCE_IDS, function(a, b)
+			return tonumber(a) < tonumber(b)
+		end)
+	else
+		KNOWN_RAID_INSTANCE_IDS = { 2657, 2769, 2810 }
+	end
 
 	local function IsNumericOnlyText(v)
 		local s = tostring(v or "")
@@ -955,31 +979,31 @@ local function BuildSelfRaidWaitingText(details)
 
 	local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true)) or nil
 	if type(raids) ~= "table" then
-		return "Warte auf RAIDS-Modulinitialisierung..."
+		return LT("CHARINFO_RAID_WAIT_MOD_INIT", "Warte auf RAIDS-Modulinitialisierung...")
 	end
 
 	if raids._storePollActive == true then
-		return "Warte auf Charakter-Speicherbindung..."
+		return LT("CHARINFO_RAID_WAIT_STORE_BIND", "Warte auf Charakter-Speicherbindung...")
 	end
 	if raids._pendingScan == true then
 		local reason = tostring(raids._pendingReason or "initial")
-		return "Warte auf Raidscan (" .. reason .. ")..."
+		return LT("CHARINFO_RAID_WAIT_SCAN_REASON", "Warte auf Raidscan (%s)...", reason)
 	end
 	if raids._statsDeferredScheduled == true then
-		return "Warte auf verzögerten Raid-Statistikscan..."
+		return LT("CHARINFO_RAID_WAIT_DEFERRED_SCAN", "Warte auf verzögerten Raid-Statistikscan...")
 	end
 	local cursor = tonumber(raids._statsCategoryCursor or 1) or 1
 	if cursor > 1 then
-		return "Raid-Statistikscan läuft..."
+		return LT("CHARINFO_RAID_WAIT_STATS_RUNNING", "Raid-Statistikscan läuft...")
 	end
 	if raids._ejUnsupported == true then
-		return "Warte auf SavedInstances-Raiddaten..."
+		return LT("CHARINFO_RAID_WAIT_SAVEDINSTANCES", "Warte auf SavedInstances-Raiddaten...")
 	end
 	if raids._ejReady == false then
-		return "Warte auf Encounter-Journal-Initialisierung..."
+		return LT("CHARINFO_RAID_WAIT_EJ_INIT", "Warte auf Encounter-Journal-Initialisierung...")
 	end
 
-	return "Warte auf erste Raid-Daten..."
+	return LT("CHARINFO_RAID_WAIT_FIRST_DATA", "Warte auf erste Raid-Daten...")
 end
 
 local function OpenRaidInEncounterJournal(instanceID)
@@ -1473,7 +1497,7 @@ end
 local function AddNoDataHint(parent, text)
 	local line = AceGUI:Create("Label")
 	line:SetFullWidth(true)
-	line:SetText("|cffffb366" .. tostring(text or "No data available.") .. "|r")
+	line:SetText("|cffffb366" .. tostring(text or LT("CHARINFO_NO_DATA", "No data available.")) .. "|r")
 	if line.label then
 		line.label:SetFontObject(GameFontNormalSmallOutline)
 	end
@@ -1488,7 +1512,7 @@ local function AddNoDataHintCentered(parent, text)
 
 	local line = AceGUI:Create("Label")
 	line:SetFullWidth(true)
-	line:SetText("|c99ffb366" .. tostring(text or "No data available.") .. "|r")
+	line:SetText("|c99ffb366" .. tostring(text or LT("CHARINFO_NO_DATA", "No data available.")) .. "|r")
 	if line.label then
 		line.label:SetFontObject(GameFontNormalSmallOutline)
 		line.label:SetJustifyH("CENTER")
@@ -1759,7 +1783,7 @@ local function StartRaidWaitAnimTicker(labelWidget, baseText, spinnerWidgets)
 	local hasSpinnerWidgets = (type(spinnerWidgets) == "table" and #spinnerWidgets > 0)
 	if not hasMainLabel and not hasSpinnerWidgets then return end
 
-	local base = tostring(baseText or "Warte auf Raidscan")
+	local base = tostring(baseText or LT("CHARINFO_RAID_WAIT_SCAN", "Warte auf Raidscan"))
 	base = base:gsub("[%.%s]+$", "")
 	local frames = { "|", "/", "-", "\\" }
 	CHARINFO._raidWaitAnimStep = 0
@@ -1769,7 +1793,7 @@ local function StartRaidWaitAnimTicker(labelWidget, baseText, spinnerWidgets)
 			StopRaidWaitAnimTicker()
 			return
 		end
-		if type(labelWidget.SetText) ~= "function" then
+		if hasMainLabel and type(labelWidget.SetText) ~= "function" then
 			StopRaidWaitAnimTicker()
 			return
 		end
@@ -1923,8 +1947,8 @@ function CHARINFO:TryRegisterPage()
 			warn:SetFullWidth(true)
 			warn:SetLayout("List")
 			wrapper:AddChild(warn)
-			AddCardTitle(warn, "No Data Found")
-			AddNoDataHint(warn, "No synced data exists for this character yet. Data will appear after sync/module scans.")
+			AddCardTitle(warn, LT("CHARINFO_NO_DATA_FOUND_TITLE", "No Data Found"))
+			AddNoDataHint(warn, LT("CHARINFO_NO_SYNCED_DATA_HINT", "No synced data exists for this character yet. Data will appear after sync/module scans."))
 		end
 
 		local contentRow = AceGUI:Create("SimpleGroup")
@@ -2160,9 +2184,9 @@ function CHARINFO:TryRegisterPage()
 		local function BuildCard_Raids(parent)
 			StopRaidWaitAnimTicker()
 
-			local card = NewCardContainer(parent, "Raid Data")
-			AddValueLine(card, "Best", ColorizeBestText(details.raids.summary or "-"))
-			AddValueLine(card, "Source", details.raids.source or "-")
+			local card = NewCardContainer(parent, LT("CHARINFO_CARD_RAID_DATA", "Raid Data"))
+			AddValueLine(card, LT("CHARINFO_LABEL_BEST", "Best"), ColorizeBestText(details.raids.summary or "-"))
+			AddValueLine(card, LT("CHARINFO_LABEL_SOURCE", "Source"), details.raids.source or "-")
 			local raidPending = (BuildSelfRaidWaitingText(details) ~= nil)
 
 			local cardWidth = colWidth - 32
@@ -2225,14 +2249,14 @@ function CHARINFO:TryRegisterPage()
 
 					local current = type(raidRow.current) == "table" and raidRow.current[diffID] or nil
 					if type(current) ~= "table" or (tonumber(current.total) or 0) <= 0 then
-						GameTooltip:AddLine("Kein aktueller Lockout.", 0.75, 0.75, 0.75)
+						GameTooltip:AddLine(LT("CHARINFO_RAID_TOOLTIP_NO_LOCKOUT", "Kein aktueller Lockout."), 0.75, 0.75, 0.75)
 						GameTooltip:Show()
 						return
 					end
 
 					local killed = tonumber(current.killed) or 0
 					local total = tonumber(current.total) or 0
-					GameTooltip:AddLine(string.format("Lockout: %d / %d", killed, total), 0.85, 0.85, 0.85)
+					GameTooltip:AddLine(LT("CHARINFO_RAID_TOOLTIP_LOCKOUT_FMT", "Lockout: %d / %d", killed, total), 0.85, 0.85, 0.85)
 
 					local encounters = type(raidRow.encounters) == "table" and raidRow.encounters or {}
 					local bosses = type(current.bosses) == "table" and current.bosses or {}
@@ -2252,11 +2276,13 @@ function CHARINFO:TryRegisterPage()
 							elseif not hasBossMap then
 								bossKilled = i <= killed
 							end
-							local statusText = bossKilled and ("|c" .. killedColor .. "Besiegt|r") or ("|c" .. availableColor .. "Verfügbar|r")
+							local statusText = bossKilled
+								and ("|c" .. killedColor .. LT("CHARINFO_RAID_TOOLTIP_BOSS_KILLED", "Besiegt") .. "|r")
+								or ("|c" .. availableColor .. LT("CHARINFO_RAID_TOOLTIP_BOSS_AVAILABLE", "Verfügbar") .. "|r")
 							GameTooltip:AddDoubleLine(ename, statusText, 1, 1, 1, 1, 1, 1)
 						end
 					else
-						GameTooltip:AddLine("Bossliste nicht verfügbar.", 0.75, 0.75, 0.75)
+						GameTooltip:AddLine(LT("CHARINFO_RAID_TOOLTIP_BOSSLIST_MISSING", "Bossliste nicht verfügbar."), 0.75, 0.75, 0.75)
 					end
 
 					GameTooltip:Show()
@@ -2272,11 +2298,11 @@ function CHARINFO:TryRegisterPage()
 			card:AddChild(header)
 
 			AddHeadCell(header, nameW, "", false)
-			AddHeadCell(header, cellW, "LFR", true)
-			AddHeadCell(header, cellW, "N", true)
-			AddHeadCell(header, cellW, "H", true)
-			AddHeadCell(header, cellW, "M", true)
-			AddHeadCell(header, bestW, "BEST", true)
+			AddHeadCell(header, cellW, LT("CHARINFO_RAID_DIFF_LFR", "LFR"), true)
+			AddHeadCell(header, cellW, LT("CHARINFO_RAID_DIFF_N", "N"), true)
+			AddHeadCell(header, cellW, LT("CHARINFO_RAID_DIFF_H", "H"), true)
+			AddHeadCell(header, cellW, LT("CHARINFO_RAID_DIFF_M", "M"), true)
+			AddHeadCell(header, bestW, LT("CHARINFO_RAID_DIFF_BEST", "BEST"), true)
 
 			if #details.raids.rows <= 0 then
 				if tostring(details.raids.summary or "-") == "-" then
@@ -2285,10 +2311,10 @@ function CHARINFO:TryRegisterPage()
 						local waitLabel = AddNoDataHintCentered(card, waitText)
 						StartRaidWaitAnimTicker(waitLabel, waitText)
 					else
-						AddNoDataHint(card, "No raid progress data available for this character.")
+						AddNoDataHint(card, LT("CHARINFO_RAID_NO_PROGRESS", "No raid progress data available for this character."))
 					end
 				else
-					AddMutedLine(card, "Detailed per-raid rows are not available yet.")
+					AddMutedLine(card, LT("CHARINFO_RAID_ROWS_NOT_AVAILABLE", "Detailed per-raid rows are not available yet."))
 				end
 				return
 			end
@@ -2332,7 +2358,7 @@ function CHARINFO:TryRegisterPage()
 					if desc ~= "" then
 						GameTooltip:AddLine(desc, 0.9, 0.9, 0.9, true)
 					else
-						GameTooltip:AddLine("Keine Raidbeschreibung verfügbar.", 0.75, 0.75, 0.75)
+						GameTooltip:AddLine(LT("CHARINFO_RAID_DESC_MISSING", "Keine Raidbeschreibung verfügbar."), 0.75, 0.75, 0.75)
 					end
 					GameTooltip:Show()
 				end)

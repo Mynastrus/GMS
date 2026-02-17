@@ -70,6 +70,7 @@ Core\ModuleStates.lua
 Core\Database.lua
 Core\Permissions.lua
 Core\Comm.lua
+Core\RaidIds.lua
 
 Core\SlashCommands.lua
 Core\ChatLinks.lua

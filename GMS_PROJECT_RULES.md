@@ -373,3 +373,29 @@ local C_Timer          = C_Timer
 * Stattdessen wird die lokale Variable `XYZ` verwendet.
 * Die Lokalisierung dient als zentrale Stelle zur Absicherung gegen fehlende APIs in verschiedenen WoW-Umgebungen.
 
+---
+
+## 13. Text-Lokalisierung (Pflicht)
+
+Alle angezeigten Texte **MÜSSEN** lokalisierbar sein, sofern es sich nicht um Eigennamen handelt.
+
+### 13.1 Geltungsbereich
+
+Die Regel gilt für:
+
+* Chat-Ausgaben
+* UI-Texte
+* generierte Texte
+* angezeigte Texte
+* Tooltip-Texte
+
+### 13.2 Ausnahme
+
+Nicht lokalisierungspflichtig sind nur **Eigennamen** (z. B. Charakter-, NPC-, Instanz- oder Itemnamen aus Blizzard-Daten).
+
+### 13.3 Ablageort der Locales
+
+Die Lokalisierungsdateien befinden sich im Ordner:
+
+* `GMS/Locales/`
+

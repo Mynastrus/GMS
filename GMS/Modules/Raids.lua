@@ -78,7 +78,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.14",
+	VERSION      = "1.2.15",
 }
 
 -- ###########################################################################
@@ -112,6 +112,19 @@ local function LOCAL_LOG(level, msg, ...)
 	if GMS._LOG_NOTIFY then
 		GMS._LOG_NOTIFY(entry, idx)
 	end
+end
+
+local function TR(key, fallback, ...)
+	if type(GMS.T) == "function" then
+		local ok, localized = pcall(GMS.T, GMS, key, ...)
+		if ok and type(localized) == "string" and localized ~= "" and localized ~= key then
+			return localized
+		end
+	end
+	if select("#", ...) > 0 then
+		return string.format(tostring(fallback or key), ...)
+	end
+	return tostring(fallback or key)
 end
 
 -- ###########################################################################
@@ -321,9 +334,9 @@ local function RegisterRaidsSlash()
 			local ok = RAIDS:ScanNow("slash_scan")
 			if type(GMS.Print) == "function" then
 				if ok then
-					GMS:Print("Raids: scan requested.")
+					GMS:Print(TR("RAIDS_SLASH_SCAN_REQUESTED", "Raids: scan requested."))
 				else
-					GMS:Print("Raids: scan could not be started.")
+					GMS:Print(TR("RAIDS_SLASH_SCAN_FAILED", "Raids: scan could not be started."))
 				end
 			end
 			return
@@ -332,16 +345,20 @@ local function RegisterRaidsSlash()
 		if cmd == "rebuild" then
 			local ok = RAIDS:RebuildCatalog()
 			if type(GMS.Print) == "function" then
-				GMS:Print(ok and "Raids: catalog rebuild started." or "Raids: catalog rebuild not available.")
+				if ok then
+					GMS:Print(TR("RAIDS_SLASH_REBUILD_STARTED", "Raids: catalog rebuild started."))
+				else
+					GMS:Print(TR("RAIDS_SLASH_REBUILD_FAILED", "Raids: catalog rebuild not available."))
+				end
 			end
 			return
 		end
 
 		if type(GMS.Print) == "function" then
-			GMS:Print("Usage: /gms raids scan")
+			GMS:Print(TR("RAIDS_SLASH_USAGE", "Usage: /gms raids scan"))
 		end
 	end, {
-		help = "/gms raids scan - trigger a raid lockout scan now",
+		help = TR("RAIDS_SLASH_HELP", "/gms raids scan - trigger a raid lockout scan now"),
 	})
 
 	RAIDS._slashRegistered = true
@@ -614,68 +631,23 @@ local function parseStatisticValueToNumber(raw)
 	return n
 end
 
--- Deterministic fallback for raids where statistic label parsing may vary by locale/client.
--- Format per boss: { LFR_ID, N_ID, H_ID, M_ID }
-local STATIC_BOSS_STATS_BY_INSTANCE = {
-	-- InstanceID 2657 = Palast von Nerub'Ar / Palace of Nerub-ar
-	[2657] = {
-		aliases = {
-			"palastvonnerubar",
-			"palaceofnerubar",
-		},
-		bosses = {
-			{ 40267, 40268, 40269, 40270 },
-			{ 40271, 40272, 40273, 40274 },
-			{ 40275, 40276, 40277, 40278 },
-			{ 40279, 40280, 40281, 40282 },
-			{ 40283, 40284, 40285, 40286 },
-			{ 40287, 40288, 40289, 40290 },
-			{ 40291, 40292, 40293, 40294 },
-			{ 40295, 40296, 40297, 40298 },
-		},
-	},
-	-- InstanceID 2769 = Befreiung von Lorenhall / Liberation of Undermine
-	[2769] = {
-		aliases = {
-			"befreiungvonlorenhall",
-			"liberationofundermine",
-		},
-		bosses = {
-			{ 41299, 41300, 41301, 41302 },
-			{ 41303, 41304, 41305, 41306 },
-			{ 41307, 41308, 41309, 41310 },
-			{ 41311, 41312, 41313, 41314 },
-			{ 41315, 41316, 41317, 41318 },
-			{ 41319, 41320, 41321, 41322 },
-			{ 41323, 41324, 41325, 41326 },
-			{ 41327, 41328, 41329, 41330 },
-		},
-	},
-	-- InstanceID 2810 = Manaschmiede Omega / Manaforge Omega
-	[2810] = {
-		aliases = {
-			"manaschmiedeomega",
-			"manaforgeomega",
-		},
-		bosses = {
-			{ 41633, 41634, 41635, 41636 },
-			{ 41637, 41638, 41639, 41640 },
-			{ 41641, 41642, 41643, 41644 },
-			{ 41645, 41646, 41647, 41648 },
-			{ 41649, 41650, 41651, 41652 },
-			{ 41653, 41654, 41655, 41656 },
-			{ 41657, 41658, 41659, 41660 },
-			{ 41661, 41662, 41663, 41664 },
-		},
-	},
-}
+local function GetRaidIdsMapByInstance()
+	local lib = _G and _G.GMS_RAIDIDS or nil
+	local map = lib and lib.MAP_TO_BOSS_STATS or nil
+	if type(map) == "table" then
+		return map
+	end
+	return {}
+end
 
-local STATIC_DIFF_INDEX_TO_ID = {
-	[1] = 17, -- LFR
-	[2] = 14, -- N
-	[3] = 15, -- H
-	[4] = 16, -- M
-}
+local function GetRaidIdsDiffIndexToID()
+	local lib = _G and _G.GMS_RAIDIDS or nil
+	local map = lib and lib.DIFF_INDEX_TO_ID or nil
+	if type(map) == "table" then
+		return map
+	end
+	return { [1] = 17, [2] = 14, [3] = 15, [4] = 16 }
+end
 
 local STATIC_INSTANCE_BY_RAID_NORM = nil
 
@@ -685,7 +657,8 @@ local function EnsureStaticRaidAliasIndex()
 	end
 
 	local idx = {}
-	for instanceID, cfg in pairs(STATIC_BOSS_STATS_BY_INSTANCE) do
+	local mapByInstance = GetRaidIdsMapByInstance()
+	for instanceID, cfg in pairs(mapByInstance) do
 		if type(cfg) == "table" and type(cfg.aliases) == "table" then
 			for i = 1, #cfg.aliases do
 				local alias = normalizeRaidName(cfg.aliases[i])
@@ -705,6 +678,8 @@ local function BuildStaticRaidStatFallback(catalog)
 	if type(GetStatistic) ~= "function" then
 		return out, matched
 	end
+	local mapByInstance = GetRaidIdsMapByInstance()
+	local diffIndexToID = GetRaidIdsDiffIndexToID()
 
 	local function applyRows(targetInstanceID, bossStatRows)
 		if type(bossStatRows) ~= "table" or #bossStatRows <= 0 then
@@ -713,7 +688,7 @@ local function BuildStaticRaidStatFallback(catalog)
 		local totalBosses = #bossStatRows
 		out[targetInstanceID] = out[targetInstanceID] or {}
 		for statDiffIndex = 1, 4 do
-			local diffID = STATIC_DIFF_INDEX_TO_ID[statDiffIndex]
+			local diffID = diffIndexToID[statDiffIndex]
 			local killed = 0
 			for bossIdx = 1, totalBosses do
 				local ids = bossStatRows[bossIdx]
@@ -741,15 +716,15 @@ local function BuildStaticRaidStatFallback(catalog)
 		for instanceID, raid in pairs(catalog.byInstanceID) do
 			local raidNameNorm = normalizeRaidName(raid and raid.name or "")
 			local staticInstanceID = staticByName[raidNameNorm]
-			if staticInstanceID and type(STATIC_BOSS_STATS_BY_INSTANCE[staticInstanceID]) == "table" then
-				local rows = STATIC_BOSS_STATS_BY_INSTANCE[staticInstanceID].bosses
+			if staticInstanceID and type(mapByInstance[staticInstanceID]) == "table" then
+				local rows = mapByInstance[staticInstanceID].bosses
 				applyRows(instanceID, rows)
 			end
 		end
 	end
 
 	-- Always run direct instance-ID fallback as well (works even when EJ catalog is not ready).
-	for instanceID, cfg in pairs(STATIC_BOSS_STATS_BY_INSTANCE) do
+	for instanceID, cfg in pairs(mapByInstance) do
 		local iid = tonumber(instanceID) or instanceID
 		if type(out[iid]) ~= "table" then
 			applyRows(iid, cfg and cfg.bosses)
