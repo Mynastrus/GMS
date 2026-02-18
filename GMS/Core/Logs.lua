@@ -38,6 +38,7 @@ local table              = table
 local tonumber           = tonumber
 local CreateFrame        = CreateFrame
 local UIParent           = UIParent
+local GameTooltip        = GameTooltip
 local EasyMenu           = EasyMenu
 local UIDropDownMenu_Initialize = UIDropDownMenu_Initialize
 local UIDropDownMenu_CreateInfo = UIDropDownMenu_CreateInfo
@@ -55,7 +56,7 @@ local METADATA = {
 	INTERN_NAME  = "LOGS",
 	SHORT_NAME   = "Logs",
 	DISPLAY_NAME = "Logging Console",
-	VERSION      = "1.1.21",
+	VERSION      = "1.4.2",
 }
 
 -- ###########################################################################
@@ -132,6 +133,7 @@ local REG_DEFAULTS = {
 	viewTRACE  = false,
 	viewDEBUG  = false,
 	viewINFO   = true,
+	viewCOMM   = true,
 	viewWARN   = true,
 	viewERROR  = true,
 }
@@ -140,6 +142,7 @@ local COLORS = {
 	TRACE = "|cff9d9d9d",
 	DEBUG = "|cff4da6ff",
 	INFO  = "|cff4dff88",
+	COMM  = "|cff6ec8ff",
 	WARN  = "|cffffd24d",
 	ERROR = "|cffff4d4d",
 }
@@ -153,6 +156,7 @@ LOGS._dockRegistered = false
 LOGS._slashRegistered = false
 
 LOGS._ticker = nil
+LOGS._volatileProfile = nil
 
 -- Notify batching (avoid ingest per log line)
 LOGS._notifyPending = false
@@ -178,11 +182,13 @@ local function levelName(n)
 	return LOGS.LEVEL_NAMES[n] or "INFO"
 end
 
-local VIEW_LEVEL_KEYS = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR" }
+local VIEW_LEVEL_KEYS = { "TRACE", "DEBUG", "INFO", "COMM", "WARN", "ERROR" }
+local SEVERITY_LEVEL_KEYS = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR" }
 local VIEW_LEVEL_DEFAULTS = {
 	TRACE = false,
 	DEBUG = false,
 	INFO = true,
+	COMM = true,
 	WARN = true,
 	ERROR = true,
 }
@@ -202,8 +208,13 @@ local function ensureViewLevelFilter(p)
 		if legacyMin then
 			for i = 1, #VIEW_LEVEL_KEYS do
 				local key = VIEW_LEVEL_KEYS[i]
+				p["view" .. key] = false
+			end
+			for i = 1, #SEVERITY_LEVEL_KEYS do
+				local key = SEVERITY_LEVEL_KEYS[i]
 				p["view" .. key] = (i >= legacyMin)
 			end
+			p.viewCOMM = true
 		else
 			for i = 1, #VIEW_LEVEL_KEYS do
 				local key = VIEW_LEVEL_KEYS[i]
@@ -227,9 +238,56 @@ local function nowReadable(fmt)
 	return ""
 end
 
+local function cloneDefaults(defaults)
+	local out = {}
+	for k, v in pairs(defaults or {}) do
+		out[k] = v
+	end
+	return out
+end
+
+local function markProfileDirty(p)
+	if type(LOGS._volatileProfile) == "table" and p == LOGS._volatileProfile then
+		LOGS._volatileProfile.__dirty = true
+	end
+end
+
+local ensureSourceFilter
+
 local function profile()
-	local p = GMS:GetModuleOptions("LOGS") or REG_DEFAULTS
+	local p = nil
+	if type(GMS.GetModuleOptions) == "function" then
+		p = GMS:GetModuleOptions("LOGS")
+	end
+
+	if type(p) ~= "table" and type(GMS.RegisterModuleOptions) == "function" then
+		GMS:RegisterModuleOptions("LOGS", REG_DEFAULTS, "PROFILE")
+		if type(GMS.GetModuleOptions) == "function" then
+			p = GMS:GetModuleOptions("LOGS")
+		end
+	end
+
+	if type(p) ~= "table" then
+		if type(LOGS._volatileProfile) ~= "table" then
+			LOGS._volatileProfile = cloneDefaults(REG_DEFAULTS)
+			LOGS._volatileProfile.__dirty = false
+		end
+		p = LOGS._volatileProfile
+	else
+		if type(LOGS._volatileProfile) == "table" and LOGS._volatileProfile.__dirty == true then
+			for k, v in pairs(LOGS._volatileProfile) do
+				if k ~= "__dirty" then
+					p[k] = v
+				end
+			end
+		end
+		LOGS._volatileProfile = nil
+	end
+
 	ensureViewLevelFilter(p)
+	if type(ensureSourceFilter) == "function" and ensureSourceFilter(p) then
+		markProfileDirty(p)
+	end
 	return p
 end
 
@@ -247,18 +305,116 @@ local function isLevelVisible(levelOrName)
 	return p["view" .. name] == true
 end
 
-local function isEntryVisible(entry)
-	if type(entry) ~= "table" then return false end
-	local msg = tostring(entry.msg or "")
-	msg = msg:gsub("[\r\n]+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-	if msg == "" then
-		return false
+local function makeSourceToken(srcType, srcName)
+	local t = tostring(srcType or ""):upper()
+	local s = tostring(srcName or ""):upper()
+	if t == "" and s == "" then
+		return ""
+	end
+	return t .. "|" .. s
+end
+
+local function getEntrySourceToken(entry)
+	if type(entry) ~= "table" then return "" end
+	return makeSourceToken(entry.type, entry.source)
+end
+
+local function resolveSourceFilterLabel(srcType, srcName)
+	local t = tostring(srcType or "")
+	local s = tostring(srcName or "")
+	if s == "" then s = "-" end
+	local display = s
+	local localeKey = "NAME_" .. s:upper()
+	if type(GMS.T) == "function" then
+		local ok, localized = pcall(GMS.T, GMS, localeKey)
+		if ok and type(localized) == "string" and localized ~= "" and localized ~= localeKey then
+			display = localized
+		end
+	end
+	return (t ~= "") and string.format("%s [%s]", display, t) or display
+end
+
+local function collectAvailableSourceFilters()
+	local entries = LOGS._entries or {}
+	local map = {}
+	local out = {}
+	for i = 1, #entries do
+		local e = entries[i]
+		if type(e) == "table" then
+			local token = getEntrySourceToken(e)
+			if token ~= "" and not map[token] then
+				local srcType = tostring(e.type or "")
+				local srcName = tostring(e.source or "")
+				local item = {
+					token = token,
+					sourceType = srcType,
+					sourceName = srcName,
+					label = resolveSourceFilterLabel(srcType, srcName),
+				}
+				map[token] = item
+				out[#out + 1] = item
+			end
+		end
+	end
+	table.sort(out, function(a, b)
+		return tostring(a and a.label or "") < tostring(b and b.label or "")
+	end)
+	return out
+end
+
+ensureSourceFilter = function(p)
+	p.viewSources = type(p.viewSources) == "table" and p.viewSources or {}
+	local changed = false
+	local list = collectAvailableSourceFilters()
+	for i = 1, #list do
+		local token = list[i].token
+		if p.viewSources[token] == nil then
+			p.viewSources[token] = true
+			changed = true
+		end
+	end
+	return changed
+end
+
+local function isSourceTokenVisible(token)
+	local p = profile()
+	p.viewSources = type(p.viewSources) == "table" and p.viewSources or {}
+	local v = p.viewSources[token]
+	if v == nil then
+		p.viewSources[token] = true
+		markProfileDirty(p)
+		return true
+	end
+	return v == true
+end
+
+local function isSourceVisible(entry)
+	local token = getEntrySourceToken(entry)
+	if token == "" then return true end
+	return isSourceTokenVisible(token)
+end
+
+local function displayLevelKey(entry)
+	if type(entry) ~= "table" then
+		return "INFO"
+	end
+	local explicit = tostring(entry.displayLevel or ""):upper()
+	if explicit ~= "" then
+		return explicit
+	end
+	if tostring(entry.level or ""):upper() == "COMM" then
+		return "COMM"
 	end
 	local lvl = entry.levelNum
 	if type(lvl) ~= "number" then
 		lvl = toLevel(entry.level)
 	end
-	return isLevelVisible(lvl)
+	return levelName(lvl)
+end
+
+local function isEntryVisible(entry)
+	if type(entry) ~= "table" then return false end
+	return isLevelVisible(displayLevelKey(entry)) and isSourceVisible(entry)
 end
 
 local function setAllVisibleLevels(flag)
@@ -268,6 +424,7 @@ local function setAllVisibleLevels(flag)
 		local key = VIEW_LEVEL_KEYS[i]
 		p["view" .. key] = v
 	end
+	markProfileDirty(p)
 end
 
 local function countVisibleLevels()
@@ -278,6 +435,36 @@ local function countVisibleLevels()
 		end
 	end
 	return count
+end
+
+local function setAllVisibleSources(flag)
+	local p = profile()
+	if ensureSourceFilter(p) then
+		markProfileDirty(p)
+	end
+	p.viewSources = type(p.viewSources) == "table" and p.viewSources or {}
+	local list = collectAvailableSourceFilters()
+	local v = flag and true or false
+	for i = 1, #list do
+		p.viewSources[list[i].token] = v
+	end
+	markProfileDirty(p)
+end
+
+local function countVisibleSources()
+	local p = profile()
+	if ensureSourceFilter(p) then
+		markProfileDirty(p)
+	end
+	local list = collectAvailableSourceFilters()
+	if #list == 0 then return 0, 0 end
+	local count = 0
+	for i = 1, #list do
+		if isSourceTokenVisible(list[i].token) then
+			count = count + 1
+		end
+	end
+	return count, #list
 end
 
 local function allowForOutput(levelNum)
@@ -384,6 +571,264 @@ local function dataSuffixFromData(data)
 	return " | data=" .. table.concat(parts, " ")
 end
 
+local function dataPrettyFromData(data)
+	if type(data) ~= "table" or #data == 0 then return "" end
+	local lines = {}
+	for i = 1, #data do
+		local v = data[i]
+		if type(v) == "table" then
+			lines[#lines + 1] = string.format("[%d] %s", i, _jsonish(v, {}, 0, 6, 200))
+		else
+			lines[#lines + 1] = string.format("[%d] %s", i, tostring(v))
+		end
+	end
+	return table.concat(lines, "\n")
+end
+
+local function analyzeDataForDetails(data)
+	if type(data) ~= "table" or #data == 0 then
+		return false, false, 0
+	end
+	local hasTable = false
+	for i = 1, #data do
+		if type(data[i]) == "table" then
+			hasTable = true
+			break
+		end
+	end
+	return true, hasTable, #data
+end
+
+local function LT(key, fallback, ...)
+	if type(GMS.T) == "function" then
+		local ok, localized = pcall(GMS.T, GMS, key, ...)
+		if ok and type(localized) == "string" and localized ~= "" and localized ~= key then
+			return localized
+		end
+	end
+	if select("#", ...) > 0 then
+		return string.format(tostring(fallback or key), ...)
+	end
+	return tostring(fallback or key)
+end
+
+local function ParseRecordKey(key)
+	local txt = tostring(key or "")
+	local a, b, c = txt:match("^([^:]+):([^:]+):(.+)$")
+	if not a or not b or not c then
+		return nil, nil, nil
+	end
+	return a, b, c
+end
+
+local function HumanizeCommMessage(raw, data)
+	local msg = tostring(raw or "")
+	if msg == "" then return msg end
+	local d = type(data) == "table" and data or {}
+
+	if msg == "Data sent" then
+		local subPrefix = tostring(d[1] or "?")
+		local distribution = tostring(d[2] or "GUILD")
+		local targetName = tostring(d[3] or "")
+		local targetSuffix = (targetName ~= "") and (" -> " .. targetName) or ""
+		if subPrefix == "__SYNC_V1" then
+			return LT("LOGS_HUMAN_COMM_DATA_SENT_SYNC_FMT", "Sent synchronization packet via %s%s", distribution, targetSuffix)
+		end
+		return LT("LOGS_HUMAN_COMM_DATA_SENT_FMT", "Sent %s packet via %s%s", subPrefix, distribution, targetSuffix)
+	end
+	if msg == "Registered prefix handler" then
+		return LT("LOGS_HUMAN_COMM_PREFIX_REGISTERED_FMT", "Registered communication handler for prefix %s", tostring(d[1] or "?"))
+	end
+	if msg == "Stored sync push record" or msg == "Stored chunked sync record" then
+		local _, _, domain = ParseRecordKey(tostring(d[1] or ""))
+		local channel = tostring(d[2] or "?")
+		return LT("LOGS_HUMAN_COMM_RECORD_STORED_FMT", "Stored %s data received via %s", tostring(domain ~= "" and domain or "?"), channel)
+	end
+	if msg == "Chunk reassembly deserialize failed" then
+		return LT("LOGS_HUMAN_COMM_CHUNK_DESERIALIZE_FAILED_FMT", "Failed to reassemble chunked data from %s", tostring(d[2] or d[1] or "?"))
+	end
+	if msg == "Invalid chunked record" then
+		return LT("LOGS_HUMAN_COMM_INVALID_CHUNK_FMT", "Received invalid chunked record (%s)", tostring(d[1] or "?"))
+	end
+	if msg == "Invalid sync push record" then
+		return LT("LOGS_HUMAN_COMM_INVALID_PUSH_FMT", "Received invalid sync record (%s)", tostring(d[1] or "?"))
+	end
+	if msg == "Relay announce batch sent" then
+		return LT("LOGS_HUMAN_COMM_RELAY_SENT_FMT", "Sent relay announce batch (%s records)", tostring(d[1] or "?"))
+	end
+	if msg == "Source GUID mismatch" then
+		return LT("LOGS_HUMAN_COMM_SOURCE_MISMATCH_FMT", "Rejected packet due to source mismatch (%s from %s)", tostring(d[1] or "?"), tostring(d[2] or "?"))
+	end
+	if msg == "Missing sender GUID for secured prefix" then
+		return LT("LOGS_HUMAN_COMM_MISSING_SENDER_GUID_FMT", "Rejected secured packet %s because sender GUID is missing", tostring(d[1] or "?"))
+	end
+	if msg == "Unauthorized data received" then
+		return LT("LOGS_HUMAN_COMM_UNAUTHORIZED_FMT", "Rejected unauthorized packet %s from %s", tostring(d[1] or "?"), tostring(d[2] or "?"))
+	end
+	if msg == "Comm initialized" then
+		return LT("LOGS_HUMAN_COMM_INITIALIZED", "Communication module initialized")
+	end
+	if msg == "Comm extension loaded" then
+		return LT("LOGS_HUMAN_COMM_EXT_LOADED", "Communication extension loaded")
+	end
+
+	return msg
+end
+
+local function HumanizeGenericMessage(source, raw, data)
+	local msg = tostring(raw or "")
+	local src = tostring(source or "")
+	if src == "Comm" or src == "COMM" then
+		return HumanizeCommMessage(msg, data)
+	end
+	local d = type(data) == "table" and data or {}
+
+	if msg == "OnInitialize" then return LT("LOGS_HUMAN_CORE_ONINITIALIZE", "Addon initialization started") end
+	if msg == "OnEnable" then return LT("LOGS_HUMAN_CORE_ONENABLE", "Addon enabled") end
+	if msg == "OnDisable" then return LT("LOGS_HUMAN_CORE_ONDISABLE", "Addon disabled") end
+	if msg == "EXT:LOGS READY" then return LT("LOGS_HUMAN_LOGS_READY", "Logs extension is ready") end
+	if msg == "Logs cleared" then return LT("LOGS_HUMAN_LOGS_CLEARED", "Logs were cleared") end
+	if msg == "Database extension loaded" then return LT("LOGS_HUMAN_DB_EXT_LOADED", "Database extension loaded") end
+	if msg == "Permissions initialized" then return LT("LOGS_HUMAN_PERM_INITIALIZED", "Permissions initialized") end
+	if msg == "Permissions extension loaded" then return LT("LOGS_HUMAN_PERM_EXT_LOADED", "Permissions extension loaded") end
+	if msg == "Settings extension loaded" then return LT("LOGS_HUMAN_SETTINGS_EXT_LOADED", "Settings extension loaded") end
+	if msg == "SlashCommands extension loaded" then return LT("LOGS_HUMAN_SLASH_EXT_LOADED", "Slash commands extension loaded") end
+	if msg == "UI page registered (UI:RegisterPage compat)" then return LT("LOGS_HUMAN_UI_PAGE_REGISTERED", "UI page registered") end
+	if msg == "Registered subcommand: /gms ui" then return LT("LOGS_HUMAN_UI_SLASH_REGISTERED", "Registered slash command /gms ui") end
+	if msg == "One-time hard reset applied" then return LT("LOGS_HUMAN_DB_HARD_RESET_APPLIED", "One-time database hard reset applied") end
+	if msg == "All databases reset to defaults" then return LT("LOGS_HUMAN_DB_RESET_DONE", "All databases were reset to defaults") end
+
+	if msg == "READY" then return LT("LOGS_HUMAN_STATE_READY_FMT", "Component ready: %s", tostring(d[1] or "?")) end
+	if msg == "UNREADY" then return LT("LOGS_HUMAN_STATE_UNREADY_FMT", "Component not ready: %s", tostring(d[1] or "?")) end
+	if msg == "INIT" then return LT("LOGS_HUMAN_STATE_INIT_FMT", "Component initialized: %s", tostring(d[1] or "?")) end
+	if msg == "ENABLED" then return LT("LOGS_HUMAN_STATE_ENABLED_FMT", "Component enabled: %s", tostring(d[1] or "?")) end
+
+	if msg == "Raid scan ingested" then
+		return LT(
+			"LOGS_HUMAN_RAID_SCAN_INGESTED_FMT",
+			"Raid scan completed: processed=%s, unresolved=%s",
+			tostring(d[1] or "?"),
+			tostring(d[5] or d[3] or "?")
+		)
+	end
+	if msg == "Raid best enriched from character statistics" then
+		return LT("LOGS_HUMAN_RAID_BEST_ENRICHED", "Raid best progress was updated from character statistics")
+	end
+	if msg == "Catalog rebuild" then
+		return LT("LOGS_HUMAN_RAID_CATALOG_REBUILD_FMT", "Raid catalog rebuild status: %s", tostring(d[1] or "?"))
+	end
+	if msg == "EJ catalog built" then
+		return LT("LOGS_HUMAN_RAID_EJ_BUILT_FMT", "Encounter Journal catalog built (%s)", tostring(d[1] or "?"))
+	end
+	if msg == "EJ catalog build failed" then
+		return LT("LOGS_HUMAN_RAID_EJ_BUILD_FAILED_FMT", "Encounter Journal catalog build failed (%s)", tostring(d[1] or "?"))
+	end
+	if msg == "SavedInstances skipped entries" then
+		return LT("LOGS_HUMAN_RAID_SKIPPED_ENTRIES", "Some SavedInstances entries were skipped")
+	end
+	if msg == "Unresolved raid name->instanceID mappings" then
+		return LT("LOGS_HUMAN_RAID_UNRESOLVED_MAPPINGS_FMT", "Unresolved raid name mappings: %s", tostring(d[1] or "?"))
+	end
+	if msg == "Collapsed named raid fallbacks" then
+		return LT("LOGS_HUMAN_RAID_FALLBACK_COLLAPSED_FMT", "Merged old raid fallback entries: %s", tostring(d[1] or "?"))
+	end
+	if msg == "Catalog not ready; ingest continues with name-based fallback keys" then
+		return LT("LOGS_HUMAN_RAID_CATALOG_NOT_READY", "Raid catalog not ready, temporary fallback mapping active")
+	end
+	if msg == "Equipment scanned + saved" then
+		return LT("LOGS_HUMAN_EQUIPMENT_SCANNED_SAVED", "Equipment scan completed and saved")
+	end
+	if msg == "GuildLog enabled" then
+		return LT("LOGS_HUMAN_GUILDLOG_ENABLED", "GuildLog enabled")
+	end
+
+	if msg == "Member added to group" then
+		return LT("LOGS_HUMAN_PERM_MEMBER_ADDED_FMT", "Member %s was added to group %s", tostring(d[1] or "?"), tostring(d[2] or "?"))
+	end
+	if msg == "Member removed from group" then
+		return LT("LOGS_HUMAN_PERM_MEMBER_REMOVED_FMT", "Member %s was removed from group %s", tostring(d[1] or "?"), tostring(d[2] or "?"))
+	end
+	if msg == "Rank assigned to group" then
+		return LT("LOGS_HUMAN_PERM_RANK_ASSIGNED_FMT", "Guild rank %s was assigned to group %s", tostring(d[1] or "?"), tostring(d[2] or "?"))
+	end
+
+	local mod = msg:match("^(.-)%s+extension%s+loaded$")
+	if mod then
+		return LT("LOGS_HUMAN_EXT_LOADED_FMT", "%s extension loaded", mod)
+	end
+
+	local modFile = msg:match("^(.-)%s+file%s+loaded$")
+	if modFile then
+		return LT("LOGS_HUMAN_FILE_LOADED_FMT", "%s file loaded", modFile)
+	end
+
+	local logic = msg:match("^(.-)%s+logic%s+loaded$")
+	if logic then
+		return LT("LOGS_HUMAN_LOGIC_LOADED_FMT", "%s logic loaded", logic)
+	end
+
+	if msg == "Module initialized" then
+		return LT("LOGS_HUMAN_MODULE_INITIALIZED", "Module initialized")
+	end
+	if msg == "Module enabled" then
+		return LT("LOGS_HUMAN_MODULE_ENABLED", "Module enabled")
+	end
+	if msg == "Module disabled" then
+		return LT("LOGS_HUMAN_MODULE_DISABLED", "Module disabled")
+	end
+
+	local optsInit = msg:match("^(.-)%s+options%s+initialized")
+	if optsInit then
+		return LT("LOGS_HUMAN_OPTIONS_INITIALIZED_FMT", "%s options initialized", optsInit)
+	end
+	local optsFail = msg:match("^Failed to retrieve%s+(.-)%s+options")
+	if optsFail then
+		return LT("LOGS_HUMAN_OPTIONS_LOAD_FAILED_FMT", "Failed to load %s options", optsFail)
+	end
+	local optsState = msg:match("^(.-)%s+options%s+state$")
+	if optsState then
+		return LT("LOGS_HUMAN_OPTIONS_STATE_FMT", "%s options state updated", optsState)
+	end
+
+	local moduleEnabling = msg:match("^Enabling%s+(.-)%s+module$")
+	if moduleEnabling then
+		return LT("LOGS_HUMAN_MODULE_ENABLING_FMT", "Enabling %s module", moduleEnabling)
+	end
+	local moduleInitializing = msg:match("^Initializing%s+(.-)%s+module$")
+	if moduleInitializing then
+		return LT("LOGS_HUMAN_MODULE_INITIALIZING_FMT", "Initializing %s module", moduleInitializing)
+	end
+
+	local snapSaved = msg:match("^(.-)%s+snapshot%s+saved$")
+	if snapSaved then
+		return LT("LOGS_HUMAN_SNAPSHOT_SAVED_FMT", "%s snapshot saved locally", snapSaved)
+	end
+	local snapPub = msg:match("^(.-)%s+snapshot%s+published$")
+	if snapPub then
+		return LT("LOGS_HUMAN_SNAPSHOT_PUBLISHED_FMT", "%s snapshot published to guild", snapPub)
+	end
+	local pubFail = msg:match("^(.-)%s+publish%s+failed$")
+	if pubFail then
+		return LT("LOGS_HUMAN_PUBLISH_FAILED_FMT", "%s publish failed", pubFail)
+	end
+
+	local pageReg = msg:match("^(.-)%s+page%s+registered")
+	if pageReg then
+		return LT("LOGS_HUMAN_PAGE_REGISTERED_FMT", "%s page registered", pageReg)
+	end
+
+	if msg == "RightDock icon registered" then
+		return LT("LOGS_HUMAN_RIGHTDOCK_REGISTERED", "RightDock icon registered")
+	end
+
+	local slashReg = msg:match("^Slash subcommand registered via%s+(.+)$")
+	if slashReg then
+		return LT("LOGS_HUMAN_SLASH_REGISTERED_FMT", "Slash subcommand registered (%s)", slashReg)
+	end
+
+	return msg
+end
+
 local function trimToMax()
 	local prof = profile()
 	local max = clamp(tonumber(prof.maxEntries) or 400, 50, 5000)
@@ -401,27 +846,46 @@ end
 -- ###########################################################################
 
 local function _mapGlobalEntry(e)
-	local lvl = toLevel(e.level)
+	local rawMsg = tostring((e and (e.msg or e.message)) or "")
+	local rawTime = e and (e.time or e.timestamp) or nil
+	local rawSource = tostring((e and e.source) or "")
+	local rawType = tostring((e and e.type) or "")
+	local rawLevel = tostring((e and e.level) or "INFO"):upper()
+	local isCommLevel = (rawLevel == "COMM")
 
-	local srcType = tostring(e.type or "")
-	local srcName = tostring(e.source or "")
+	local lvl = isCommLevel and LOGS.LEVELS.INFO or toLevel(rawLevel)
 
-	local base = tostring(e.msg or "")
+	local srcType = rawType
+	local srcName = rawSource
+
+	local base = rawMsg
+	base = HumanizeGenericMessage(srcName, base, e.data)
 	local suffix = dataSuffixFromData(e.data)
+	if suffix ~= "" then
+		local detailsLabel = LT("LOGS_SUFFIX_DETAILS_LABEL", "details")
+		suffix = suffix:gsub("^%s*|%s*data=", " | " .. tostring(detailsLabel) .. "=")
+		suffix = suffix:gsub("^%s*|%s*details=", " | " .. tostring(detailsLabel) .. "=")
+	end
 	local msg = base .. suffix
+	local displayLevel = isCommLevel and "COMM" or levelName(lvl)
 
 	return {
 		time     = nowReadable(profile().timestampFormat or "%Y-%m-%d %H:%M:%S"),
 		levelNum = lvl,
 		level    = levelName(lvl),
+		displayLevel = displayLevel,
 
 		type   = srcType,
 		source = srcName,
 
 		msg = msg,
+		detailsPretty = dataPrettyFromData(e.data),
+		hasDetailsData = analyzeDataForDetails(e.data),
+		detailsCount = (type(e.data) == "table" and #e.data) or 0,
+		detailsHasTable = (select(2, analyzeDataForDetails(e.data)) == true),
 
 		-- optional: raw timing from GetTime()
-		t = e.time,
+		t = rawTime,
 	}
 end
 
@@ -537,10 +1001,11 @@ function GMS:Logs_SetLevel(level)
 	local lvl = toLevel(level)
 	local p = profile()
 	p.minLevel = lvl
-	for i = 1, #VIEW_LEVEL_KEYS do
-		local key = VIEW_LEVEL_KEYS[i]
+	for i = 1, #SEVERITY_LEVEL_KEYS do
+		local key = SEVERITY_LEVEL_KEYS[i]
 		p["view" .. key] = (i >= lvl)
 	end
+	markProfileDirty(p)
 end
 
 function GMS:Logs_GetLevel()
@@ -548,19 +1013,28 @@ function GMS:Logs_GetLevel()
 	if p.minLevel then
 		return p.minLevel
 	end
-	for i = 1, #VIEW_LEVEL_KEYS do
-		if p["view" .. VIEW_LEVEL_KEYS[i]] == true then
+	for i = 1, #SEVERITY_LEVEL_KEYS do
+		if p["view" .. SEVERITY_LEVEL_KEYS[i]] == true then
 			return i
 		end
 	end
 	return LOGS.LEVELS.INFO
 end
 
-function GMS:Logs_EnableChat(v) profile().chat = not not v end
+function GMS:Logs_EnableChat(v)
+	local p = profile()
+	p.chat = not not v
+	markProfileDirty(p)
+end
 
 function GMS:Logs_IsChatEnabled() return not not profile().chat end
 
-function GMS:Logs_SetMaxEntries(n) profile().maxEntries = clamp(tonumber(n) or 400, 50, 5000); trimToMax() end
+function GMS:Logs_SetMaxEntries(n)
+	local p = profile()
+	p.maxEntries = clamp(tonumber(n) or 400, 50, 5000)
+	markProfileDirty(p)
+	trimToMax()
+end
 
 function GMS:Logs_GetMaxEntries() return profile().maxEntries end
 
@@ -569,6 +1043,7 @@ function GMS:Logs_Clear()
 	p.entries = {}
 	LOGS._entries = p.entries
 	if LOGS._db then LOGS._db.profile.entries = LOGS._entries end
+	markProfileDirty(p)
 
 	-- optional: ingest cursor bleibt (damit wir nicht alles erneut reinziehen)
 	if LOGS._ui and LOGS._ui.scroller then
@@ -676,6 +1151,66 @@ local function BuildLogRow(entry, totalWidth)
 		return s:gsub("^%s+", ""):gsub("%s+$", "")
 	end
 
+	local function EscapePattern(text)
+		return tostring(text or ""):gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+	end
+
+	local function ExtractDetailsFromMsg(rawMsg)
+		local s = tostring(rawMsg or "")
+		local details = s:match("%s*|%s*data=(.+)$")
+		if details and details ~= "" then return details end
+		local details2 = s:match("%s*|%s*details=(.+)$")
+		if details2 and details2 ~= "" then return details2 end
+		local details3 = s:match("%s*|%s*daten=(.+)$")
+		if details3 and details3 ~= "" then return details3 end
+		return ""
+	end
+
+	local function StripDetailsSuffix(rawMsg)
+		local s = tostring(rawMsg or "")
+		s = s:gsub("%s*|%s*data=.+$", "")
+		s = s:gsub("%s*|%s*details=.+$", "")
+		s = s:gsub("%s*|%s*daten=.+$", "")
+		local detailsLabel = LT("LOGS_SUFFIX_DETAILS_LABEL", "details")
+		if detailsLabel ~= "" then
+			s = s:gsub("%s*|%s*" .. EscapePattern(detailsLabel) .. "=.+$", "")
+		end
+		return s
+	end
+
+	local function ShowDetailsPopup(detailsEntry, displayName, detailsText)
+		if not AceGUI then return end
+		local txt = tostring(detailsText or "")
+		local e = type(detailsEntry) == "table" and detailsEntry or {}
+		local contextMsg = OneLine(StripDetailsSuffix(tostring(e.msg or "")))
+		if contextMsg == "" then contextMsg = "-" end
+		local context = table.concat({
+			string.format(LT("LOGS_DETAILS_CONTEXT_SOURCE_FMT", "Log: %s"), tostring(displayName or "-")),
+			string.format(LT("LOGS_DETAILS_CONTEXT_LEVEL_FMT", "Level: %s"), tostring(displayLevelKey(e) or "-")),
+			string.format(LT("LOGS_DETAILS_CONTEXT_TIME_FMT", "Time: %s"), tostring(e.time or "-")),
+			string.format(LT("LOGS_DETAILS_CONTEXT_MSG_FMT", "Message: %s"), contextMsg),
+		}, "\n")
+		if txt == "" then
+			txt = LT("LOGS_DETAILS_EMPTY", "No details available.")
+		end
+		txt = context .. "\n\n" .. txt
+		local frame = AceGUI:Create("Frame")
+		frame:SetTitle(LT("LOGS_DETAILS_TITLE_FMT", "Log Details - %s", tostring(displayName or "-")))
+		frame:SetLayout("Fill")
+		frame:SetWidth(760)
+		frame:SetHeight(420)
+		frame:EnableResize(true)
+
+		local box = AceGUI:Create("MultiLineEditBox")
+		box:SetLabel("")
+		box:SetText(txt)
+		box:DisableButton(true)
+		if box.SetNumLines then
+			box:SetNumLines(22)
+		end
+		frame:AddChild(box)
+	end
+
 	local available = tonumber(totalWidth) or 900
 	if available < 520 then available = 520 end
 
@@ -706,9 +1241,10 @@ local function BuildLogRow(entry, totalWidth)
 	grp:SetFullWidth(true)
 	grp:SetLayout("Flow")
 
-	local color = COLORS[entry.level] or "|cffffffff"
+	local rowLevel = displayLevelKey(entry)
+	local color = COLORS[rowLevel] or COLORS[entry.level] or "|cffffffff"
 	local timeText = OneLine(entry.time or "")
-	local levelText = OneLine(entry.level or "INFO")
+	local levelText = OneLine(rowLevel)
 	local typeText = OneLine(entry.type or "-")
 	local sourceText = OneLine(entry.source or "-")
 
@@ -716,13 +1252,9 @@ local function BuildLogRow(entry, totalWidth)
 		local t = tostring(srcType or "")
 		local s = tostring(srcName or "")
 		if s == "" then return "-" end
+		local su = s:upper()
 
 		local registry = (GMS and GMS.REGISTRY) or nil
-		if type(registry) ~= "table" then
-			return s
-		end
-
-		local su = s:upper()
 		local function MatchIn(reg)
 			if type(reg) ~= "table" then return nil end
 			for _, meta in pairs(reg) do
@@ -740,16 +1272,30 @@ local function BuildLogRow(entry, totalWidth)
 			return nil
 		end
 
-		if t == "EXT" then
-			local hit = MatchIn(registry.EXT)
-			if hit then return hit end
-		elseif t == "MOD" then
-			local hit = MatchIn(registry.MOD)
+		if type(registry) == "table" then
+			if t == "EXT" then
+				local hit = MatchIn(registry.EXT)
+				if hit then return hit end
+			elseif t == "MOD" then
+				local hit = MatchIn(registry.MOD)
+				if hit then return hit end
+			elseif t == "CORE" then
+				local hit = MatchIn(registry.CORE)
+				if hit then return hit end
+			end
+
+			local hit = MatchIn(registry.EXT) or MatchIn(registry.MOD) or MatchIn(registry.CORE)
 			if hit then return hit end
 		end
 
-		local hit = MatchIn(registry.EXT) or MatchIn(registry.MOD)
-		if hit then return hit end
+		local localeKey = "NAME_" .. su
+		if type(GMS.T) == "function" then
+			local ok, localized = pcall(GMS.T, GMS, localeKey)
+			if ok and type(localized) == "string" and localized ~= "" and localized ~= localeKey then
+				return localized
+			end
+		end
+
 		return s
 	end
 
@@ -783,6 +1329,25 @@ local function BuildLogRow(entry, totalWidth)
 	grp:AddChild(lSource)
 
 	local msg = OneLine(entry.msg or "")
+	local detailsText = tostring(entry.detailsPretty or "")
+	if detailsText == "" then
+		detailsText = ExtractDetailsFromMsg(entry.msg)
+	end
+	msg = OneLine(StripDetailsSuffix(msg))
+	local hasRawDetails = (tostring(detailsText or "") ~= "")
+	local hasTableDetails = (entry.detailsHasTable == true)
+	local detailsLongText = (#tostring(detailsText or "") >= 90)
+	local hasDetails = hasRawDetails and (hasTableDetails or detailsLongText)
+
+	local detailsButtonWidth = 0
+	if hasDetails then
+		detailsButtonWidth = 86
+	end
+	if detailsButtonWidth > 0 then
+		msgWidth = msgWidth - detailsButtonWidth
+		if msgWidth < 120 then msgWidth = 120 end
+	end
+
 	if msg ~= "" then
 		local body = AceGUI:Create("Label")
 		body:SetWidth(msgWidth)
@@ -792,6 +1357,39 @@ local function BuildLogRow(entry, totalWidth)
 			body.label:SetMaxLines(1)
 		end
 		grp:AddChild(body)
+	end
+
+	if hasDetails then
+		local link = AceGUI:Create("InteractiveLabel")
+		link:SetWidth(detailsButtonWidth)
+		local linkText = LT("LOGS_DETAILS_BUTTON", "View")
+		local normalColor = "6ec8ff"
+		local hoverColor = "a8e4ff"
+		local function SetLinkVisual(isHover)
+			local c = isHover and hoverColor or normalColor
+			link:SetText("|cff" .. c .. linkText .. "|r")
+		end
+		SetLinkVisual(false)
+		link:SetCallback("OnClick", function()
+			ShowDetailsPopup(entry, displayName, detailsText)
+		end)
+		if link.frame and type(link.frame.SetScript) == "function" and GameTooltip then
+			link.frame:SetScript("OnEnter", function(self)
+				SetLinkVisual(true)
+				GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+				GameTooltip:SetText(LT("LOGS_DETAILS_TOOLTIP", "Show detailed payload in pretty print"))
+				GameTooltip:Show()
+			end)
+			link.frame:SetScript("OnLeave", function()
+				SetLinkVisual(false)
+				GameTooltip:Hide()
+			end)
+		end
+		if link.label then
+			link.label:SetWordWrap(false)
+			link.label:SetMaxLines(1)
+		end
+		grp:AddChild(link)
 	end
 
 	return grp
@@ -828,26 +1426,50 @@ local function RegisterLogsUI()
 		title:SetWidth(160)
 		header:AddChild(title)
 
-		local levelLabel = AceGUI:Create("Label")
-		levelLabel:SetText((type(GMS.T) == "function" and GMS:T("LOGS_LEVELS")) or "Levels:")
-		levelLabel:SetWidth(46)
-		header:AddChild(levelLabel)
-
-		local levelBtn = AceGUI:Create("Button")
-		levelBtn:SetWidth(160)
-		local function UpdateLevelButtonText()
-			local c = countVisibleLevels()
-			levelBtn:SetText((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_FMT", c)) or string.format("Select (%d/5)", c))
+		local filterBtn = AceGUI:Create("Button")
+		filterBtn:SetWidth(260)
+		local function UpdateFilterButtonText()
+			local levelSelected = countVisibleLevels()
+			local sourceSelected, sourceTotal = countVisibleSources()
+			filterBtn:SetText(
+				(type(GMS.T) == "function" and GMS:T("LOGS_FILTER_FMT", levelSelected, #VIEW_LEVEL_KEYS, sourceSelected, sourceTotal))
+				or string.format("Filter (L %d/%d, Q %d/%d)", levelSelected, #VIEW_LEVEL_KEYS, sourceSelected, sourceTotal)
+			)
 		end
-		local function ShowLevelMenu()
-			if type(CreateFrame) ~= "function" then return end
-			LOGS._levelMenuFrame = LOGS._levelMenuFrame or CreateFrame("Frame", "GMS_LOGS_LEVEL_MENU", UIParent, "UIDropDownMenuTemplate")
-			if type(UIDropDownMenu_Initialize) == "function" and type(ToggleDropDownMenu) == "function" then
-				UIDropDownMenu_Initialize(LOGS._levelMenuFrame, function(_, level)
-					level = level or 1
-					if level ~= 1 or type(UIDropDownMenu_AddButton) ~= "function" then return end
 
-					local function AddEntry(text, notCheckable, checked, keepShownOnClick, func, disabled)
+		local function ToggleLevelKey(levelKey)
+			local p = profile()
+			local k = "view" .. levelKey
+			p[k] = not p[k]
+			markProfileDirty(p)
+			UpdateFilterButtonText()
+			TriggerRender()
+		end
+
+		local function ToggleSourceToken(token)
+			local p = profile()
+			p.viewSources = type(p.viewSources) == "table" and p.viewSources or {}
+			p.viewSources[token] = not isSourceTokenVisible(token)
+			markProfileDirty(p)
+			UpdateFilterButtonText()
+			TriggerRender()
+		end
+
+		local function ShowFilterMenu()
+			local p = profile()
+			if ensureSourceFilter(p) then
+				markProfileDirty(p)
+			end
+			local sources = collectAvailableSourceFilters()
+			if type(CreateFrame) ~= "function" then return end
+			LOGS._filterMenuFrame = LOGS._filterMenuFrame or CreateFrame("Frame", "GMS_LOGS_FILTER_MENU", UIParent, "UIDropDownMenuTemplate")
+			if type(UIDropDownMenu_Initialize) == "function" and type(ToggleDropDownMenu) == "function" then
+				UIDropDownMenu_Initialize(LOGS._filterMenuFrame, function(_, level, menuList)
+					level = level or 1
+					if type(UIDropDownMenu_AddButton) ~= "function" then return end
+
+					local menuValue = menuList or _G.UIDROPDOWNMENU_MENU_VALUE
+					local function AddEntry(text, notCheckable, checked, keepShownOnClick, func, disabled, hasArrow, value)
 						local info = type(UIDropDownMenu_CreateInfo) == "function" and UIDropDownMenu_CreateInfo() or {}
 						info.text = text
 						info.notCheckable = notCheckable and true or false
@@ -856,78 +1478,120 @@ local function RegisterLogsUI()
 						info.isNotRadio = true
 						info.func = func
 						info.disabled = disabled and true or false
+						info.hasArrow = hasArrow and true or false
+						info.value = value
 						UIDropDownMenu_AddButton(info, level)
 					end
 
-					AddEntry((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_ALL")) or "Select All", true, false, false, function()
-						setAllVisibleLevels(true)
-						UpdateLevelButtonText()
-						TriggerRender()
-					end, false)
+					if level == 1 then
+						AddEntry((type(GMS.T) == "function" and GMS:T("LOGS_LEVELS")) or "Levels:", true, false, false, nil, false, true, "LEVELS")
+						AddEntry((type(GMS.T) == "function" and GMS:T("LOGS_SOURCES")) or "Sources:", true, false, false, nil, false, true, "SOURCES")
+						return
+					end
 
-					AddEntry((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_NONE")) or "Select None", true, false, false, function()
-						setAllVisibleLevels(false)
-						UpdateLevelButtonText()
-						TriggerRender()
-					end, false)
-
-					AddEntry(" ", true, false, false, nil, true)
-
-					for i = 1, #VIEW_LEVEL_KEYS do
-						local levelKey = VIEW_LEVEL_KEYS[i]
-						AddEntry(levelKey, false, isLevelVisible(levelKey), true, function()
-							local p = profile()
-							local k = "view" .. levelKey
-							p[k] = not p[k]
-							UpdateLevelButtonText()
+					if level == 2 and menuValue == "LEVELS" then
+						AddEntry((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_ALL")) or "Select All", true, false, false, function()
+							setAllVisibleLevels(true)
+							UpdateFilterButtonText()
 							TriggerRender()
 						end, false)
+						AddEntry((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_NONE")) or "Select None", true, false, false, function()
+							setAllVisibleLevels(false)
+							UpdateFilterButtonText()
+							TriggerRender()
+						end, false)
+						AddEntry(" ", true, false, false, nil, true)
+
+						for i = 1, #VIEW_LEVEL_KEYS do
+							local levelKey = VIEW_LEVEL_KEYS[i]
+							AddEntry(levelKey, false, isLevelVisible(levelKey), true, function()
+								ToggleLevelKey(levelKey)
+							end, false)
+						end
+						return
+					end
+
+					if level == 2 and menuValue == "SOURCES" then
+						AddEntry((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_ALL")) or "Select All", true, false, false, function()
+							setAllVisibleSources(true)
+							UpdateFilterButtonText()
+							TriggerRender()
+						end, false)
+						AddEntry((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_NONE")) or "Select None", true, false, false, function()
+							setAllVisibleSources(false)
+							UpdateFilterButtonText()
+							TriggerRender()
+						end, false)
+						AddEntry(" ", true, false, false, nil, true)
+
+						for i = 1, #sources do
+							local item = sources[i]
+							AddEntry(item.label, false, isSourceTokenVisible(item.token), true, function()
+								ToggleSourceToken(item.token)
+							end, false)
+						end
 					end
 				end, "MENU")
 
-				local anchor = (levelBtn and levelBtn.frame) or "cursor"
-				ToggleDropDownMenu(1, nil, LOGS._levelMenuFrame, anchor, 0, 0)
+				local anchor = (filterBtn and filterBtn.frame) or "cursor"
+				ToggleDropDownMenu(1, nil, LOGS._filterMenuFrame, anchor, 0, 0)
 			elseif type(EasyMenu) == "function" then
-				local menu = {}
-				menu[#menu + 1] = { text = ((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_ALL")) or "Select All"), notCheckable = true, func = function()
-					setAllVisibleLevels(true); UpdateLevelButtonText(); TriggerRender()
+				local levelsMenu = {}
+				levelsMenu[#levelsMenu + 1] = { text = ((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_ALL")) or "Select All"), notCheckable = true, func = function()
+					setAllVisibleLevels(true); UpdateFilterButtonText(); TriggerRender()
 				end }
-				menu[#menu + 1] = { text = ((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_NONE")) or "Select None"), notCheckable = true, func = function()
-					setAllVisibleLevels(false); UpdateLevelButtonText(); TriggerRender()
+				levelsMenu[#levelsMenu + 1] = { text = ((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_NONE")) or "Select None"), notCheckable = true, func = function()
+					setAllVisibleLevels(false); UpdateFilterButtonText(); TriggerRender()
 				end }
-				menu[#menu + 1] = { text = " ", disabled = true, notCheckable = true }
+				levelsMenu[#levelsMenu + 1] = { text = " ", disabled = true, notCheckable = true }
 				for i = 1, #VIEW_LEVEL_KEYS do
 					local levelKey = VIEW_LEVEL_KEYS[i]
-					menu[#menu + 1] = {
+					levelsMenu[#levelsMenu + 1] = {
 						text = levelKey,
 						keepShownOnClick = true,
 						isNotRadio = true,
 						checked = isLevelVisible(levelKey),
 						func = function()
-							local p = profile()
-							local k = "view" .. levelKey
-							p[k] = not p[k]
-							UpdateLevelButtonText()
-							TriggerRender()
+							ToggleLevelKey(levelKey)
 						end,
 					}
 				end
-				EasyMenu(menu, LOGS._levelMenuFrame, "cursor", 0, 0, "MENU")
+
+				local sourcesMenu = {}
+				sourcesMenu[#sourcesMenu + 1] = { text = ((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_ALL")) or "Select All"), notCheckable = true, func = function()
+					setAllVisibleSources(true); UpdateFilterButtonText(); TriggerRender()
+				end }
+				sourcesMenu[#sourcesMenu + 1] = { text = ((type(GMS.T) == "function" and GMS:T("LOGS_SELECT_NONE")) or "Select None"), notCheckable = true, func = function()
+					setAllVisibleSources(false); UpdateFilterButtonText(); TriggerRender()
+				end }
+				sourcesMenu[#sourcesMenu + 1] = { text = " ", disabled = true, notCheckable = true }
+				for i = 1, #sources do
+					local item = sources[i]
+					sourcesMenu[#sourcesMenu + 1] = {
+						text = item.label,
+						keepShownOnClick = true,
+						isNotRadio = true,
+						checked = isSourceTokenVisible(item.token),
+						func = function()
+							ToggleSourceToken(item.token)
+						end,
+					}
+				end
+
+				local menu = {
+					{ text = ((type(GMS.T) == "function" and GMS:T("LOGS_LEVELS")) or "Levels:"), notCheckable = true, hasArrow = true, menuList = levelsMenu },
+					{ text = ((type(GMS.T) == "function" and GMS:T("LOGS_SOURCES")) or "Sources:"), notCheckable = true, hasArrow = true, menuList = sourcesMenu },
+				}
+				EasyMenu(menu, LOGS._filterMenuFrame, "cursor", 0, 0, "MENU")
 			end
 		end
-		levelBtn:SetCallback("OnClick", function()
-			ShowLevelMenu()
-		end)
-		UpdateLevelButtonText()
-		header:AddChild(levelBtn)
 
-		local btnRefresh = AceGUI:Create("Button")
-		btnRefresh:SetText((type(GMS.T) == "function" and GMS:T("LOGS_REFRESH")) or "Refresh")
-		btnRefresh:SetWidth(110)
-		btnRefresh:SetCallback("OnClick", function()
-			TriggerRender()
+		filterBtn:SetCallback("OnClick", function()
+			ShowFilterMenu()
 		end)
-		header:AddChild(btnRefresh)
+		UpdateFilterButtonText()
+		LOGS._updateSourceButtonText = UpdateFilterButtonText
+		header:AddChild(filterBtn)
 
 		local btnClear = AceGUI:Create("Button")
 		btnClear:SetText((type(GMS.T) == "function" and GMS:T("LOGS_CLEAR")) or "Clear")
@@ -938,32 +1602,60 @@ local function RegisterLogsUI()
 		end)
 		header:AddChild(btnClear)
 
+		local function ShowCopyPopup(text)
+			if not AceGUI then
+				if type(ChatFrame_OpenChat) == "function" then
+					ChatFrame_OpenChat(text)
+				else
+					chatPrint(text)
+				end
+				return
+			end
+			local frame = AceGUI:Create("Frame")
+			frame:SetTitle((type(GMS.T) == "function" and GMS:T("LOGS_COPY_TITLE")) or "Copy Logs")
+			frame:SetLayout("Fill")
+			frame:SetWidth(900)
+			frame:SetHeight(560)
+			frame:EnableResize(true)
+
+			local box = AceGUI:Create("MultiLineEditBox")
+			box:SetLabel("")
+			box:SetText(tostring(text or ""))
+			box:DisableButton(true)
+			if box.SetNumLines then
+				box:SetNumLines(30)
+			end
+			frame:AddChild(box)
+		end
+
 		local btnCopy = AceGUI:Create("Button")
-		btnCopy:SetText((type(GMS.T) == "function" and GMS:T("LOGS_COPY")) or "Copy (2000)")
+		btnCopy:SetText((type(GMS.T) == "function" and GMS:T("LOGS_COPY")) or "Copy")
 		btnCopy:SetWidth(130)
 		btnCopy:SetCallback("OnClick", function()
 			LOGS:IngestGlobalBuffer()
 
-			local entries = GMS:Logs_GetEntries(2000, 1)
+			local entries = LOGS._entries or {}
 			local lines = {}
-			for i = 1, #entries do
+			for i = #entries, 1, -1 do
 				local e = entries[i]
 				if isEntryVisible(e) then
 					local origin = ""
 					if (e.type and e.type ~= "") or (e.source and e.source ~= "") then
 						origin = string.format(" [%s:%s]", e.type or "", e.source or "")
 					end
-					lines[#lines + 1] = string.format("[%s][%s]%s %s", e.level, e.time or "", origin, e.msg or "")
+					local line = string.format("[%s][%s]%s %s", displayLevelKey(e), e.time or "", origin, tostring(e.msg or ""))
+					local details = tostring(e.detailsPretty or "")
+					if details ~= "" then
+						line = line .. "\n" .. details
+					end
+					lines[#lines + 1] = line
 				end
 			end
 			local text = table.concat(lines, "\n")
-			if type(ChatFrame_OpenChat) == "function" then
-				ChatFrame_OpenChat(text)
-			else
-				chatPrint(text)
-			end
+			ShowCopyPopup(text)
 		end)
 		header:AddChild(btnCopy)
+
 	end
 
 	local function BuildPage(root, id, isCached)
@@ -991,11 +1683,20 @@ local function RegisterLogsUI()
 				(scroller.frame and scroller.frame.GetWidth and scroller.frame:GetWidth()) or
 				(root and root.frame and root.frame.GetWidth and root.frame:GetWidth()) or 900
 			contentWidth = math.max(520, contentWidth - 24)
+			local visibleCount = 0
+			local totalCount = #entries
 			for i = #entries, 1, -1 do
 				local e = entries[i]
 				if e and isEntryVisible(e) then
+					visibleCount = visibleCount + 1
 					scroller:AddChild(BuildLogRow(e, contentWidth))
 				end
+			end
+			if type(LOGS._updateSourceButtonText) == "function" then
+				pcall(LOGS._updateSourceButtonText)
+			end
+			if GMS and GMS.UI and type(GMS.UI.SetStatusText) == "function" then
+				GMS.UI:SetStatusText(LT("LOGS_STATUS_BAR_FMT", "Logs: showing %d / total %d", visibleCount, totalCount))
 			end
 		end
 

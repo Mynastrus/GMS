@@ -32,6 +32,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] Changelog-Language-Fallback-Hinweis in `GMS/Core/Changelog.lua` als `InlineGroup` ohne Titel dargestellt und den ersten Satz als blaue Überschrift hervorgehoben.
 
 ### Fixed
+- [x] Logs-Filter-Dropdown in `GMS/Core/Logs.lua` korrigiert: Submenues `Levels`/`Quellen` werden wieder befuellt (UIDropDownMenu Callback nutzt `menuList`/aktuellen Menu-Value), Header bleibt bei einem einzigen Filter-Button.
 - [x] CHAR-Store-Bindung in `GMS/Core/Database.lua` stabilisiert (GUID-Wait statt frühem Fallback-Key).
 - [x] SavedVariable-Optionen korrigiert (`GMS/Modules/Roster.lua`: `showOnline` wird nicht mehr bei Login hart resettet).
 - [x] GuildLog-Initialanzeige korrigiert (`GMS/Modules/GuildLog.lua`: zuerst Sync, dann UI-Lesen).
