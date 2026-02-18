@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 --	GMS/Locales/itIT.lua
 --	Italian locale
 -- ============================================================================
@@ -36,17 +36,32 @@ GMS:RegisterLocale("itIT", {
 	UI_CMD_OPEN_HELP = "Apre la UI di GMS (/gms ui [page])",
 
 	LOGS_HEADER_TITLE = "Console log",
+	LOGS_FILTER = "Filtro:",
+	LOGS_FILTER_FMT = "Filtro (L %d/%d, S %d/%d)",
 	LOGS_LEVELS = "Livelli:",
-	LOGS_SELECT_FMT = "Selezione (%d/5)",
+	LOGS_SOURCES = "Sorgenti:",
+	LOGS_LEVEL_MENU = "Menu livelli",
+	LOGS_SELECT_FMT = "Selezione (%d/%d)",
+	LOGS_SOURCE_SELECT_FMT = "Sorgenti (%d/%d)",
 	LOGS_SELECT_ALL = "Seleziona tutto",
 	LOGS_SELECT_NONE = "Deseleziona tutto",
 	LOGS_REFRESH = "Aggiorna",
 	LOGS_CLEAR = "Pulisci",
-	LOGS_COPY = "Copia (2000)",
+	LOGS_COPY = "Copia",
+	LOGS_COPY_TITLE = "Copia log",
+	LOGS_DETAILS_BUTTON = "Vedi",
+	LOGS_DETAILS_TOOLTIP = "Mostra i dettagli in formato leggibile",
+	LOGS_DETAILS_TITLE_FMT = "Dettagli log - %s",
+	LOGS_DETAILS_EMPTY = "Nessun dettaglio disponibile.",
+	LOGS_DETAILS_CONTEXT_SOURCE_FMT = "Log: %s",
+	LOGS_DETAILS_CONTEXT_LEVEL_FMT = "Livello: %s",
+	LOGS_DETAILS_CONTEXT_TIME_FMT = "Ora: %s",
+	LOGS_DETAILS_CONTEXT_MSG_FMT = "Messaggio: %s",
+	LOGS_STATUS_VISIBLE_FMT = "Mostrati %d / %d",
+	LOGS_STATUS_BAR_FMT = "Log: mostrati %d / totale %d",
 	LOGS_DOCK_TOOLTIP = "Apri log",
 	LOGS_SLASH_HELP = "/gms logs - apre la UI log",
 	LOGS_SUB_FALLBACK_DESC = "Apre la UI log",
-
 	ROSTER_SEARCH = "Cerca:",
 	ROSTER_SHOW_OFFLINE = "Mostra membri offline",
 	ROSTER_EMPTY = "Nessun membro di gilda trovato.",
@@ -144,3 +159,4 @@ GMS:RegisterLocale("itIT", {
 	SETTINGS_LANG_APPLIED_FMT = "Lingua applicata: %s",
 	SETTINGS_LANG_APPLY_FAILED = "Impossibile applicare la lingua.",
 })
+

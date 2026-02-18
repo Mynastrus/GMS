@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 --	GMS/Locales/esES.lua
 --	Spanish (Spain) locale
 -- ============================================================================
@@ -36,17 +36,32 @@ GMS:RegisterLocale("esES", {
 	UI_CMD_OPEN_HELP = "Abre la UI de GMS (/gms ui [page])",
 
 	LOGS_HEADER_TITLE = "Consola de registros",
+	LOGS_FILTER = "Filtro:",
+	LOGS_FILTER_FMT = "Filtro (N %d/%d, F %d/%d)",
 	LOGS_LEVELS = "Niveles:",
-	LOGS_SELECT_FMT = "Seleccion (%d/5)",
+	LOGS_SOURCES = "Fuentes:",
+	LOGS_LEVEL_MENU = "Menu de niveles",
+	LOGS_SELECT_FMT = "Seleccion (%d/%d)",
+	LOGS_SOURCE_SELECT_FMT = "Fuentes (%d/%d)",
 	LOGS_SELECT_ALL = "Seleccionar todo",
 	LOGS_SELECT_NONE = "Deseleccionar todo",
 	LOGS_REFRESH = "Actualizar",
 	LOGS_CLEAR = "Limpiar",
-	LOGS_COPY = "Copiar (2000)",
+	LOGS_COPY = "Copiar",
+	LOGS_COPY_TITLE = "Copiar logs",
+	LOGS_DETAILS_BUTTON = "Ver",
+	LOGS_DETAILS_TOOLTIP = "Mostrar datos detallados en formato legible",
+	LOGS_DETAILS_TITLE_FMT = "Detalles del log - %s",
+	LOGS_DETAILS_EMPTY = "No hay detalles disponibles.",
+	LOGS_DETAILS_CONTEXT_SOURCE_FMT = "Log: %s",
+	LOGS_DETAILS_CONTEXT_LEVEL_FMT = "Nivel: %s",
+	LOGS_DETAILS_CONTEXT_TIME_FMT = "Hora: %s",
+	LOGS_DETAILS_CONTEXT_MSG_FMT = "Mensaje: %s",
+	LOGS_STATUS_VISIBLE_FMT = "Mostrando %d / %d",
+	LOGS_STATUS_BAR_FMT = "Logs: mostrando %d / total %d",
 	LOGS_DOCK_TOOLTIP = "Abrir registros",
 	LOGS_SLASH_HELP = "/gms logs - abre la UI de registros",
 	LOGS_SUB_FALLBACK_DESC = "Abre la UI de registros",
-
 	ROSTER_SEARCH = "Buscar:",
 	ROSTER_SHOW_OFFLINE = "Mostrar miembros desconectados",
 	ROSTER_EMPTY = "No se encontraron miembros de la hermandad.",
@@ -144,3 +159,4 @@ GMS:RegisterLocale("esES", {
 	SETTINGS_LANG_APPLIED_FMT = "Idioma aplicado: %s",
 	SETTINGS_LANG_APPLY_FAILED = "No se pudo aplicar el idioma.",
 })
+

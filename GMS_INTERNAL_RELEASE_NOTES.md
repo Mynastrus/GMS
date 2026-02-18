@@ -21,6 +21,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] Neue zweisprachige CurseForge-Startseite (`CURSEFORGE_STARTPAGE.md`) mit DE/EN Addon-Uebersicht, Kernfunktionen, Commands, Installationshinweisen und Discord-Link ergänzt.
 
 ### Changed
+- [x] Logs-Locale-Bereich in allen verbleibenden Sprachdateien auf native Formulierungen umgestellt (`GMS/Locales/deDE.lua`, `GMS/Locales/esES.lua`, `GMS/Locales/frFR.lua`, `GMS/Locales/itIT.lua`, `GMS/Locales/koKR.lua`, `GMS/Locales/ptBR.lua`, `GMS/Locales/ruRU.lua`, `GMS/Locales/zhCN.lua`, `GMS/Locales/zhTW.lua`).
 - [x] AccountInfo/Settings/CharInfo-Interaktionspaket umgesetzt: neues `AccountInfo`-Modul (inkl. persistenter Shared-Profile), Roster-Tooltip mit verknuepften Gildenchars, Mythic+-Dungeonnamen in CharInfo klickbar (Adventure Guide) sowie Portal-Icon mit Cooldown-Anzeige fuer geeignete +10-In-Time-Runs.
 - [x] Startseiten-/Dashboard-Anzeige in `GMS/Core/Dashboard.lua` und `GMS/Core/Settings.lua` umgebaut.
 - [x] Raid-Erkennung in `GMS/Modules/Raids.lua` auf ID-basierten Statistik-Fallback erweitert (u. a. `2657`, `2769`, `2810`) und weicher getaktet.

@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 --	GMS/Locales/ptBR.lua
 --	Portuguese (Brazil) locale
 -- ============================================================================
@@ -36,17 +36,32 @@ GMS:RegisterLocale("ptBR", {
 	UI_CMD_OPEN_HELP = "Abre a UI do GMS (/gms ui [page])",
 
 	LOGS_HEADER_TITLE = "Console de logs",
+	LOGS_FILTER = "Filtro:",
+	LOGS_FILTER_FMT = "Filtro (N %d/%d, F %d/%d)",
 	LOGS_LEVELS = "Niveis:",
-	LOGS_SELECT_FMT = "Selecao (%d/5)",
+	LOGS_SOURCES = "Fontes:",
+	LOGS_LEVEL_MENU = "Menu de niveis",
+	LOGS_SELECT_FMT = "Selecao (%d/%d)",
+	LOGS_SOURCE_SELECT_FMT = "Fontes (%d/%d)",
 	LOGS_SELECT_ALL = "Selecionar tudo",
 	LOGS_SELECT_NONE = "Desmarcar tudo",
 	LOGS_REFRESH = "Atualizar",
 	LOGS_CLEAR = "Limpar",
-	LOGS_COPY = "Copiar (2000)",
+	LOGS_COPY = "Copiar",
+	LOGS_COPY_TITLE = "Copiar logs",
+	LOGS_DETAILS_BUTTON = "Ver",
+	LOGS_DETAILS_TOOLTIP = "Mostrar dados detalhados em formato legivel",
+	LOGS_DETAILS_TITLE_FMT = "Detalhes do log - %s",
+	LOGS_DETAILS_EMPTY = "Nenhum detalhe disponivel.",
+	LOGS_DETAILS_CONTEXT_SOURCE_FMT = "Log: %s",
+	LOGS_DETAILS_CONTEXT_LEVEL_FMT = "Nivel: %s",
+	LOGS_DETAILS_CONTEXT_TIME_FMT = "Hora: %s",
+	LOGS_DETAILS_CONTEXT_MSG_FMT = "Mensagem: %s",
+	LOGS_STATUS_VISIBLE_FMT = "Mostrando %d / %d",
+	LOGS_STATUS_BAR_FMT = "Logs: mostrando %d / total %d",
 	LOGS_DOCK_TOOLTIP = "Abrir logs",
 	LOGS_SLASH_HELP = "/gms logs - abre a UI de logs",
 	LOGS_SUB_FALLBACK_DESC = "Abre a UI de logs",
-
 	ROSTER_SEARCH = "Buscar:",
 	ROSTER_SHOW_OFFLINE = "Mostrar membros offline",
 	ROSTER_EMPTY = "Nenhum membro da guilda encontrado.",
@@ -144,3 +159,4 @@ GMS:RegisterLocale("ptBR", {
 	SETTINGS_LANG_APPLIED_FMT = "Idioma aplicado: %s",
 	SETTINGS_LANG_APPLY_FAILED = "Nao foi possivel aplicar o idioma.",
 })
+
