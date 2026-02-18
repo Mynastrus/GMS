@@ -9,7 +9,7 @@ local METADATA = {
 	INTERN_NAME  = "DB",
 	SHORT_NAME   = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION      = "1.1.6",
+	VERSION      = "1.1.7",
 }
 
 -- Blizzard Globals
@@ -111,33 +111,6 @@ local LOGGING_DEFAULTS = {
 	global = {},
 }
 
--- One-time hard reset baseline for the next release.
--- Set this to the release version that should trigger the reset once.
-local ONE_TIME_RESET_TARGET_VERSION = "1.4.6"
-local ONE_TIME_RESET_MARKER_KEY = "oneTimeHardResetAppliedVersion"
-local ONE_TIME_RESET_MARKER_AT_KEY = "oneTimeHardResetAppliedAt"
-
-local function ParseVersionParts(v)
-	local out = {}
-	for n in tostring(v or ""):gmatch("%d+") do
-		out[#out + 1] = tonumber(n) or 0
-	end
-	return out
-end
-
-local function IsVersionAtLeast(current, target)
-	local a = ParseVersionParts(current)
-	local b = ParseVersionParts(target)
-	local maxLen = (#a > #b) and #a or #b
-	for i = 1, maxLen do
-		local av = a[i] or 0
-		local bv = b[i] or 0
-		if av > bv then return true end
-		if av < bv then return false end
-	end
-	return true
-end
-
 -- ###########################################################################
 -- #	STANDARD DATABASE INIT
 -- ###########################################################################
@@ -148,71 +121,6 @@ local GUILD_DB_DEFAULTS = {
 	realm = {}, -- Realm specific
 	profile = {}, -- Profile specific (rarely used for guilds, but good practice)
 }
-
-local function HardResetAllSavedVariablesNoReload(self)
-	if self.db then
-		self.db:ResetProfile()
-		if type(self.db.global) == "table" then
-			wipe(self.db.global)
-		else
-			self.db.global = {}
-		end
-		self.db.global.version = 2
-		self.db.global.characters = {}
-		self.db.global.guilds = {}
-	end
-
-	if self.logging_db then
-		self.logging_db.char = type(self.logging_db.char) == "table" and self.logging_db.char or {}
-		self.logging_db.profile = type(self.logging_db.profile) == "table" and self.logging_db.profile or {}
-		self.logging_db.char.logs = {}
-		self.logging_db.profile.ingestPos = 0
-	end
-
-	if type(_G.GMS_Guild_DB) == "table" then wipe(_G.GMS_Guild_DB) end
-	local uiDB = rawget(_G, "GMS_UIDB")
-	if type(uiDB) == "table" then wipe(uiDB) end
-	local changelogDB = rawget(_G, "GMS_Changelog_DB")
-	if type(changelogDB) == "table" then wipe(changelogDB) end
-end
-
-local function ApplyOneTimeReleaseResetIfNeeded(self)
-	local target = tostring(ONE_TIME_RESET_TARGET_VERSION or "")
-	if target == "" then return false end
-	if not self or not self.db then return false end
-
-	local global = self.db.global
-	if type(global) ~= "table" then
-		self.db.global = {}
-		global = self.db.global
-	end
-
-	local alreadyApplied = tostring(global[ONE_TIME_RESET_MARKER_KEY] or "")
-	if alreadyApplied == target then
-		return false
-	end
-
-	-- Prevent repeated wipe loops on reload if marker is missing but schema is already migrated.
-	local schemaVersion = tonumber(global.version) or 0
-	if schemaVersion >= 2 then
-		global[ONE_TIME_RESET_MARKER_KEY] = target
-		global[ONE_TIME_RESET_MARKER_AT_KEY] = tonumber(global[ONE_TIME_RESET_MARKER_AT_KEY]) or (now() or 0)
-		LOCAL_LOG("INFO", "One-time hard reset skipped (already migrated)", "target=" .. target, "schema=" .. tostring(schemaVersion))
-		return false
-	end
-
-	local currentVersion = tostring(self.VERSION or "")
-	if currentVersion == "" or not IsVersionAtLeast(currentVersion, target) then
-		return false
-	end
-
-	HardResetAllSavedVariablesNoReload(self)
-
-	self.db.global[ONE_TIME_RESET_MARKER_KEY] = target
-	self.db.global[ONE_TIME_RESET_MARKER_AT_KEY] = now() or 0
-	LOCAL_LOG("WARN", "One-time hard reset applied", "target=" .. target, "current=" .. currentVersion)
-	return true
-end
 
 function GMS:InitializeStandardDatabases(force)
 	if not AceDB then
@@ -234,8 +142,6 @@ function GMS:InitializeStandardDatabases(force)
 		_G.GMS_Guild_DB = {}
 	end
 	self.guild_db = _G.GMS_Guild_DB
-
-	ApplyOneTimeReleaseResetIfNeeded(self)
 
 	local global = self.db.global
 	if type(global) ~= "table" then

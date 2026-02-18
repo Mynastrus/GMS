@@ -22,6 +22,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] CharInfo: Kontextansicht nutzt jetzt persistierten Sync-Cache (`CHARINFO_SYNC`) mit Fallback auf lokale Char-Daten und aktiver Sync-Anforderung je Domain (`roster_meta`, `MYTHICPLUS_V1`, `RAIDS_V1`, `EQUIPMENT_V1`). (GMS/Modules/CharInfo.lua, GMS/Core/Comm.lua)
 - [x] CharInfo: Responsive Karten-Layout und dynamische Breitenberechnung für kleine Fenster/Einspaltenansicht verbessert. (GMS/Modules/CharInfo.lua)
 - [x] AccountInfo: Twink-/Accountanzeige nutzt neben `guild-verified` jetzt einen robusten `stored`-Fallback, damit gespeicherte Verknüpfungen auch ohne aktuellen Roster-Treffer angezeigt werden. (GMS/Modules/AccountInfo.lua, GMS/Modules/CharInfo.lua)
+- [x] Database: automatische One-Time-Hardreset-Logik aus der Initialisierung entfernt; manueller Reset via `/gms dbwipe` bleibt erhalten. (GMS/Core/Database.lua)
 
 ### Fixed
 - [x] Comm: Checksum-Mismatch bei Sync-Paketen wird im Kompatibilitätsmodus akzeptiert und Warnungen werden throttled statt Spam. (GMS/Core/Comm.lua)
@@ -29,6 +30,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] Logs: Layout-Edge-Cases bei Detail-Button/leerem Text sowie Reflow nach Render aktualisiert. (GMS/Core/Logs.lua)
 - [x] CharInfo: Fehlende Lokalisierungs-Keys für statische Raidnamen/-beschreibungen ergänzt. (GMS/Locales/enUS.lua, GMS/Locales/deDE.lua, GMS/Modules/CharInfo.lua)
 - [x] Logs/Comm: Sync-Record-Keys mit GUID werden in der Comm-Humanisierung als `Name-Realm` in Klassenfarbe aufgelöst (mit GUID-Fallback). (GMS/Core/Logs.lua)
+- [x] Logs: Klassenfarben-Fallback für Spieleranzeigen ergänzt (lokalisierte Klassenname-Mappings + `RAID_CLASS_COLORS`). (GMS/Core/Logs.lua)
 
 ### Rules/Infra
 - [ ] (noch keine Eintraege)

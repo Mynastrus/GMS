@@ -39,6 +39,9 @@ local tonumber           = tonumber
 local CreateFrame        = CreateFrame
 local UIParent           = UIParent
 local GameTooltip        = GameTooltip
+local RAID_CLASS_COLORS  = RAID_CLASS_COLORS
+local LOCALIZED_CLASS_NAMES_MALE = LOCALIZED_CLASS_NAMES_MALE
+local LOCALIZED_CLASS_NAMES_FEMALE = LOCALIZED_CLASS_NAMES_FEMALE
 local EasyMenu           = EasyMenu
 local UIDropDownMenu_Initialize = UIDropDownMenu_Initialize
 local UIDropDownMenu_CreateInfo = UIDropDownMenu_CreateInfo
@@ -56,7 +59,7 @@ local METADATA = {
 	INTERN_NAME  = "LOGS",
 	SHORT_NAME   = "Logs",
 	DISPLAY_NAME = "Logging Console",
-	VERSION      = "1.4.6",
+	VERSION      = "1.4.7",
 }
 
 -- ###########################################################################
@@ -635,18 +638,69 @@ local function NormalizeHexColor(hex)
 	return nil
 end
 
+local function ResolveClassTokenFromName(className)
+	local c = tostring(className or "")
+	if c == "" then return "" end
+	if type(LOCALIZED_CLASS_NAMES_MALE) == "table" then
+		for token, localized in pairs(LOCALIZED_CLASS_NAMES_MALE) do
+			if tostring(localized or "") == c then
+				return tostring(token or "")
+			end
+		end
+	end
+	if type(LOCALIZED_CLASS_NAMES_FEMALE) == "table" then
+		for token, localized in pairs(LOCALIZED_CLASS_NAMES_FEMALE) do
+			if tostring(localized or "") == c then
+				return tostring(token or "")
+			end
+		end
+	end
+	return ""
+end
+
+local function ResolveClassColorHex(classToken)
+	local token = tostring(classToken or "")
+	if token == "" then return nil end
+
+	if type(GMS.GET_CLASS_COLOR) == "function" then
+		local ok, clsColor = pcall(GMS.GET_CLASS_COLOR, GMS, token)
+		if ok then
+			local normalized = NormalizeHexColor(clsColor)
+			if normalized then return normalized end
+		end
+	end
+
+	if type(RAID_CLASS_COLORS) == "table" then
+		local c = RAID_CLASS_COLORS[token]
+		if type(c) == "table" then
+			local byStr = NormalizeHexColor(c.colorStr)
+			if byStr then return byStr end
+			local r = tonumber(c.r or 0)
+			local g = tonumber(c.g or 0)
+			local b = tonumber(c.b or 0)
+			if r >= 0 and g >= 0 and b >= 0 then
+				return string.format("ff%02x%02x%02x", math.floor(r * 255), math.floor(g * 255), math.floor(b * 255))
+			end
+		end
+	end
+
+	return nil
+end
+
 local function ResolveCharacterDisplayByGuid(guid)
 	local g = tostring(guid or "")
 	if g == "" then return "?" end
 
 	local roster = GMS and (GMS:GetModule("ROSTER", true) or GMS:GetModule("Roster", true)) or nil
 	local nameFull = ""
-	local classFile = ""
+	local classToken = ""
+	local className = ""
 	if type(roster) == "table" and type(roster.GetMemberByGUID) == "function" then
 		local ok, m = pcall(roster.GetMemberByGUID, roster, g)
 		if ok and type(m) == "table" then
 			nameFull = tostring(m.name_full or m.name or "")
-			classFile = tostring(m.classFileName or m.classFile or "")
+			classToken = tostring(m.classFileName or m.classFile or "")
+			className = tostring(m.class or "")
 		end
 	end
 	if nameFull == "" and type(roster) == "table" and type(roster.GetMemberMeta) == "function" then
@@ -660,8 +714,11 @@ local function ResolveCharacterDisplayByGuid(guid)
 					nameFull = (r ~= "") and (n .. "-" .. r) or n
 				end
 			end
-			if classFile == "" then
-				classFile = tostring(meta.classFile or "")
+			if classToken == "" then
+				classToken = tostring(meta.classFile or "")
+			end
+			if className == "" then
+				className = tostring(meta.class or "")
 			end
 		end
 	end
@@ -669,13 +726,10 @@ local function ResolveCharacterDisplayByGuid(guid)
 		return g
 	end
 
-	local colorHex = nil
-	if type(GMS.GET_CLASS_COLOR) == "function" and classFile ~= "" then
-		local ok, clsColor = pcall(GMS.GET_CLASS_COLOR, GMS, classFile)
-		if ok then
-			colorHex = NormalizeHexColor(clsColor)
-		end
+	if classToken == "" and className ~= "" then
+		classToken = ResolveClassTokenFromName(className)
 	end
+	local colorHex = ResolveClassColorHex(classToken)
 	if colorHex then
 		return "|c" .. colorHex .. nameFull .. "|r"
 	end
