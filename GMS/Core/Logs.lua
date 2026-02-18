@@ -56,7 +56,7 @@ local METADATA = {
 	INTERN_NAME  = "LOGS",
 	SHORT_NAME   = "Logs",
 	DISPLAY_NAME = "Logging Console",
-	VERSION      = "1.4.5",
+	VERSION      = "1.4.6",
 }
 
 -- ###########################################################################
@@ -621,6 +621,81 @@ local function ParseRecordKey(key)
 	return a, b, c
 end
 
+local function NormalizeHexColor(hex)
+	local c = tostring(hex or "")
+	c = c:gsub("^|c", ""):gsub("|r", "")
+	if c:match("^[0-9a-fA-F]+$") then
+		if #c == 6 then
+			c = "ff" .. c
+		end
+		if #c == 8 then
+			return string.lower(c)
+		end
+	end
+	return nil
+end
+
+local function ResolveCharacterDisplayByGuid(guid)
+	local g = tostring(guid or "")
+	if g == "" then return "?" end
+
+	local roster = GMS and (GMS:GetModule("ROSTER", true) or GMS:GetModule("Roster", true)) or nil
+	local nameFull = ""
+	local classFile = ""
+	if type(roster) == "table" and type(roster.GetMemberByGUID) == "function" then
+		local ok, m = pcall(roster.GetMemberByGUID, roster, g)
+		if ok and type(m) == "table" then
+			nameFull = tostring(m.name_full or m.name or "")
+			classFile = tostring(m.classFileName or m.classFile or "")
+		end
+	end
+	if nameFull == "" and type(roster) == "table" and type(roster.GetMemberMeta) == "function" then
+		local ok, meta = pcall(roster.GetMemberMeta, roster, g)
+		if ok and type(meta) == "table" then
+			nameFull = tostring(meta.name_full or "")
+			if nameFull == "" then
+				local n = tostring(meta.name or "")
+				local r = tostring(meta.realm or "")
+				if n ~= "" then
+					nameFull = (r ~= "") and (n .. "-" .. r) or n
+				end
+			end
+			if classFile == "" then
+				classFile = tostring(meta.classFile or "")
+			end
+		end
+	end
+	if nameFull == "" then
+		return g
+	end
+
+	local colorHex = nil
+	if type(GMS.GET_CLASS_COLOR) == "function" and classFile ~= "" then
+		local ok, clsColor = pcall(GMS.GET_CLASS_COLOR, GMS, classFile)
+		if ok then
+			colorHex = NormalizeHexColor(clsColor)
+		end
+	end
+	if colorHex then
+		return "|c" .. colorHex .. nameFull .. "|r"
+	end
+	return nameFull
+end
+
+local function ResolveRecordTargetDisplay(key)
+	local originGuid, charGuid, domain = ParseRecordKey(key)
+	local targetGuid = tostring(charGuid or originGuid or "")
+	if targetGuid == "" then
+		return tostring(key or "?")
+	end
+	local who = ResolveCharacterDisplayByGuid(targetGuid)
+	local d = tostring(domain or "")
+	if d ~= "" then
+		return who .. " [" .. d .. "]"
+	end
+	return who
+end
+
 local function HumanizeCommMessage(raw, data)
 	local msg = tostring(raw or "")
 	if msg == "" then return msg end
@@ -657,26 +732,29 @@ local function HumanizeCommMessage(raw, data)
 		return LT("LOGS_HUMAN_COMM_RELAY_SENT_FMT", "Sent relay announce batch (%s records)", tostring(d[1] or "?"))
 	end
 	if msg == "Manual sync request sent" then
+		local target = ResolveRecordTargetDisplay(tostring(d[1] or ""))
 		return LT(
 			"LOGS_HUMAN_COMM_MANUAL_REQ_SENT_FMT",
 			"Requested sync for %s via %s (%s)",
-			tostring(d[1] or "?"),
+			target,
 			tostring(d[2] or "?"),
 			tostring(d[3] or "-")
 		)
 	end
 	if msg == "Chunked sync checksum mismatch accepted (compat)" then
+		local target = ResolveRecordTargetDisplay(tostring(d[1] or ""))
 		return LT(
 			"LOGS_HUMAN_COMM_CHUNK_CHECKSUM_COMPAT_FMT",
 			"Accepted chunked sync checksum mismatch for %s (compatibility mode)",
-			tostring(d[1] or "?")
+			target
 		)
 	end
 	if msg == "Sync checksum mismatch accepted (compat)" then
+		local target = ResolveRecordTargetDisplay(tostring(d[1] or ""))
 		return LT(
 			"LOGS_HUMAN_COMM_SYNC_CHECKSUM_COMPAT_FMT",
 			"Accepted sync checksum mismatch for %s via %s (compatibility mode)",
-			tostring(d[1] or "?"),
+			target,
 			tostring(d[2] or "?")
 		)
 	end

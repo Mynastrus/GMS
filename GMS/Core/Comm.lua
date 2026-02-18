@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "COMM",
 	SHORT_NAME   = "Comm",
 	DISPLAY_NAME = "Kommunikation",
-	VERSION      = "1.2.5",
+	VERSION      = "1.2.6",
 }
 
 ---@diagnostic disable: undefined-global
@@ -731,6 +731,8 @@ function Comm:OnCommReceive(prefix, msg, channel, sender)
 
 	packet.src_claimed = packet.src
 	packet.src = senderGUID
+	packet.senderName = sender
+	packet.channel = channel
 	pcall(handler.cb, senderGUID, packet.d, packet)
 end
 

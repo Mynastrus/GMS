@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.21",
+	VERSION      = "1.0.23",
 }
 
 local LibStub = LibStub
@@ -459,9 +459,12 @@ end
 
 local function BuildItemLevelFromEquipmentSnapshot(snapshot)
 	if type(snapshot) ~= "table" or type(snapshot.slots) ~= "table" then return nil end
+	local relevantSlots = { 1, 2, 3, 15, 5, 9, 10, 6, 7, 8, 11, 12, 13, 14, 16, 17 }
 	local total = 0
 	local count = 0
-	for _, item in pairs(snapshot.slots) do
+	for i = 1, #relevantSlots do
+		local slotId = relevantSlots[i]
+		local item = snapshot.slots[slotId]
 		if type(item) == "table" then
 			local ilvl = tonumber(item.itemLevel)
 			if ilvl and ilvl > 0 then

@@ -34,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "ACCOUNTINFO",
 	SHORT_NAME   = "AccountInfo",
 	DISPLAY_NAME = "Account Information",
-	VERSION      = "1.0.2",
+	VERSION      = "1.0.3",
 }
 
 local ACCOUNT_CHARS_SYNC_DOMAIN = "ACCOUNT_CHARS_V1"
@@ -455,6 +455,56 @@ local function BuildGuildVerifiedLinkedRows(selectedGuid, chars, fallbackGuildKe
 	return rows, true, tostring(sourceLabel or "Account guild links (guild-verified)")
 end
 
+local function BuildStoredLinkedRows(selectedGuid, chars, fallbackGuildKey, sourceLabel)
+	local guid = tostring(selectedGuid or "")
+	if guid == "" then return {}, false, "No character GUID available." end
+	if type(chars) ~= "table" or #chars <= 0 then
+		return {}, false, "No same-account characters stored yet."
+	end
+
+	local selectedGuildKey = tostring(fallbackGuildKey or "")
+	for i = 1, #chars do
+		local row = chars[i]
+		if type(row) == "table" and tostring(row.guid or "") == guid then
+			local rowGuildKey = tostring(row.guildKey or "")
+			if rowGuildKey ~= "" then selectedGuildKey = rowGuildKey end
+			break
+		end
+	end
+	if selectedGuildKey == "" then
+		selectedGuildKey = tostring(select(1, GetCurrentGuildStorageKeySafe()) or "")
+	end
+	if selectedGuildKey == "" then
+		return {}, false, "No guild context available."
+	end
+
+	local rows = {}
+	for i = 1, #chars do
+		local entry = chars[i]
+		if type(entry) == "table" then
+			local otherGuid = tostring(entry.guid or "")
+			local otherGuildKey = tostring(entry.guildKey or selectedGuildKey)
+			if otherGuid ~= "" and otherGuid ~= guid and otherGuildKey == selectedGuildKey then
+				rows[#rows + 1] = {
+					guid = otherGuid,
+					name_full = tostring(entry.name_full or entry.name or otherGuid),
+					level = tonumber(entry.level or 0) or 0,
+					class = tostring(entry.class or "-"),
+					classFile = tostring(entry.classFile or ""),
+					online = false,
+				}
+			end
+		end
+	end
+	table.sort(rows, function(a, b)
+		return tostring(a.name_full or "") < tostring(b.name_full or "")
+	end)
+	if #rows <= 0 then
+		return rows, false, "No same-account guild characters in stored links."
+	end
+	return rows, true, tostring(sourceLabel or "Account links (stored)")
+end
+
 local function BuildAccountCharsDigest(guildKey, chars)
 	local parts = { tostring(guildKey or "") }
 	for i = 1, #chars do
@@ -830,6 +880,15 @@ function AccountInfo:GetSyncedAccountGuildCharactersForGuid(guid)
 		if hasData then
 			return rows, true, source
 		end
+		local fallbackRows, fallbackHasData, fallbackSource = BuildStoredLinkedRows(
+			g,
+			stored.chars,
+			tostring(stored.guildKey or ""),
+			"Synced account guild links (saved, stored)"
+		)
+		if fallbackHasData then
+			return fallbackRows, true, fallbackSource
+		end
 	end
 
 	local comm = GMS and GMS.Comm
@@ -879,11 +938,20 @@ function AccountInfo:GetSyncedAccountGuildCharactersForGuid(guid)
 		return {}, false, "No synced account-link record found for selected character."
 	end
 	self:StoreSyncedAccountRecord(best, "comm-best")
-	return BuildGuildVerifiedLinkedRows(
+	local verifiedRows, verifiedHasData, verifiedSource = BuildGuildVerifiedLinkedRows(
 		g,
 		type(best.payload.chars) == "table" and best.payload.chars or {},
 		tostring(best.payload.guildKey or ""),
 		"Synced account guild links (guild-verified)"
+	)
+	if verifiedHasData then
+		return verifiedRows, true, verifiedSource
+	end
+	return BuildStoredLinkedRows(
+		g,
+		type(best.payload.chars) == "table" and best.payload.chars or {},
+		tostring(best.payload.guildKey or ""),
+		"Synced account guild links (stored)"
 	)
 end
 
@@ -906,6 +974,13 @@ function AccountInfo:GetLinkedAccountGuildCharactersForGuid(guid)
 				"Local account guild links (guild-verified)"
 			)
 			if hasData then return rows, true, source end
+			local fallbackRows, fallbackHasData, fallbackSource = BuildStoredLinkedRows(
+				g,
+				localChars,
+				guildKey,
+				"Local account guild links (stored)"
+			)
+			if fallbackHasData then return fallbackRows, true, fallbackSource end
 
 			local syncedRows, syncedHasData, syncedSource = self:GetSyncedAccountGuildCharactersForGuid(g)
 			if syncedHasData then return syncedRows, true, syncedSource end
@@ -916,6 +991,10 @@ function AccountInfo:GetLinkedAccountGuildCharactersForGuid(guid)
 					g, globalRows, tostring(base.guildKey or ""), "Global twink list (guild-verified)"
 				)
 				if globalHasData then return globalVerifiedRows, true, globalSource end
+				local globalFallbackRows, globalFallbackHasData, globalFallbackSource = BuildStoredLinkedRows(
+					g, globalRows, tostring(base.guildKey or ""), "Global twink list (stored)"
+				)
+				if globalFallbackHasData then return globalFallbackRows, true, globalFallbackSource end
 			end
 			return rows, false, source
 		end
@@ -930,6 +1009,10 @@ function AccountInfo:GetLinkedAccountGuildCharactersForGuid(guid)
 			g, globalRows, "", "Global twink list (guild-verified)"
 		)
 		if globalHasData then return globalVerifiedRows, true, globalSource end
+		local globalFallbackRows, globalFallbackHasData, globalFallbackSource = BuildStoredLinkedRows(
+			g, globalRows, "", "Global twink list (stored)"
+		)
+		if globalFallbackHasData then return globalFallbackRows, true, globalFallbackSource end
 	end
 
 	return syncedRows, false, syncedSource
