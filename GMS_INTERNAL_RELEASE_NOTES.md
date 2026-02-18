@@ -18,6 +18,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] Neues Modul `GMS/Modules/GuildInfo.lua` ergänzt und in `GMS/GMS.toc` registriert.
 - [x] Raid-Card in `GMS/Modules/CharInfo.lua` um Icon, Raidbeschreibung-Tooltip, klickbares EJ-Opening und animierte Ladeanzeige erweitert.
 - [x] Neue Core-Extension `GMS/Core/RaidIds.lua` hinzugefügt (JournalInstanceID->MapID, MapID->Boss-Stat-IDs, Validator-Helper).
+- [x] Neue zweisprachige CurseForge-Startseite (`CURSEFORGE_STARTPAGE.md`) mit DE/EN Addon-Uebersicht, Kernfunktionen, Commands, Installationshinweisen und Discord-Link ergänzt.
 
 ### Changed
 - [x] AccountInfo/Settings/CharInfo-Interaktionspaket umgesetzt: neues `AccountInfo`-Modul (inkl. persistenter Shared-Profile), Roster-Tooltip mit verknuepften Gildenchars, Mythic+-Dungeonnamen in CharInfo klickbar (Adventure Guide) sowie Portal-Icon mit Cooldown-Anzeige fuer geeignete +10-In-Time-Runs.
