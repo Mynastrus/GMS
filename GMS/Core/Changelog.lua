@@ -109,6 +109,28 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.5.0",
+		date = "2026-02-18",
+		title_en = "Baseline player sync rollout, account/twink resilience, and database reset hardening",
+		title_de = "Baseline-Player-Sync-Rollout, robuste Account/Twink-Pfade und gehaertete Datenbank-Reset-Logik",
+		notes_en = {
+			"Implemented the baseline guild sync flow in Roster/Comm with login announce (ANN), peer response (RESP), missing-domain discovery (NEED/HAVE), and targeted peer fetch from the best available sources.",
+			"Added per-domain freshness handling (server timestamp, source GUID, self-report priority) and GUID-claim validation for roster meta messages.",
+			"Expanded roster/account sync coverage across required domains: account/twinks, equipment, raids, and MythicPlus.",
+			"AccountInfo now falls back to stored/synced account links when guild-verified roster matching is temporarily unavailable, improving CharInfo account character visibility.",
+			"Removed automatic one-time database hard-reset execution from startup initialization while keeping manual /gms dbwipe behavior intact.",
+			"Improved Comm log readability by resolving sync target GUID keys to class-colored Name-Realm output where possible.",
+		},
+		notes_de = {
+			"Der Baseline-Gildensync in Roster/Comm wurde umgesetzt: Login-Announce (ANN), Peer-Response (RESP), Missing-Domain-Ermittlung (NEED/HAVE) und gezielter Peer-Fetch von den besten verfuegbaren Quellen.",
+			"Pro-Domain-Freshness wurde ergaenzt (Server-Timestamp, Source-GUID, Self-Report-Prioritaet) inklusive GUID-Claim-Validierung fuer Roster-Meta-Nachrichten.",
+			"Die Sync-Abdeckung fuer Pflicht-Domains wurde erweitert: Account/Twinks, Equipment, Raids und MythicPlus.",
+			"AccountInfo nutzt nun einen robusten Stored-/Synced-Fallback, wenn guild-verified Roster-Matches temporaer fehlen; dadurch ist die Account-Char-Anzeige in CharInfo stabiler.",
+			"Die automatische One-Time-Datenbank-Hardreset-Ausfuehrung beim Startup wurde entfernt; der manuelle Reset via /gms dbwipe bleibt unveraendert erhalten.",
+			"Die Comm-Log-Lesbarkeit wurde verbessert: Sync-Ziel-GUID-Keys werden, wenn moeglich, als klassenfarbiger Name-Realm dargestellt.",
+		},
+	},
+	{
 		version = "1.4.9",
 		date = "2026-02-18",
 		title_en = "Unified logs filtering, submenu reliability fix, and expanded locale-native logs text",
