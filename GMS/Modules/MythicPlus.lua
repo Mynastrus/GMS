@@ -33,7 +33,7 @@ local METADATA = {
 	INTERN_NAME  = "MythicPlus",
 	SHORT_NAME   = "MYTHIC",
 	DISPLAY_NAME = "Mythic Plus",
-	VERSION      = "1.1.3",
+	VERSION      = "1.1.5",
 }
 
 -- Ensure global log buffer exists
@@ -244,7 +244,7 @@ function MYTHIC:ScanMythicPlusData(reason)
 	if digest ~= "" and digest ~= previousDigest then
 		local ok, publishReason = self:_PublishMythicToGuild(store, reason or "scan")
 		if ok then
-			LOCAL_LOG("INFO", "Mythic+ snapshot published", tostring(reason or "scan"))
+			LOCAL_LOG("COMM", "Mythic+ snapshot published", tostring(reason or "scan"))
 		else
 			LOCAL_LOG("WARN", "Mythic+ publish failed", tostring(publishReason or "unknown"), tostring(reason or "scan"))
 		end

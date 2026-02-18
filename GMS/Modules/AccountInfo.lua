@@ -34,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "ACCOUNTINFO",
 	SHORT_NAME   = "AccountInfo",
 	DISPLAY_NAME = "Account Information",
-	VERSION      = "1.0.0",
+	VERSION      = "1.0.2",
 }
 
 local ACCOUNT_CHARS_SYNC_DOMAIN = "ACCOUNT_CHARS_V1"
@@ -474,17 +474,25 @@ end
 function AccountInfo:PublishLocalAccountLinks(reason, force)
 	local comm = GMS and GMS.Comm
 	if type(comm) ~= "table" or type(comm.PublishRecord) ~= "function" then
+		LOCAL_LOG("WARN", "Account links publish unavailable", "comm-unavailable", tostring(reason or "unknown"))
 		return false, "comm-unavailable"
 	end
 	local guid = (type(UnitGUID) == "function") and tostring(UnitGUID("player") or "") or ""
-	if guid == "" then return false, "no-player-guid" end
+	if guid == "" then
+		LOCAL_LOG("WARN", "Account links publish unavailable", "no-player-guid", tostring(reason or "unknown"))
+		return false, "no-player-guid"
+	end
 
 	local links = self:GetAccountLinkStore()
 	if type(links) ~= "table" or type(links.chars) ~= "table" then
+		LOCAL_LOG("WARN", "Account links publish unavailable", "store-unavailable", tostring(reason or "unknown"))
 		return false, "store-unavailable"
 	end
 	local base = links.chars[guid]
-	if type(base) ~= "table" then return false, "player-row-missing" end
+	if type(base) ~= "table" then
+		LOCAL_LOG("WARN", "Account links publish unavailable", "player-row-missing", tostring(reason or "unknown"))
+		return false, "player-row-missing"
+	end
 
 	local guildKey = tostring(base.guildKey or "")
 	if guildKey == "" then return false, "no-guild" end
@@ -536,13 +544,14 @@ function AccountInfo:PublishLocalAccountLinks(reason, force)
 		payload.characters[#payload.characters + 1] = tostring(chars[i].name_full or chars[i].guid or "-")
 	end
 
-	local ok = comm:PublishRecord(ACCOUNT_CHARS_SYNC_DOMAIN, guid, payload, { updatedAt = nowTs })
+	local ok, publishReason = comm:PublishRecord(ACCOUNT_CHARS_SYNC_DOMAIN, guid, payload, { updatedAt = nowTs })
 	if ok then
 		self._accountCharsLastDigest = digest
 		self._accountCharsLastPublishAt = nowTs
-		LOCAL_LOG("INFO", "Account links published", tostring(#chars), tostring(reason or "unknown"))
+		LOCAL_LOG("COMM", "Account links published", tostring(#chars), tostring(reason or "unknown"))
 		return true, "published"
 	end
+	LOCAL_LOG("WARN", "Account links publish failed", tostring(publishReason or "unknown"), tostring(reason or "unknown"))
 	return false, "publish-failed"
 end
 

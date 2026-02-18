@@ -78,7 +78,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.15",
+	VERSION      = "1.2.19",
 }
 
 -- ###########################################################################
@@ -610,6 +610,165 @@ local function normalizeRaidName(name)
 	return (name:gsub("[%s%p]+", ""))
 end
 
+local function mergeRaidEntryInto(target, source)
+	if type(target) ~= "table" or type(source) ~= "table" then return end
+
+	local sourceTotal = tonumber(source.total) or 0
+	local targetTotal = tonumber(target.total) or 0
+	if sourceTotal > targetTotal then
+		target.total = sourceTotal
+	end
+	if tostring(target.name or "") == "" and tostring(source.name or "") ~= "" then
+		target.name = tostring(source.name)
+	end
+
+	if type(source.current) == "table" then
+		target.current = (type(target.current) == "table") and target.current or {}
+		for diffID, srcCur in pairs(source.current) do
+			if type(srcCur) == "table" then
+				local dstCur = target.current[diffID]
+				if type(dstCur) ~= "table" then
+					dstCur = {}
+					target.current[diffID] = dstCur
+				end
+
+				local srcKilled = tonumber(srcCur.killed) or 0
+				local dstKilled = tonumber(dstCur.killed) or 0
+				local srcTotalCur = tonumber(srcCur.total) or sourceTotal
+				local dstTotalCur = tonumber(dstCur.total) or targetTotal
+				local takeSource = (srcKilled > dstKilled) or (srcKilled == dstKilled and srcTotalCur > dstTotalCur)
+
+				if takeSource then
+					dstCur.diffID = tonumber(srcCur.diffID) or tonumber(diffID) or dstCur.diffID
+					dstCur.diffTag = tostring(srcCur.diffTag or dstCur.diffTag or diffTag(tonumber(diffID) or diffID))
+					dstCur.killed = srcKilled
+					dstCur.total = srcTotalCur
+					dstCur.short = tostring(srcCur.short or buildShort(tonumber(diffID) or diffID, srcKilled, srcTotalCur))
+				end
+
+				dstCur.locked = (dstCur.locked == true) or (srcCur.locked == true)
+				dstCur.extended = (dstCur.extended == true) or (srcCur.extended == true)
+
+				local srcResetAt = tonumber(srcCur.resetAt)
+				local dstResetAt = tonumber(dstCur.resetAt)
+				if srcResetAt and (not dstResetAt or srcResetAt > dstResetAt) then
+					dstCur.resetAt = srcResetAt
+				end
+				local srcResetSeconds = tonumber(srcCur.resetSeconds)
+				local dstResetSeconds = tonumber(dstCur.resetSeconds)
+				if srcResetSeconds and (not dstResetSeconds or srcResetSeconds > dstResetSeconds) then
+					dstCur.resetSeconds = srcResetSeconds
+				end
+
+				if type(srcCur.bosses) == "table" then
+					dstCur.bosses = (type(dstCur.bosses) == "table") and dstCur.bosses or {}
+					for encID, killed in pairs(srcCur.bosses) do
+						if killed then
+							dstCur.bosses[encID] = true
+						end
+					end
+				end
+			end
+		end
+	end
+
+	if type(source.bestByDiff) == "table" then
+		target.bestByDiff = (type(target.bestByDiff) == "table") and target.bestByDiff or {}
+		for diffID, srcBest in pairs(source.bestByDiff) do
+			if type(srcBest) == "table" then
+				local dstBest = target.bestByDiff[diffID]
+				local srcKilled = tonumber(srcBest.killed) or 0
+				local dstKilled = tonumber(dstBest and dstBest.killed or 0) or 0
+				if type(dstBest) ~= "table" or srcKilled > dstKilled then
+					target.bestByDiff[diffID] = {
+						diffID = tonumber(srcBest.diffID) or tonumber(diffID) or diffID,
+						diffTag = tostring(srcBest.diffTag or diffTag(tonumber(diffID) or diffID)),
+						killed = srcKilled,
+						total = tonumber(srcBest.total) or sourceTotal,
+						short = tostring(srcBest.short or buildShort(tonumber(diffID) or diffID, srcKilled, tonumber(srcBest.total) or sourceTotal)),
+					}
+				end
+			end
+		end
+	end
+
+	if type(source.best) == "table" and (type(target.best) ~= "table" or betterThan(source.best, target.best)) then
+		target.best = {
+			diffID = tonumber(source.best.diffID) or nil,
+			diffTag = tostring(source.best.diffTag or ""),
+			killed = tonumber(source.best.killed) or 0,
+			total = tonumber(source.best.total) or sourceTotal,
+			short = tostring(source.best.short or ""),
+		}
+	end
+
+	local srcLastScan = tonumber(source.lastScan)
+	local dstLastScan = tonumber(target.lastScan)
+	if srcLastScan and (not dstLastScan or srcLastScan > dstLastScan) then
+		target.lastScan = srcLastScan
+	end
+	if tostring(target.lastReason or "") == "" and tostring(source.lastReason or "") ~= "" then
+		target.lastReason = tostring(source.lastReason)
+	end
+end
+
+local function migrateNamedRaidFallback(raidsStore, catalog, instanceID, raidName)
+	if type(raidsStore) ~= "table" or type(catalog) ~= "table" then return false end
+	if type(catalog.nameNormToInstanceID) ~= "table" then return false end
+	local nkey = normalizeRaidName(raidName)
+	if nkey == "" then return false end
+
+	local fallbackKey = "name:" .. nkey
+	local fallbackEntry = raidsStore[fallbackKey]
+	if type(fallbackEntry) ~= "table" then return false end
+
+	local targetKey = tonumber(instanceID) or instanceID
+	if targetKey == nil or tostring(targetKey) == fallbackKey then return false end
+	local targetEntry = raidsStore[targetKey]
+	if type(targetEntry) ~= "table" then
+		targetEntry = {}
+		raidsStore[targetKey] = targetEntry
+	end
+
+	mergeRaidEntryInto(targetEntry, fallbackEntry)
+	raidsStore[fallbackKey] = nil
+	return true
+end
+
+local function collapseNamedRaidFallbacks(raidsStore, catalog)
+	if type(raidsStore) ~= "table" or type(catalog) ~= "table" then return 0 end
+	local nameIdx = catalog.nameNormToInstanceID
+	if type(nameIdx) ~= "table" then return 0 end
+
+	local fallbackKeys = {}
+	for key in pairs(raidsStore) do
+		if type(key) == "string" and key:match("^name:.+$") then
+			fallbackKeys[#fallbackKeys + 1] = key
+		end
+	end
+
+	local migrated = 0
+	for i = 1, #fallbackKeys do
+		local fallbackKey = fallbackKeys[i]
+		local normalized = fallbackKey:match("^name:(.+)$")
+		local targetKey = normalized and nameIdx[normalized] or nil
+		local sourceEntry = raidsStore[fallbackKey]
+		if targetKey and type(sourceEntry) == "table" then
+			local dstKey = tonumber(targetKey) or targetKey
+			local targetEntry = raidsStore[dstKey]
+			if type(targetEntry) ~= "table" then
+				targetEntry = {}
+				raidsStore[dstKey] = targetEntry
+			end
+			mergeRaidEntryInto(targetEntry, sourceEntry)
+			raidsStore[fallbackKey] = nil
+			migrated = migrated + 1
+		end
+	end
+
+	return migrated
+end
+
 local function parseDifficultyIDFromLowerText(dn)
 	dn = tostring(dn or "")
 	if dn == "" then return nil end
@@ -741,11 +900,14 @@ local function BuildStaticRaidStatFallback(catalog)
 		end
 	end
 
-	-- Always run direct instance-ID fallback as well (works even when EJ catalog is not ready).
-	for instanceID, cfg in pairs(mapByInstance) do
-		local iid = tonumber(instanceID) or instanceID
-		if type(out[iid]) ~= "table" then
-			applyRows(iid, cfg and cfg.bosses)
+	-- Direct instance-ID fallback is only needed when EJ catalog cannot map names.
+	local catalogUsable = type(catalog) == "table" and type(catalog.byInstanceID) == "table" and next(catalog.byInstanceID) ~= nil
+	if not catalogUsable then
+		for instanceID, cfg in pairs(mapByInstance) do
+			local iid = tonumber(instanceID) or instanceID
+			if type(out[iid]) ~= "table" then
+				applyRows(iid, cfg and cfg.bosses)
+			end
 		end
 	end
 
@@ -1394,7 +1556,7 @@ function RAIDS:_RunStandaloneStatisticsEnrichment(reason)
 	if digest ~= "" and digest ~= previousDigest then
 		local ok, publishReason = _publishRaidsToGuild(raidsStore, reason or "stats-standalone")
 		if ok then
-			LOCAL_LOG("INFO", "Raids snapshot published", reason or "stats-standalone")
+			LOCAL_LOG("COMM", "Raids snapshot published", reason or "stats-standalone")
 		else
 			LOCAL_LOG("WARN", "Raids publish failed", tostring(publishReason or "unknown"), reason or "stats-standalone")
 		end
@@ -1660,8 +1822,17 @@ function RAIDS:OnUpdateInstanceInfo()
 	local ingested = 0
 	local unresolved = 0
 	local fallbackMapped = 0
+	local fallbackMigrated = 0
 	local unresolvedDetails = {}
 	local rawDetails = {}
+
+	if catalogReady then
+		local collapsed = collapseNamedRaidFallbacks(raidsStore, RAIDS._catalog)
+		if collapsed > 0 then
+			fallbackMigrated = fallbackMigrated + collapsed
+			LOCAL_LOG("INFO", "Collapsed named raid fallbacks", collapsed)
+		end
+	end
 
 	for i = 1, num do
 		local info = { GetSavedInstanceInfo(i) }
@@ -1748,6 +1919,12 @@ function RAIDS:OnUpdateInstanceInfo()
 					end
 				end
 				if instanceID then
+					if type(instanceID) ~= "string" or not instanceID:match("^name:") then
+						if migrateNamedRaidFallback(raidsStore, catalog, instanceID, name) then
+							fallbackMigrated = fallbackMigrated + 1
+						end
+					end
+
 					local catRaid = catalog and catalog.byInstanceID and catalog.byInstanceID[instanceID] or nil
 					local total = (catRaid and catRaid.total) or (tonumber(numEncounters) or 0)
 					if total <= 0 then total = encCount end
@@ -1863,7 +2040,7 @@ function RAIDS:OnUpdateInstanceInfo()
 	if digest ~= "" and digest ~= previousDigest then
 		local ok, publishReason = _publishRaidsToGuild(raidsStore, self._pendingReason)
 		if ok then
-			LOCAL_LOG("INFO", "Raids snapshot published", self._pendingReason or "?")
+			LOCAL_LOG("COMM", "Raids snapshot published", self._pendingReason or "?")
 		else
 			LOCAL_LOG("WARN", "Raids publish failed", tostring(publishReason or "unknown"), self._pendingReason or "?")
 		end
@@ -1873,6 +2050,6 @@ function RAIDS:OnUpdateInstanceInfo()
 		end
 	end
 
-	LOCAL_LOG("INFO", "Raid scan ingested", ingested, "reason", self._pendingReason or "?", "unresolved", unresolved, "fallbackMapped", fallbackMapped)
+	LOCAL_LOG("INFO", "Raid scan ingested", ingested, "reason", self._pendingReason or "?", "unresolved", unresolved, "fallbackMapped", fallbackMapped, "fallbackMigrated", fallbackMigrated)
 	self._pendingReason = nil
 end

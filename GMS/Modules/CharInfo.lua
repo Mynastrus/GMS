@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.15",
+	VERSION      = "1.0.16",
 }
 
 local LibStub = LibStub
@@ -1195,6 +1195,117 @@ local function BuildRaidRows(all, catalog)
 			end
 		end
 	end
+
+	local function NormalizeRaidNameKey(name)
+		local s = string.lower(tostring(name or ""))
+		return (s:gsub("[%s%p]+", ""))
+	end
+
+	local function BestRank(diffID)
+		local d = tonumber(diffID) or 0
+		if d == 17 then return 1 end
+		if d == 14 then return 2 end
+		if d == 15 then return 3 end
+		if d == 16 then return 4 end
+		return 0
+	end
+
+	local function ParseBestCell(bestText)
+		local txt = tostring(bestText or "")
+		local tag, k, t = txt:match("^%s*(%S+)%s+(%d+)%s*/%s*(%d+)%s*$")
+		if not tag then
+			return nil, 0, 0
+		end
+		local u = string.upper(tag)
+		local diffID = (u == "LFR" and 17) or (u == "N" and 14) or (u == "H" and 15) or (u == "M" and 16) or nil
+		return diffID, tonumber(k) or 0, tonumber(t) or 0
+	end
+
+	local function MergeRaidRows(dst, src)
+		if type(dst) ~= "table" or type(src) ~= "table" then return end
+		if not dst.instanceID and src.instanceID then
+			dst.instanceID = src.instanceID
+		end
+		if tostring(dst.description or "") == "" and tostring(src.description or "") ~= "" then
+			dst.description = tostring(src.description)
+		end
+		if (tonumber(dst.icon) or 0) <= 0 and (tonumber(src.icon) or 0) > 0 then
+			dst.icon = tonumber(src.icon) or 0
+		end
+		if (tonumber(src.total) or 0) > (tonumber(dst.total) or 0) then
+			dst.total = tonumber(src.total) or dst.total
+		end
+
+		dst.current = type(dst.current) == "table" and dst.current or {}
+		src.current = type(src.current) == "table" and src.current or {}
+		for i = 1, #RAID_DIFF_ORDER do
+			local diffID = RAID_DIFF_ORDER[i]
+			local dCur = dst.current[diffID]
+			local sCur = src.current[diffID]
+			if type(sCur) == "table" then
+				if type(dCur) ~= "table" then
+					dCur = {
+						text = "- / -",
+						killed = 0,
+						total = tonumber(dst.total) or 0,
+						bosses = {},
+					}
+					dst.current[diffID] = dCur
+				end
+
+				local sKilled = tonumber(sCur.killed) or 0
+				local dKilled = tonumber(dCur.killed) or 0
+				local sTotal = tonumber(sCur.total) or 0
+				local dTotal = tonumber(dCur.total) or 0
+				if (sKilled > dKilled) or (sKilled == dKilled and sTotal > dTotal) then
+					dCur.killed = sKilled
+					dCur.total = sTotal
+					dCur.text = FormatRaidProgress(sKilled, sTotal)
+				end
+
+				if type(sCur.bosses) == "table" then
+					dCur.bosses = type(dCur.bosses) == "table" and dCur.bosses or {}
+					for encID, killed in pairs(sCur.bosses) do
+						if killed then
+							dCur.bosses[encID] = true
+						end
+					end
+				end
+			end
+		end
+
+		local dDiff, dKilled, dTotal = tonumber(dst.bestDiffID), 0, 0
+		local sDiff, sKilled, sTotal = tonumber(src.bestDiffID), 0, 0
+		local pd, pk, pt = ParseBestCell(dst.best)
+		if not dDiff then dDiff = pd end
+		dKilled, dTotal = pk, pt
+		local sd, sk, st = ParseBestCell(src.best)
+		if not sDiff then sDiff = sd end
+		sKilled, sTotal = sk, st
+
+		if BestRank(sDiff) > BestRank(dDiff) or (BestRank(sDiff) == BestRank(dDiff) and sKilled > dKilled) or (BestRank(sDiff) == BestRank(dDiff) and sKilled == dKilled and sTotal > dTotal) then
+			dst.bestDiffID = sDiff
+			dst.best = tostring(src.best or dst.best or "- / -")
+		end
+	end
+
+	local deduped = {}
+	local byName = {}
+	for i = 1, #rows do
+		local row = rows[i]
+		local key = NormalizeRaidNameKey(row and row.name)
+		if key == "" then
+			key = "__idx_" .. tostring(i)
+		end
+		local existing = byName[key]
+		if not existing then
+			byName[key] = row
+			deduped[#deduped + 1] = row
+		else
+			MergeRaidRows(existing, row)
+		end
+	end
+	rows = deduped
 
 	table.sort(rows, function(a, b)
 		return tostring(a.name or "") < tostring(b.name or "")

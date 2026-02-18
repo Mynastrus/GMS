@@ -418,3 +418,15 @@ In `GMS/Locales/deDE.lua` duerfen und sollen echte deutsche Umlaute verwendet we
 
 * ASCII-Umschreibungen wie `ae`, `oe`, `ue` sind in `deDE` nur noch Fallback-Ausnahme, wenn technische Inkompatibilitaeten nachweisbar sind.
 * Neue oder geaenderte `deDE`-Texte sollen standardmaessig mit korrekter deutscher Rechtschreibung inkl. Umlauten gepflegt werden.
+
+### 13.6 Log-Lokalisierung & menschliche Lesbarkeit (Pflicht)
+
+Alle im Addon angezeigten Logs **MÜSSEN** fuer Endnutzer menschlich lesbar und lokalisiert sein.
+
+**Verbindliche Regeln:**
+
+* Technische/roh-formatierte Meldungen (z. B. Protokoll- oder Paketdetails) duerfen intern existieren, muessen in der sichtbaren Log-Ausgabe jedoch in eine nutzerfreundliche Form ueberfuehrt werden.
+* Die sichtbare Log-Sprache folgt der aktiven Addon-Sprache (Locale-System via `GMS:T(...)` / Locale-Keys).
+* Neue oder geaenderte Log-Texte sind als Locale-Keys zu pflegen (mindestens `enUS` und `deDE`).
+* Wenn fuer ein Log-Muster keine Humanisierung existiert, ist dies als Luecke zu behandeln und bei naechster Aenderung nachzuziehen.
+* Ziel der Logs: klarer fachlicher Kontext (wer, was, wann, optional wohin), ohne unnoetigen technischen Noise.

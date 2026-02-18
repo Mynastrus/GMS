@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "COMM",
 	SHORT_NAME   = "Comm",
 	DISPLAY_NAME = "Kommunikation",
-	VERSION      = "1.2.1",
+	VERSION      = "1.2.3",
 }
 
 ---@diagnostic disable: undefined-global
@@ -281,7 +281,7 @@ function Comm:SendData(subPrefix, data, priority, target, targetName)
 	local distribution = target or "GUILD"
 	local ok = SendRaw(subPrefix, data, priority or "NORMAL", distribution, targetName)
 	if ok then
-		LOCAL_LOG("DEBUG", "Data sent", subPrefix, distribution, targetName or "")
+		LOCAL_LOG("COMM", "Data sent", subPrefix, distribution, targetName or "")
 	end
 	return ok
 end
@@ -521,7 +521,7 @@ local function HandleChunkPacket(senderGUID, senderName, channel, d)
 
 	local stored = StoreIfNewer(record, senderGUID, channel)
 	if stored then
-		LOCAL_LOG("DEBUG", "Stored chunked sync record", record.key, channel or "")
+		LOCAL_LOG("COMM", "Stored chunked sync record", record.key, channel or "")
 	end
 end
 
@@ -572,7 +572,7 @@ local function HandleSyncPush(senderGUID, channel, d)
 	end
 	local stored = StoreIfNewer(record, senderGUID, channel)
 	if stored then
-		LOCAL_LOG("DEBUG", "Stored sync push record", record.key, channel or "")
+		LOCAL_LOG("COMM", "Stored sync push record", record.key, channel or "")
 	end
 end
 
@@ -621,7 +621,7 @@ function Comm:BroadcastRelayAnnounces(limit)
 		end
 	end
 	if sent > 0 then
-		LOCAL_LOG("DEBUG", "Relay announce batch sent", sent)
+		LOCAL_LOG("COMM", "Relay announce batch sent", sent)
 	end
 	return sent
 end

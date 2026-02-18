@@ -52,7 +52,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.9",
+	VERSION      = "1.3.11",
 }
 
 -- ###########################################################################
@@ -538,7 +538,7 @@ function EQUIP:SaveSnapshot(snapshot, reason)
 	if digest ~= "" and digest ~= previousDigest then
 		local ok, publishReason = self:_PublishSnapshotToGuild(snapshot, reason)
 		if ok then
-			LOCAL_LOG("INFO", "Equipment snapshot published", tostring(reason or "unknown"))
+			LOCAL_LOG("COMM", "Equipment snapshot published", tostring(reason or "unknown"))
 		else
 			LOCAL_LOG("WARN", "Equipment publish failed", tostring(publishReason or "unknown"), tostring(reason or "unknown"))
 		end

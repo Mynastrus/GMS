@@ -42,6 +42,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] Anzeigename-Auflösung für `ModuleStates` korrigiert: Self-Registration in `GMS/Core/ModuleStates.lua` zeitlich korrekt vor `SetReady` ergänzt und Logs-Quellenmapping in `GMS/Core/Logs.lua` robust gemacht, damit kein Fallback auf `MODULESTATES` mehr erfolgt.
 
 ### Rules/Infra
+- [x] Sammelstand eingecheckt: ausstehende Repo-Änderungen konsolidiert (`.gitignore`, `CURSEFORGE_STARTPAGE.md`, `GMS/Core/Comm.lua`, `GMS/Locales/deDE.lua`, `GMS/Locales/enUS.lua`, `GMS/Modules/AccountInfo.lua`, `GMS/Modules/CharInfo.lua`, `GMS/Modules/Equipment.lua`, `GMS/Modules/MythicPlus.lua`, `GMS/Modules/Raids.lua`, `GMS_PROJECT_RULES.md`).
 - [x] Unreleased-Abschnitt nach Release `1.4.7` fuer die naechste Iteration zurueckgesetzt.
 - [x] `GMS_PROJECT_RULES.md` erweitert: neue Pflichtregel fuer lokalisierbare Chat-/UI-/Tooltip-/generierte Texte (Ausnahme Eigennamen, Verweis auf `GMS/Locales/`).
 - [x] `GMS_PROJECT_RULES.md` erweitert: neue Pflichtregel fuer Vor-Commit-Lokalisierungspruefung (fehlende Locale-Keys vor Commit pruefen).
