@@ -40,6 +40,7 @@ GMS:RegisterLocale("deDE", {
 	NAME_MYTHIC = "Mythisch Plus",
 	NAME_RAIDS = "Raids",
 	NAME_ROSTER = "Roster",
+	NAME_ACCOUNTINFO = "Accountinformationen",
 
 	SLASH_DISPLAY_NAME = "Chateingabe",
 	SLASH_HELP_USAGE = "Verwendung: /gms <subcommand> [args]",
@@ -247,6 +248,7 @@ GMS:RegisterLocale("deDE", {
 	CHARINFO_CARD_ACCOUNT = "Gildencharaktere auf demselben Account",
 	CHARINFO_CARD_TALENTS = "Talente",
 	CHARINFO_CARD_PVP = "PvP",
+	CHARINFO_LABEL_KEY = "Schluessel",
 	CHARINFO_LABEL_SCORE = "Wertung",
 	CHARINFO_LABEL_SUMMARY = "Zusammenfassung",
 	CHARINFO_LABEL_NAME = "Name",
@@ -268,6 +270,17 @@ GMS:RegisterLocale("deDE", {
 	CHARINFO_STATUS_ONLINE = "Online",
 	CHARINFO_STATUS_OFFLINE = "Offline",
 
+	ACCOUNTINFO_OPT_PROFILE_NAME = "Name (optional)",
+	ACCOUNTINFO_NOTICE_SHARED = "Alle hier eingegebenen Daten werden innerhalb der Gilde geshared.",
+	ACCOUNTINFO_OPT_BIRTHDAY = "Geburtstag (optional)",
+	ACCOUNTINFO_OPT_GENDER = "Geschlecht (optional)",
+	ACCOUNTINFO_OPT_MAINCHAR = "Main-Charakter (Gilde)",
+	ACCOUNTINFO_OPT_PUBLISH_NOW = "Accountinfos veröffentlichen",
+	ACCOUNTINFO_GENDER_UNKNOWN = "Keine Angabe",
+	ACCOUNTINFO_GENDER_MALE = "Männlich",
+	ACCOUNTINFO_GENDER_FEMALE = "Weiblich",
+	ACCOUNTINFO_GENDER_DIVERSE = "Divers",
+
 	ROSTER_STATUS_ONLINE = "Online",
 	ROSTER_STATUS_OFFLINE = "Offline",
 	ROSTER_STATUS_AWAY = "Abwesend",
@@ -277,4 +290,6 @@ GMS:RegisterLocale("deDE", {
 	ROSTER_FACTION_HORDE = "Horde",
 	ROSTER_FACTION_NEUTRAL = "Neutral",
 	ROSTER_GUID_LABEL = "GUID",
+	ROSTER_TOOLTIP_LINKED_CHARS = "Verknüpfte Gildencharaktere",
+	ROSTER_TOOLTIP_LINKED_CHARS_NONE = "Keine verknüpften Gildencharaktere",
 })

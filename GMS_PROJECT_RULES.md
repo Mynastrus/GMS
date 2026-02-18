@@ -412,3 +412,9 @@ Vor **jedem Commit** muss auf fehlende Lokalisierungen geprÃ¼ft werden.
 
 Ein Commit ohne diese PrÃ¼fung gilt als **regelwidrig**.
 
+### 13.5 deDE-Umlaute (Pflicht)
+
+In `GMS/Locales/deDE.lua` duerfen und sollen echte deutsche Umlaute verwendet werden (`ä`, `ö`, `ü`, `Ä`, `Ö`, `Ü`, `ß`), sofern Encoding/Toolchain dies korrekt unterstuetzt.
+
+* ASCII-Umschreibungen wie `ae`, `oe`, `ue` sind in `deDE` nur noch Fallback-Ausnahme, wenn technische Inkompatibilitaeten nachweisbar sind.
+* Neue oder geaenderte `deDE`-Texte sollen standardmaessig mit korrekter deutscher Rechtschreibung inkl. Umlauten gepflegt werden.

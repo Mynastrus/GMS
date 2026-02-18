@@ -58,7 +58,19 @@ local HandleModifiedItemClick    = HandleModifiedItemClick
 local GameFontNormalSmallOutline = GameFontNormalSmallOutline
 local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
 local LoadAddOn                  = LoadAddOn
+local CastSpellByID              = CastSpellByID
+local GetSpellTexture            = GetSpellTexture
+local GetSpellCooldown           = GetSpellCooldown
+local BOOKTYPE_SPELL             = BOOKTYPE_SPELL
+local GetNumSpellTabs            = GetNumSpellTabs
+local GetSpellTabInfo            = GetSpellTabInfo
+local GetSpellBookItemInfo       = GetSpellBookItemInfo
+local GetSpellBookItemName       = GetSpellBookItemName
 local EJ_SelectInstance          = EJ_SelectInstance
+local EJ_GetNumTiers             = EJ_GetNumTiers
+local EJ_SelectTier              = EJ_SelectTier
+local EJ_GetInstanceByIndex      = EJ_GetInstanceByIndex
+local EJ_GetInstanceInfo         = EJ_GetInstanceInfo
 local ToggleEncounterJournal     = ToggleEncounterJournal
 local EncounterJournal_OpenJournal = EncounterJournal_OpenJournal
 local ShowUIPanel                = ShowUIPanel
@@ -708,6 +720,8 @@ local function BuildMythicRows(dungeons)
 					name = name,
 					level = level,
 					score = score,
+					mapId = tonumber(d.mapId or 0) or 0,
+					completed = (d.completed == true),
 				}
 			end
 		end
@@ -718,6 +732,200 @@ local function BuildMythicRows(dungeons)
 		return tostring(a.name) < tostring(b.name)
 	end)
 	return rows
+end
+
+local function NormalizeSearchText(raw)
+	local s = tostring(raw or ""):lower()
+	s = s:gsub("[äáàâ]", "a"):gsub("[öóòô]", "o"):gsub("[üúùû]", "u"):gsub("ß", "ss")
+	s = s:gsub("[^%w%s]", " "):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+	return s
+end
+
+local function SplitTokens(raw)
+	local out = {}
+	local s = NormalizeSearchText(raw)
+	for token in s:gmatch("%S+") do
+		if #token >= 3 then
+			out[#out + 1] = token
+		end
+	end
+	return out
+end
+
+local function GetSpellCooldownRemaining(spellID)
+	local sid = tonumber(spellID or 0) or 0
+	if sid <= 0 then return 0, 0, 0 end
+	local start, duration = 0, 0
+	if C_Spell and type(C_Spell.GetSpellCooldown) == "function" then
+		local info = C_Spell.GetSpellCooldown(sid)
+		if type(info) == "table" then
+			start = tonumber(info.startTime or 0) or 0
+			duration = tonumber(info.duration or 0) or 0
+		end
+	elseif type(GetSpellCooldown) == "function" then
+		start, duration = GetSpellCooldown(sid)
+		start = tonumber(start or 0) or 0
+		duration = tonumber(duration or 0) or 0
+	end
+	local remain = 0
+	if duration > 0 and start > 0 then
+		remain = math.max(0, (start + duration) - (tonumber(GetTime and GetTime() or 0) or 0))
+	end
+	return remain, start, duration
+end
+
+local function FormatCooldownShort(seconds)
+	local s = math.floor(tonumber(seconds or 0) or 0)
+	if s <= 0 then return "Ready" end
+	if s >= 3600 then
+		return string.format("%dh %02dm", math.floor(s / 3600), math.floor((s % 3600) / 60))
+	end
+	if s >= 60 then
+		return string.format("%dm %02ds", math.floor(s / 60), s % 60)
+	end
+	return string.format("%ds", s)
+end
+
+local function BuildKnownSpellIndex()
+	local idx = {}
+	local bookType = BOOKTYPE_SPELL or "spell"
+	if type(GetNumSpellTabs) ~= "function" or type(GetSpellTabInfo) ~= "function" or type(GetSpellBookItemInfo) ~= "function" then
+		return idx
+	end
+	local tabs = tonumber(GetNumSpellTabs() or 0) or 0
+	for tab = 1, tabs do
+		local _, _, offset, numSpells = GetSpellTabInfo(tab)
+		offset = tonumber(offset or 0) or 0
+		numSpells = tonumber(numSpells or 0) or 0
+		for i = 1, numSpells do
+			local slot = offset + i
+			local stype, spellID = GetSpellBookItemInfo(slot, bookType)
+			if stype == "SPELL" and tonumber(spellID or 0) and tonumber(spellID or 0) > 0 then
+				local sname = nil
+				if type(GetSpellBookItemName) == "function" then
+					sname = select(1, GetSpellBookItemName(slot, bookType))
+				end
+				if (not sname or sname == "") and C_Spell and type(C_Spell.GetSpellName) == "function" then
+					sname = C_Spell.GetSpellName(spellID)
+				end
+				if type(sname) == "string" and sname ~= "" then
+					idx[#idx + 1] = {
+						id = tonumber(spellID) or 0,
+						name = sname,
+						norm = NormalizeSearchText(sname),
+					}
+				end
+			end
+		end
+	end
+	return idx
+end
+
+local function FindPortalSpellForDungeonName(dungeonName)
+	local dname = tostring(dungeonName or "")
+	if dname == "" then return nil, nil end
+	local dnorm = NormalizeSearchText(dname)
+	if dnorm == "" then return nil, nil end
+	local dtokens = SplitTokens(dnorm)
+	if #dtokens <= 0 then return nil, nil end
+
+	local nowTs = tonumber(GetTime and GetTime() or 0) or 0
+	local cache = CHARINFO._spellIndexCache
+	if type(cache) ~= "table" or (nowTs - tonumber(CHARINFO._spellIndexAt or 0)) > 15 then
+		cache = BuildKnownSpellIndex()
+		CHARINFO._spellIndexCache = cache
+		CHARINFO._spellIndexAt = nowTs
+	end
+
+	local best = nil
+	local bestScore = -1
+	for i = 1, #cache do
+		local s = cache[i]
+		local snorm = tostring(s.norm or "")
+		if snorm ~= "" then
+			local score = 0
+			if snorm:find(dnorm, 1, true) then
+				score = score + 100
+			end
+			for t = 1, #dtokens do
+				if snorm:find(dtokens[t], 1, true) then
+					score = score + 10
+				end
+			end
+			if score > bestScore then
+				bestScore = score
+				best = s
+			end
+		end
+	end
+	if type(best) == "table" and bestScore >= 30 then
+		return tonumber(best.id or 0) or 0, tostring(best.name or "")
+	end
+	return nil, nil
+end
+
+local function BuildEJDungeonNameIndex()
+	local out = {}
+	if type(LoadAddOn) == "function" then
+		pcall(LoadAddOn, "Blizzard_EncounterJournal")
+	end
+	EJ_GetNumTiers = rawget(_G, "EJ_GetNumTiers") or EJ_GetNumTiers
+	EJ_SelectTier = rawget(_G, "EJ_SelectTier") or EJ_SelectTier
+	EJ_GetInstanceByIndex = rawget(_G, "EJ_GetInstanceByIndex") or EJ_GetInstanceByIndex
+	EJ_GetInstanceInfo = rawget(_G, "EJ_GetInstanceInfo") or EJ_GetInstanceInfo
+	if type(EJ_GetNumTiers) ~= "function" or type(EJ_SelectTier) ~= "function" or type(EJ_GetInstanceByIndex) ~= "function" then
+		return out
+	end
+	local tiers = tonumber(EJ_GetNumTiers() or 0) or 0
+	for tier = 1, tiers do
+		pcall(EJ_SelectTier, tier)
+		for idx = 1, 200 do
+			local instanceID = EJ_GetInstanceByIndex(idx, false)
+			if not instanceID then break end
+			local name = nil
+			if type(EJ_GetInstanceInfo) == "function" then
+				name = select(1, EJ_GetInstanceInfo(instanceID))
+			end
+			name = tostring(name or "")
+			if name ~= "" then
+				out[NormalizeSearchText(name)] = tonumber(instanceID) or 0
+			end
+		end
+	end
+	return out
+end
+
+local function FindDungeonJournalInstanceIDByName(dungeonName)
+	local dnorm = NormalizeSearchText(dungeonName)
+	if dnorm == "" then return nil end
+	local nowTs = tonumber(GetTime and GetTime() or 0) or 0
+	local cache = CHARINFO._ejDungeonNameIndex
+	if type(cache) ~= "table" or (nowTs - tonumber(CHARINFO._ejDungeonNameIndexAt or 0)) > 60 then
+		cache = BuildEJDungeonNameIndex()
+		CHARINFO._ejDungeonNameIndex = cache
+		CHARINFO._ejDungeonNameIndexAt = nowTs
+	end
+	return tonumber(cache[dnorm] or 0) or nil
+end
+
+local function OpenDungeonInEncounterJournalByName(dungeonName)
+	local iid = FindDungeonJournalInstanceIDByName(dungeonName)
+	if not iid or iid <= 0 then return false end
+
+	if type(LoadAddOn) == "function" then
+		pcall(LoadAddOn, "Blizzard_EncounterJournal")
+	end
+	if type(ShowUIPanel) == "function" and type(_G.EncounterJournal) == "table" then
+		pcall(ShowUIPanel, _G.EncounterJournal)
+	end
+	local openJournal = EncounterJournal_OpenJournal or (_G and _G.EncounterJournal_OpenJournal)
+	if type(openJournal) == "function" then
+		pcall(openJournal, 2, iid)
+	end
+	if type(EJ_SelectInstance) == "function" then
+		pcall(EJ_SelectInstance, iid)
+	end
+	return true
 end
 
 local RAID_DIFF_ORDER = { 17, 14, 15, 16 } -- LFR, N, H, M
@@ -767,12 +975,18 @@ local function GetBestColorByDiffID(diffID)
 		[14] = "HUNTER",  -- N
 		[17] = "ROGUE",   -- LFR
 	}
+	local fallbackByDiff = {
+		[16] = "ffa66bff", -- M
+		[15] = "ffb084f5", -- H
+		[14] = "ff4caf50", -- N
+		[17] = "ffffd54f", -- LFR
+	}
 	local classToken = classByDiff[tonumber(diffID) or 0]
 	if classToken and GMS and type(GMS.GET_CLASS_COLOR) == "function" then
 		local c = tostring(GMS:GET_CLASS_COLOR(classToken) or "")
 		if c ~= "" then return NormalizeColor8(c) end
 	end
-	return "ffffffff"
+	return fallbackByDiff[tonumber(diffID) or 0] or "ffffffff"
 end
 
 local function GetBestColorByTag(tag)
@@ -784,18 +998,32 @@ local function GetBestColorByTag(tag)
 	return "ffffffff"
 end
 
-local function ColorizeBestText(raw)
+local function ColorizeBestText(raw, forcedDiffID)
 	local txt = tostring(raw or "")
 	if txt == "" or txt == "-" or txt == "- / -" then
 		return txt
 	end
+	local d = tonumber(forcedDiffID)
+	if d and d > 0 then
+		return "|c" .. GetBestColorByDiffID(d) .. txt .. "|r"
+	end
 
-	local leadTag = txt:match("^%s*(LFR|M|H|N)%s+")
+	local function NormalizeTag(tag)
+		local t = string.upper(tostring(tag or ""))
+		if t == "LFR" or t == "M" or t == "H" or t == "N" then
+			return t
+		end
+		return nil
+	end
+
+	local leadRaw = txt:match("^%s*(%S+)")
+	local leadTag = NormalizeTag(leadRaw)
 	if leadTag then
 		return "|c" .. GetBestColorByTag(leadTag) .. txt .. "|r"
 	end
 
-	local trailTag = txt:match("%s+(LFR|M|H|N)%s*$")
+	local trailRaw = txt:match("(%S+)%s*$")
+	local trailTag = NormalizeTag(trailRaw)
 	if trailTag then
 		return "|c" .. GetBestColorByTag(trailTag) .. txt .. "|r"
 	end
@@ -884,6 +1112,7 @@ local function BuildRaidRows(all, catalog)
 			encounters = (type(encounters) == "table") and encounters or {},
 			current = {},
 			best = "- / -",
+			bestDiffID = nil,
 		}
 		for i = 1, #RAID_DIFF_ORDER do
 			row.current[RAID_DIFF_ORDER[i]] = {
@@ -961,6 +1190,9 @@ local function BuildRaidRows(all, catalog)
 			end
 
 			row.best = FormatBestShort(entry.best)
+			if type(entry.best) == "table" then
+				row.bestDiffID = tonumber(entry.best.diffID) or row.bestDiffID
+			end
 		end
 	end
 
@@ -1066,46 +1298,6 @@ local function GetCharScopedModuleBucket(guid, moduleKey)
 	return mod
 end
 
-local function MergeUniqueNames(dest, source)
-	if type(dest) ~= "table" or type(source) ~= "table" then return end
-	local seen = {}
-	for i = 1, #dest do
-		seen[string.lower(tostring(dest[i]))] = true
-	end
-	for i = 1, #source do
-		local n = tostring(source[i] or "")
-		n = n:gsub("^%s+", ""):gsub("%s+$", "")
-		if n ~= "" then
-			local key = string.lower(n)
-			if not seen[key] then
-				seen[key] = true
-				dest[#dest + 1] = n
-			end
-		end
-	end
-end
-
-local function NormalizeNameList(raw)
-	local out = {}
-	if type(raw) == "string" and raw ~= "" then
-		out[#out + 1] = raw
-		return out
-	end
-	if type(raw) ~= "table" then return out end
-
-	for k, v in pairs(raw) do
-		if type(v) == "string" then
-			out[#out + 1] = v
-		elseif type(v) == "table" then
-			local n = tostring(v.name or v.name_full or v.character or v.char or "")
-			if n ~= "" then out[#out + 1] = n end
-		elseif type(k) == "string" and k ~= "" and v == true then
-			out[#out + 1] = k
-		end
-	end
-	return out
-end
-
 local function NormalizeAccountCharacterRows(rows)
 	local out = {}
 	if type(rows) ~= "table" then
@@ -1142,42 +1334,20 @@ local function GetAccountCharactersForGuid(guid)
 	local g = tostring(guid or "")
 	if g == "" then return {}, false, "No character GUID available." end
 
-	local roster = GMS and (GMS:GetModule("ROSTER", true) or GMS:GetModule("Roster", true)) or nil
-	if type(roster) == "table" and type(roster.GetLinkedAccountGuildCharactersForGuid) == "function" then
-		local ok, rows, hasData, source = pcall(roster.GetLinkedAccountGuildCharactersForGuid, roster, g)
+	local accountInfo = GMS and (GMS:GetModule("ACCOUNTINFO", true) or GMS:GetModule("AccountInfo", true)) or nil
+	if type(accountInfo) == "table" and type(accountInfo.GetLinkedAccountGuildCharactersForGuid) == "function" then
+		local ok, rows, hasData, source = pcall(accountInfo.GetLinkedAccountGuildCharactersForGuid, accountInfo, g)
 		if ok and type(rows) == "table" then
 			local normalized = NormalizeAccountCharacterRows(rows)
 			local hasRows = (hasData == true) or (#normalized > 0)
-			return normalized, hasRows, tostring(source or "Local account guild links")
+			return normalized, hasRows, tostring(source or "AccountInfo account guild links")
 		end
 		if not ok then
 			LOCAL_LOG("WARN", "Account-link query failed", tostring(rows))
 		end
 	end
 
-	-- Legacy fallback (for older roster versions): synced names without guild-live verification.
-	local names = {}
-	if type(roster) == "table" and type(roster.GetMemberMeta) == "function" then
-		local ok, meta = pcall(roster.GetMemberMeta, roster, g)
-		if ok and type(meta) == "table" then
-			MergeUniqueNames(names, NormalizeNameList(meta.accountCharacters))
-			MergeUniqueNames(names, NormalizeNameList(meta.accountChars))
-			MergeUniqueNames(names, NormalizeNameList(meta.sameAccountChars))
-			MergeUniqueNames(names, NormalizeNameList(meta.alts))
-		end
-	end
-
-	local rec = GetLatestDomainRecordForGuid("ACCOUNT_CHARS_V1", g)
-	if rec and type(rec.payload) == "table" then
-		MergeUniqueNames(names, NormalizeNameList(rec.payload.characters))
-		MergeUniqueNames(names, NormalizeNameList(rec.payload.chars))
-	end
-
-	if #names <= 0 then
-		return {}, false, "No same-account guild characters recorded yet."
-	end
-	table.sort(names)
-	return NormalizeAccountCharacterRows(names), true, "Legacy synced account-character list"
+	return {}, false, "No same-account guild characters recorded yet."
 end
 
 local function GetRaidSummaryFromRosterMeta(guid)
@@ -1785,7 +1955,8 @@ local function StartRaidWaitAnimTicker(labelWidget, baseText, spinnerWidgets)
 
 	local base = tostring(baseText or LT("CHARINFO_RAID_WAIT_SCAN", "Warte auf Raidscan"))
 	base = base:gsub("[%.%s]+$", "")
-	local frames = { "|", "/", "-", "\\" }
+	-- Do not use raw "|" in WoW font strings; it is parsed as color/format prefix.
+	local frames = { "/", "-", "\\", "*" }
 	CHARINFO._raidWaitAnimStep = 0
 	CHARINFO._raidWaitAnimTicker = C_Timer.NewTicker(0.45, function()
 		local ui = UIRef()
@@ -1988,18 +2159,171 @@ function CHARINFO:TryRegisterPage()
 
 		local function BuildCard_Mythic(parent)
 			local card = NewCardContainer(parent, LT("CHARINFO_CARD_MYTHIC", "Mythic Dungeons"))
-			AddValueLine(card, LT("CHARINFO_LABEL_SCORE", "Score"), (details.mythic.score and tostring(details.mythic.score)) or "-")
-			AddValueLine(card, LT("CHARINFO_LABEL_SOURCE", "Source"), details.mythic.source or "-")
 			if #details.mythic.rows <= 0 then
 				AddNoDataHint(card, LT("CHARINFO_NO_MYTHIC_DATA", "No Mythic+ data available for this character."))
 				return
 			end
+
+			local cardWidth = colWidth - 32
+			if card and card.content and type(card.content.GetWidth) == "function" then
+				local cw = tonumber(card.content:GetWidth()) or 0
+				if cw > 0 then cardWidth = cw end
+			end
+			if cardWidth < 300 then cardWidth = 300 end
+
+			local portalW = 18
+			local keyW = 68
+			local scoreW = 70
+			local nameW = cardWidth - portalW - keyW - scoreW - 22
+			if nameW < 130 then
+				nameW = 130
+				portalW = 16
+				keyW = 60
+				scoreW = 64
+			end
+
+			local head = AceGUI:Create("SimpleGroup")
+			head:SetFullWidth(true)
+			head:SetLayout("Flow")
+			card:AddChild(head)
+
+			local hName = AceGUI:Create("Label")
+			hName:SetWidth(nameW + portalW)
+			hName:SetText("")
+			head:AddChild(hName)
+
+			local hKey = AceGUI:Create("Label")
+			hKey:SetWidth(keyW)
+			hKey:SetText("|cff9d9d9d" .. LT("CHARINFO_LABEL_KEY", "Key") .. "|r")
+			if hKey.label then
+				hKey.label:SetFontObject(GameFontNormalSmallOutline)
+				hKey.label:SetJustifyH("CENTER")
+				hKey.label:SetWordWrap(false)
+			end
+			head:AddChild(hKey)
+
+			local hScore = AceGUI:Create("Label")
+			hScore:SetWidth(scoreW)
+			hScore:SetText("|cff9d9d9d" .. LT("CHARINFO_LABEL_SCORE", "Score") .. "|r")
+			if hScore.label then
+				hScore.label:SetFontObject(GameFontNormalSmallOutline)
+				hScore.label:SetJustifyH("RIGHT")
+				hScore.label:SetWordWrap(false)
+			end
+			head:AddChild(hScore)
+
 			local maxRows = math.min(#details.mythic.rows, 10)
 			for i = 1, maxRows do
 				local row = details.mythic.rows[i]
 				local levelText = (tonumber(row.level) or 0) > 0 and ("+" .. tostring(row.level)) or "-"
 				local scoreText = (tonumber(row.score) or 0) > 0 and tostring(row.score) or "-"
-				AddMutedLine(card, LT("CHARINFO_MYTHIC_ROW_FMT", "%s   key: %s   score: %s", tostring(row.name or "-"), levelText, scoreText))
+
+				local rowGroup = AceGUI:Create("SimpleGroup")
+				rowGroup:SetFullWidth(true)
+				rowGroup:SetLayout("Flow")
+				card:AddChild(rowGroup)
+
+				local portalSpellID, portalSpellName = nil, nil
+				local hasTimedTenPlus = (tonumber(row.level) or 0) >= 10 and (row.completed == true)
+				if hasTimedTenPlus then
+					portalSpellID, portalSpellName = FindPortalSpellForDungeonName(row.name)
+				end
+
+				local portalIcon = AceGUI:Create("Icon")
+				portalIcon:SetWidth(portalW)
+				portalIcon:SetHeight(12)
+				portalIcon:SetImageSize(12, 12)
+				if portalSpellID and type(GetSpellTexture) == "function" then
+					portalIcon:SetImage(GetSpellTexture(portalSpellID))
+				else
+					portalIcon:SetImage("Interface\\PetBattles\\PetBattle-LockIcon")
+				end
+				if portalIcon.image and type(portalIcon.image.SetDesaturated) == "function" then
+					portalIcon.image:SetDesaturated(not (portalSpellID and hasTimedTenPlus))
+				end
+				if portalIcon.frame then
+					local cd = portalIcon.frame._gmsCd
+					if not cd and type(CreateFrame) == "function" then
+						cd = CreateFrame("Cooldown", nil, portalIcon.frame, "CooldownFrameTemplate")
+						if cd then
+							cd:SetAllPoints(portalIcon.frame)
+							portalIcon.frame._gmsCd = cd
+						end
+					end
+					if cd and type(cd.SetCooldown) == "function" and portalSpellID then
+						local _, start, duration = GetSpellCooldownRemaining(portalSpellID)
+						cd:SetCooldown(tonumber(start or 0) or 0, tonumber(duration or 0) or 0)
+					end
+				end
+				portalIcon:SetCallback("OnEnter", function(widget)
+					if not GameTooltip or not widget or not widget.frame then return end
+					GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
+					if portalSpellID then
+						local remain = select(1, GetSpellCooldownRemaining(portalSpellID))
+						GameTooltip:SetText(tostring(portalSpellName or "Mythic+ Portal"), 1, 1, 1)
+						GameTooltip:AddLine(string.format("|cff9d9d9dCooldown:|r %s", FormatCooldownShort(remain)), 1, 1, 1)
+						GameTooltip:AddLine("|cff03A9F4Klick: Instanzportal zaubern|r", 1, 1, 1)
+					elseif hasTimedTenPlus then
+						GameTooltip:SetText("|cffffcc00Kein passender Portalzauber gefunden|r", 1, 1, 1)
+						GameTooltip:AddLine("|cff9d9d9dMöglicherweise nicht gelernt oder kein Spellbook-Match.|r", 1, 1, 1)
+					else
+						GameTooltip:SetText("|cff9d9d9dPortal nicht verfügbar|r", 1, 1, 1)
+						GameTooltip:AddLine("|cff9d9d9dFreischaltung ab +10 in Time.|r", 1, 1, 1)
+					end
+					GameTooltip:Show()
+				end)
+				portalIcon:SetCallback("OnLeave", function()
+					if GameTooltip then GameTooltip:Hide() end
+				end)
+				portalIcon:SetCallback("OnClick", function()
+					if portalSpellID and hasTimedTenPlus and type(CastSpellByID) == "function" then
+						pcall(CastSpellByID, portalSpellID)
+					end
+				end)
+				rowGroup:AddChild(portalIcon)
+
+				local nameLabel = AceGUI:Create("InteractiveLabel")
+				nameLabel:SetWidth(nameW)
+				nameLabel:SetText("|cff03A9F4" .. tostring(row.name or "-") .. "|r")
+				if nameLabel.label then
+					nameLabel.label:SetFontObject(GameFontNormalSmallOutline)
+					nameLabel.label:SetJustifyH("LEFT")
+					nameLabel.label:SetWordWrap(false)
+				end
+				nameLabel:SetCallback("OnEnter", function(widget)
+					if not GameTooltip or not widget or not widget.frame then return end
+					GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
+					GameTooltip:SetText(tostring(row.name or "-"), 1, 1, 1)
+					GameTooltip:AddLine("|cff03A9F4Klick: Abenteuerführer öffnen|r", 1, 1, 1)
+					GameTooltip:Show()
+				end)
+				nameLabel:SetCallback("OnLeave", function()
+					if GameTooltip then GameTooltip:Hide() end
+				end)
+				nameLabel:SetCallback("OnClick", function()
+					OpenDungeonInEncounterJournalByName(row.name)
+				end)
+				rowGroup:AddChild(nameLabel)
+
+				local keyLabel = AceGUI:Create("Label")
+				keyLabel:SetWidth(keyW)
+				keyLabel:SetText("|cffffffff" .. levelText .. "|r")
+				if keyLabel.label then
+					keyLabel.label:SetFontObject(GameFontNormalSmallOutline)
+					keyLabel.label:SetJustifyH("CENTER")
+					keyLabel.label:SetWordWrap(false)
+				end
+				rowGroup:AddChild(keyLabel)
+
+				local scoreLabel = AceGUI:Create("Label")
+				scoreLabel:SetWidth(scoreW)
+				scoreLabel:SetText("|cffffffff" .. scoreText .. "|r")
+				if scoreLabel.label then
+					scoreLabel.label:SetFontObject(GameFontNormalSmallOutline)
+					scoreLabel.label:SetJustifyH("RIGHT")
+					scoreLabel.label:SetWordWrap(false)
+				end
+				rowGroup:AddChild(scoreLabel)
 			end
 		end
 
@@ -2187,8 +2511,6 @@ function CHARINFO:TryRegisterPage()
 			StopRaidWaitAnimTicker()
 
 			local card = NewCardContainer(parent, LT("CHARINFO_CARD_RAID_DATA", "Raid Data"))
-			AddValueLine(card, LT("CHARINFO_LABEL_BEST", "Best"), ColorizeBestText(details.raids.summary or "-"))
-			AddValueLine(card, LT("CHARINFO_LABEL_SOURCE", "Source"), details.raids.source or "-")
 			local raidPending = (BuildSelfRaidWaitingText(details) ~= nil)
 
 			local cardWidth = colWidth - 32
@@ -2200,14 +2522,14 @@ function CHARINFO:TryRegisterPage()
 			local availW = cardWidth - 16
 			local bestW = 56
 			local iconW = 16
-			local nameW = 110
-			local cellW = math.floor((availW - bestW - nameW) / 4)
-			if cellW < 24 then cellW = 24 end
-			nameW = availW - bestW - (cellW * 4)
-			if nameW < 70 then
-				nameW = 70
-				cellW = math.floor((availW - bestW - nameW) / 4)
-				if cellW < 20 then cellW = 20 end
+			local cellW = 34
+			local nameW = availW - bestW - (cellW * 4)
+			if nameW < 120 then
+				cellW = math.max(24, math.floor((availW - bestW - 120) / 4))
+				nameW = availW - bestW - (cellW * 4)
+			end
+			if nameW < 90 then
+				nameW = 90
 			end
 
 			local function AddHeadCell(row, width, text, center)
@@ -2395,10 +2717,10 @@ function CHARINFO:TryRegisterPage()
 				best:SetWidth(bestW)
 				local bestRaw = tostring(rowData.best or "- / -")
 				if raidPending and (bestRaw == "- / -" or bestRaw == "-") then
-					best:SetText("|c99ffb366|r")
+					best:SetText("|c99ffb366...|r")
 					pendingBestWidgets[#pendingBestWidgets + 1] = best
 				else
-					best:SetText(ColorizeBestText(bestRaw))
+					best:SetText(ColorizeBestText(bestRaw, rowData.bestDiffID))
 				end
 				if best.label then
 					best.label:SetFontObject(GameFontNormalSmallOutline)
@@ -2407,10 +2729,6 @@ function CHARINFO:TryRegisterPage()
 				end
 				row:AddChild(best)
 
-				local spacer = AceGUI:Create("Label")
-				spacer:SetFullWidth(true)
-				spacer:SetText(" ")
-				card:AddChild(spacer)
 			end
 			if raidPending and #pendingBestWidgets > 0 then
 				StartRaidWaitAnimTicker(nil, nil, pendingBestWidgets)

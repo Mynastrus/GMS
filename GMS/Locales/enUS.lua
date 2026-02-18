@@ -40,6 +40,7 @@ GMS:RegisterLocale("enUS", {
 	NAME_MYTHIC = "Mythic Plus",
 	NAME_RAIDS = "Raids",
 	NAME_ROSTER = "Roster",
+	NAME_ACCOUNTINFO = "Account Information",
 
 	SLASH_DISPLAY_NAME = "Chat Input",
 	SLASH_HELP_USAGE = "Usage: /gms <subcommand> [args]",
@@ -247,6 +248,7 @@ GMS:RegisterLocale("enUS", {
 	CHARINFO_CARD_ACCOUNT = "Guild Characters on Same Account",
 	CHARINFO_CARD_TALENTS = "Talents",
 	CHARINFO_CARD_PVP = "PvP",
+	CHARINFO_LABEL_KEY = "Key",
 	CHARINFO_LABEL_SCORE = "Score",
 	CHARINFO_LABEL_SUMMARY = "Summary",
 	CHARINFO_LABEL_NAME = "Name",
@@ -268,6 +270,17 @@ GMS:RegisterLocale("enUS", {
 	CHARINFO_STATUS_ONLINE = "Online",
 	CHARINFO_STATUS_OFFLINE = "Offline",
 
+	ACCOUNTINFO_OPT_PROFILE_NAME = "Name (optional)",
+	ACCOUNTINFO_NOTICE_SHARED = "All data entered here is shared within the guild.",
+	ACCOUNTINFO_OPT_BIRTHDAY = "Birthday (optional)",
+	ACCOUNTINFO_OPT_GENDER = "Gender (optional)",
+	ACCOUNTINFO_OPT_MAINCHAR = "Main Character (guild)",
+	ACCOUNTINFO_OPT_PUBLISH_NOW = "Publish Account Info",
+	ACCOUNTINFO_GENDER_UNKNOWN = "Prefer not to say",
+	ACCOUNTINFO_GENDER_MALE = "Male",
+	ACCOUNTINFO_GENDER_FEMALE = "Female",
+	ACCOUNTINFO_GENDER_DIVERSE = "Diverse",
+
 	ROSTER_STATUS_ONLINE = "Online",
 	ROSTER_STATUS_OFFLINE = "Offline",
 	ROSTER_STATUS_AWAY = "Away",
@@ -277,4 +290,6 @@ GMS:RegisterLocale("enUS", {
 	ROSTER_FACTION_HORDE = "Horde",
 	ROSTER_FACTION_NEUTRAL = "Neutral",
 	ROSTER_GUID_LABEL = "GUID",
+	ROSTER_TOOLTIP_LINKED_CHARS = "Linked guild characters",
+	ROSTER_TOOLTIP_LINKED_CHARS_NONE = "No linked guild characters",
 })

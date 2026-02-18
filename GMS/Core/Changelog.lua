@@ -109,6 +109,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.4.8",
+		date = "2026-02-18",
+		title_en = "AccountInfo rollout, Mythic+ interaction upgrades, and settings persistence hardening",
+		title_de = "AccountInfo-Rollout, Mythic+-Interaktionsupgrades und gehaertete Einstellungs-Persistenz",
+		notes_en = {
+			"Added new ACCOUNTINFO module with guild-shared profile fields (name, birthday, gender, main character) and centralized account-link synchronization.",
+			"Roster tooltips now list same-account guild characters with class color, level, and online indicator.",
+			"CharInfo Mythic+ card now supports clickable dungeon names to open the Adventure Guide and portal icons with cooldown display for eligible timed +10 runs.",
+			"Settings dashboard and module option rendering were reworked for stable scrolling/layout and robust input handling.",
+			"Hardened AccountInfo persistence and restore flow across reloads with direct profile-store fallback and sync hydration improvements.",
+		},
+		notes_de = {
+			"Neues ACCOUNTINFO-Modul hinzugefuegt mit gildenweit geteilten Profilfeldern (Name, Geburtstag, Geschlecht, Main-Charakter) und zentralisierter Account-Link-Synchronisierung.",
+			"Roster-Tooltips zeigen jetzt verknuepfte Gildencharaktere desselben Accounts inklusive Klassenfarbe, Stufe und Online-Indikator.",
+			"Die Mythic+-Karte in CharInfo unterstuetzt nun klickbare Dungeon-Namen zum Oeffnen des Abenteuerfuehrers sowie Portal-Icons mit Cooldown-Anzeige fuer qualifizierte +10 In-Time-Runs.",
+			"Settings-Dashboard und Module-Options-Rendering wurden fuer stabiles Scrolling/Layout und robustes Input-Handling ueberarbeitet.",
+			"AccountInfo-Persistenz und Restore-Flow ueber Reloads wurden gehaertet, inklusive direktem Profil-Store-Fallback und verbesserter Sync-Hydration.",
+		},
+	},
+	{
 		version = "1.4.7",
 		date = "2026-02-16",
 		title_en = "Account-link sync rollout, CharInfo equipment polish, and roster noise reduction",

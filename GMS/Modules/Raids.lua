@@ -433,6 +433,23 @@ local function _buildRaidsDigest(raidsStore)
 	return table.concat(out, "|")
 end
 
+local function _hasAnyBestProgress(raidsStore)
+	if type(raidsStore) ~= "table" then return false end
+	for _, raidEntry in pairs(raidsStore) do
+		if type(raidEntry) == "table" then
+			local best = raidEntry.best
+			if type(best) == "table" then
+				local killed = tonumber(best.killed) or 0
+				local total = tonumber(best.total) or 0
+				if total > 0 or killed > 0 then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
 -- ###########################################################################
 -- # DIFFICULTY TAGS / RANKING (best: diffRank first, then killed)
 -- ###########################################################################
@@ -1815,6 +1832,14 @@ function RAIDS:OnUpdateInstanceInfo()
 	end
 
 	local runStats, statsGateReason = self:_ShouldRunStatisticsEnrichment(self._pendingReason, tsNow)
+	if not runStats and (statsGateReason == "login-grace" or statsGateReason == "startup-reason") then
+		-- Bootstrap path: right after reload/login we want BEST values quickly.
+		-- If no BEST data exists yet, run enrichment immediately instead of waiting.
+		if not _hasAnyBestProgress(raidsStore) then
+			runStats = true
+			statsGateReason = "bootstrap-no-best"
+		end
+	end
 	if runStats then
 		local statsApplied, statsMatched, statsCompleted = ApplyRaidBestFromCharacterStatistics(raidsStore, RAIDS._catalog, tsNow, self._pendingReason)
 		if statsCompleted then

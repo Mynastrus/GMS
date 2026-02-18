@@ -20,6 +20,7 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [x] Neue Core-Extension `GMS/Core/RaidIds.lua` hinzugefügt (JournalInstanceID->MapID, MapID->Boss-Stat-IDs, Validator-Helper).
 
 ### Changed
+- [x] AccountInfo/Settings/CharInfo-Interaktionspaket umgesetzt: neues `AccountInfo`-Modul (inkl. persistenter Shared-Profile), Roster-Tooltip mit verknuepften Gildenchars, Mythic+-Dungeonnamen in CharInfo klickbar (Adventure Guide) sowie Portal-Icon mit Cooldown-Anzeige fuer geeignete +10-In-Time-Runs.
 - [x] Startseiten-/Dashboard-Anzeige in `GMS/Core/Dashboard.lua` und `GMS/Core/Settings.lua` umgebaut.
 - [x] Raid-Erkennung in `GMS/Modules/Raids.lua` auf ID-basierten Statistik-Fallback erweitert (u. a. `2657`, `2769`, `2810`) und weicher getaktet.
 - [x] `GMS/Modules/Raids.lua` auf zentrale Raid-ID-Quelle (`GMS_RAIDIDS`) umgestellt; Slash-Ausgaben lokalisiert.

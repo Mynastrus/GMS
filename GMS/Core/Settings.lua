@@ -136,6 +136,7 @@ end
 
 local function BuildOptionsForTarget(container, targetType, targetKey)
 	container:ReleaseChildren()
+	container:SetLayout("Flow")
 
 	local reg = nil
 	if GMS.DB and GMS.DB._registrations then
@@ -172,10 +173,45 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 	local keys = {}
 	for k in pairs(reg.defaults) do table.insert(keys, k) end
 	table.sort(keys)
+	if #keys == 0 then
+		local lbl = AceGUI:Create("Label")
+		lbl:SetText(ST("SETTINGS_NO_OPTIONS", "No configurable options found for this item."))
+		lbl:SetFullWidth(true)
+		container:AddChild(lbl)
+		return
+	end
+
+	local function CloneValue(value)
+		if type(value) ~= "table" then
+			return value
+		end
+		local out = {}
+		for k, v in pairs(value) do
+			out[k] = CloneValue(v)
+		end
+		return out
+	end
+
+	local function NotifyOptionChanged(changedKey, newValue)
+		LOCAL_LOG("INFO", "Option changed", targetKey, changedKey, newValue)
+		if type(GMS.SendMessage) == "function" then
+			GMS:SendMessage("GMS_CONFIG_CHANGED", targetKey, changedKey, newValue)
+		end
+		if tostring(targetKey) == "ACCOUNTINFO" and type(GMS.GetModule) == "function" then
+			local ai = GMS:GetModule("ACCOUNTINFO", true) or GMS:GetModule("AccountInfo", true)
+			if type(ai) == "table" and type(ai.PersistProfileSettings) == "function" then
+				pcall(ai.PersistProfileSettings, ai)
+			end
+		end
+	end
 
 	for _, key in ipairs(keys) do
 		local defaultVal = reg.defaults[key]
 		local val = options[key]
+		if val == nil and type(defaultVal) == "table" and defaultVal.default ~= nil then
+			options[key] = CloneValue(defaultVal.default)
+			val = options[key]
+		end
 		local valType = type(val)
 		local optDisplayName = key
 
@@ -185,7 +221,12 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 		end
 
 		-- Support for "execute" (button) type
-		if type(defaultVal) == "table" and defaultVal.type == "execute" then
+		if type(defaultVal) == "table" and defaultVal.type == "description" then
+			local lbl = AceGUI:Create("Label")
+			lbl:SetText(tostring(defaultVal.name or ""))
+			lbl:SetFullWidth(true)
+			container:AddChild(lbl)
+		elseif type(defaultVal) == "table" and defaultVal.type == "execute" then
 			local btn = AceGUI:Create("Button")
 			btn:SetText(optDisplayName)
 			btn:SetFullWidth(true)
@@ -202,12 +243,7 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 			cb:SetValue(val)
 			cb:SetCallback("OnValueChanged", function(_, _, newValue)
 				options[key] = newValue
-				LOCAL_LOG("INFO", "Option changed", targetKey, key, newValue)
-
-				-- Notify system via AceEvent
-				if type(GMS.SendMessage) == "function" then
-					GMS:SendMessage("GMS_CONFIG_CHANGED", targetKey, key, newValue)
-				end
+				NotifyOptionChanged(key, newValue)
 			end)
 			container:AddChild(cb)
 		elseif (type(defaultVal) == "table" and defaultVal.type == "range") or
@@ -222,27 +258,67 @@ local function BuildOptionsForTarget(container, targetType, targetKey)
 			end
 			slider:SetCallback("OnValueChanged", function(_, _, newValue)
 				options[key] = newValue
-				LOCAL_LOG("INFO", "Option changed", targetKey, key, newValue)
-				if type(GMS.SendMessage) == "function" then
-					GMS:SendMessage("GMS_CONFIG_CHANGED", targetKey, key, newValue)
-				end
+				NotifyOptionChanged(key, newValue)
 			end)
 			container:AddChild(slider)
+		elseif type(defaultVal) == "table" and defaultVal.type == "select" then
+			local dd = AceGUI:Create("Dropdown")
+			dd:SetLabel(optDisplayName)
+			dd:SetFullWidth(true)
+
+			local values = defaultVal.values
+			if type(values) == "function" then
+				local ok, dyn = pcall(values, options, targetKey, key)
+				if ok then values = dyn else values = {} end
+			end
+			if type(values) ~= "table" then values = {} end
+			dd:SetList(values)
+			dd:SetValue(tostring(val or ""))
+			dd:SetCallback("OnValueChanged", function(_, _, newValue)
+				options[key] = tostring(newValue or "")
+				NotifyOptionChanged(key, tostring(newValue or ""))
+			end)
+			container:AddChild(dd)
+		elseif type(defaultVal) == "table" and defaultVal.type == "input" then
+			local eb = AceGUI:Create("EditBox")
+			eb:SetLabel(optDisplayName)
+			eb:SetText(tostring(val or ""))
+			local function CommitEditValue(newValue)
+				newValue = tostring(newValue or "")
+				if tostring(options[key] or "") == newValue then return end
+				options[key] = newValue
+				NotifyOptionChanged(key, newValue)
+			end
+			eb:SetCallback("OnEnterPressed", function(_, _, newValue)
+				CommitEditValue(newValue)
+			end)
+			eb:SetCallback("OnTextChanged", function(_, _, newValue)
+				CommitEditValue(newValue)
+			end)
+			container:AddChild(eb)
 		elseif valType == "string" or valType == "number" then
 			local eb = AceGUI:Create("EditBox")
 			eb:SetLabel(optDisplayName)
 			eb:SetText(tostring(val))
-			eb:SetCallback("OnEnterPressed", function(_, _, newValue)
+			local function CommitEditValue(newValue)
 				if valType == "number" then
 					local n = tonumber(newValue)
-					if n then options[key] = n end
+					if n == nil then return end
+					if options[key] == n then return end
+					options[key] = n
+					newValue = n
 				else
+					newValue = tostring(newValue or "")
+					if tostring(options[key] or "") == newValue then return end
 					options[key] = newValue
 				end
-				LOCAL_LOG("INFO", "Option changed", targetKey, key, newValue)
-				if type(GMS.SendMessage) == "function" then
-					GMS:SendMessage("GMS_CONFIG_CHANGED", targetKey, key, newValue)
-				end
+				NotifyOptionChanged(key, newValue)
+			end
+			eb:SetCallback("OnEnterPressed", function(_, _, newValue)
+				CommitEditValue(newValue)
+			end)
+			eb:SetCallback("OnTextChanged", function(_, _, newValue)
+				CommitEditValue(newValue)
 			end)
 			container:AddChild(eb)
 		end
@@ -251,18 +327,25 @@ end
 
 local function BuildDashboardStartPage(container)
 	container:ReleaseChildren()
-	container:SetLayout("Flow")
+	container:SetLayout("Fill")
+
+	local scroll = AceGUI:Create("ScrollFrame")
+	scroll:SetLayout("Flow")
+	scroll:SetFullWidth(true)
+	scroll:SetFullHeight(true)
+	container:AddChild(scroll)
+	local parent = scroll
 
 	local intro = AceGUI:Create("Label")
 	intro:SetFullWidth(true)
 	intro:SetText(ST("SETTINGS_DASHBOARD_INTRO", "System status (as before in dashboard)."))
-	container:AddChild(intro)
+	parent:AddChild(intro)
 
 	local extGroup = AceGUI:Create("InlineGroup")
 	extGroup:SetTitle(ST("SETTINGS_EXTENSIONS_TITLE", "Extensions (core system)"))
 	extGroup:SetFullWidth(true)
 	extGroup:SetLayout("Flow")
-	container:AddChild(extGroup)
+	parent:AddChild(extGroup)
 
 	if GMS.REGISTRY and GMS.REGISTRY.EXT then
 		local extKeys = {}
@@ -297,7 +380,7 @@ local function BuildDashboardStartPage(container)
 	modGroup:SetTitle(ST("SETTINGS_MODULES_TITLE", "Modules (features)"))
 	modGroup:SetFullWidth(true)
 	modGroup:SetLayout("Flow")
-	container:AddChild(modGroup)
+	parent:AddChild(modGroup)
 
 	if GMS.REGISTRY and GMS.REGISTRY.MOD then
 		local modKeys = {}
@@ -334,7 +417,7 @@ local function BuildDashboardStartPage(container)
 	btnRefresh:SetCallback("OnClick", function()
 		BuildDashboardStartPage(container)
 	end)
-	container:AddChild(btnRefresh)
+	parent:AddChild(btnRefresh)
 end
 
 local function BuildLanguagePage(container)
