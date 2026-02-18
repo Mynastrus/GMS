@@ -18,10 +18,14 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [ ] (noch keine Eintraege)
 
 ### Changed
-- [ ] (noch keine Eintraege)
+- [x] CharInfo: Kontextansicht nutzt jetzt persistierten Sync-Cache (`CHARINFO_SYNC`) mit Fallback auf lokale Char-Daten und aktiver Sync-Anforderung je Domain (`roster_meta`, `MYTHICPLUS_V1`, `RAIDS_V1`, `EQUIPMENT_V1`). (GMS/Modules/CharInfo.lua, GMS/Core/Comm.lua)
+- [x] CharInfo: Responsive Karten-Layout und dynamische Breitenberechnung für kleine Fenster/Einspaltenansicht verbessert. (GMS/Modules/CharInfo.lua)
 
 ### Fixed
-- [ ] (noch keine Eintraege)
+- [x] Comm: Checksum-Mismatch bei Sync-Paketen wird im Kompatibilitätsmodus akzeptiert und Warnungen werden throttled statt Spam. (GMS/Core/Comm.lua)
+- [x] Logs: Humanisierung und Lokalisierung für neue Comm-Logmeldungen ergänzt (manuelle Sync-Requests, Checksum-Kompatibilitätsmeldungen). (GMS/Core/Logs.lua, GMS/Locales/enUS.lua, GMS/Locales/deDE.lua)
+- [x] Logs: Layout-Edge-Cases bei Detail-Button/leerem Text sowie Reflow nach Render aktualisiert. (GMS/Core/Logs.lua)
+- [x] CharInfo: Fehlende Lokalisierungs-Keys für statische Raidnamen/-beschreibungen ergänzt. (GMS/Locales/enUS.lua, GMS/Locales/deDE.lua, GMS/Modules/CharInfo.lua)
 
 ### Rules/Infra
 - [ ] (noch keine Eintraege)

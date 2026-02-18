@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.16",
+	VERSION      = "1.0.21",
 }
 
 local LibStub = LibStub
@@ -155,6 +155,8 @@ CHARINFO._uiDataLastSig  = CHARINFO._uiDataLastSig or nil
 CHARINFO._resizeRefreshPending = CHARINFO._resizeRefreshPending or false
 CHARINFO._raidWaitAnimTicker = CHARINFO._raidWaitAnimTicker or nil
 CHARINFO._raidWaitAnimStep = CHARINFO._raidWaitAnimStep or 0
+CHARINFO._syncListenersRegistered = CHARINFO._syncListenersRegistered or false
+CHARINFO._syncRequestAt = CHARINFO._syncRequestAt or {}
 
 ---@class GMSTickerHandle
 ---@field Cancel fun(self: GMSTickerHandle)
@@ -1049,10 +1051,19 @@ local function BuildRaidRows(all, catalog)
 		catalog = BuildRaidCatalogLookup()
 	end
 
-	local STATIC_RAID_NAME_BY_INSTANCE = {
-		[2657] = "Palast der Nerub'ar",
-		[2769] = "Befreiung von Lorenhall",
-		[2810] = "Manaschmiede Omega",
+	local STATIC_RAID_META_BY_INSTANCE = {
+		[2657] = {
+			name = LT("CHARINFO_RAID_NAME_NERUBAR", "Palast der Nerub'ar"),
+			description = LT("CHARINFO_RAID_DESC_NERUBAR", "Ein unterirdischer Neruber-Palast mit den Streitkraeften der Neruber."),
+		},
+		[2769] = {
+			name = LT("CHARINFO_RAID_NAME_LORENHALL", "Befreiung von Lorenhall"),
+			description = LT("CHARINFO_RAID_DESC_LORENHALL", "Ein Befreiungsschlag gegen die Streitkraefte in Lorenhall."),
+		},
+		[2810] = {
+			name = LT("CHARINFO_RAID_NAME_MANAFORGE_OMEGA", "Manaschmiede Omega"),
+			description = LT("CHARINFO_RAID_DESC_MANAFORGE_OMEGA", "Eine Titanen-Manaschmiede mit arkanen Sicherheitsmechanismen."),
+		},
 	}
 	local KNOWN_RAID_INSTANCE_IDS = {}
 	local raidIdsLib = _G and _G.GMS_RAIDIDS or nil
@@ -1080,8 +1091,8 @@ local function BuildRaidRows(all, catalog)
 		end
 
 		local iid = tonumber(instanceID)
-		if iid and STATIC_RAID_NAME_BY_INSTANCE[iid] then
-			return STATIC_RAID_NAME_BY_INSTANCE[iid]
+		if iid and type(STATIC_RAID_META_BY_INSTANCE[iid]) == "table" then
+			return tostring(STATIC_RAID_META_BY_INSTANCE[iid].name or "")
 		end
 
 		local rn = tostring(rawName or "")
@@ -1141,7 +1152,15 @@ local function BuildRaidRows(all, catalog)
 	-- Ensure current known raids are always listed even before EJ catalog is ready.
 	for i = 1, #KNOWN_RAID_INSTANCE_IDS do
 		local iid = KNOWN_RAID_INSTANCE_IDS[i]
-		ensureRow(iid, STATIC_RAID_NAME_BY_INSTANCE[iid], 0, nil, "", 0)
+		local staticMeta = STATIC_RAID_META_BY_INSTANCE[iid]
+		ensureRow(
+			iid,
+			type(staticMeta) == "table" and staticMeta.name or nil,
+			0,
+			nil,
+			type(staticMeta) == "table" and staticMeta.description or "",
+			0
+		)
 	end
 
 	for key, entry in pairs(all) do
@@ -1409,6 +1428,164 @@ local function GetCharScopedModuleBucket(guid, moduleKey)
 	return mod
 end
 
+local function EnsureCharStoreByGuid(guid)
+	if not GMS or not GMS.db or type(GMS.db.global) ~= "table" then
+		return nil
+	end
+	local chars = GMS.db.global.characters
+	if type(chars) ~= "table" then
+		GMS.db.global.characters = {}
+		chars = GMS.db.global.characters
+	end
+
+	local g = tostring(guid or "")
+	if g == "" and type(GMS.GetCharacterGUID) == "function" then
+		g = tostring(GMS:GetCharacterGUID() or "")
+	end
+	if g == "" then
+		return nil
+	end
+
+	local c = chars[g]
+	if type(c) ~= "table" then
+		c = {}
+		chars[g] = c
+	end
+	return c
+end
+
+local function CloneSyncPayload(value, depth)
+	local d = tonumber(depth) or 0
+	if d > 8 then
+		return nil
+	end
+	if type(value) ~= "table" then
+		return value
+	end
+	local out = {}
+	for k, v in pairs(value) do
+		local kt = type(k)
+		local vt = type(v)
+		if (kt == "string" or kt == "number" or kt == "boolean")
+			and vt ~= "function"
+			and vt ~= "userdata"
+			and vt ~= "thread" then
+			if vt == "table" then
+				out[k] = CloneSyncPayload(v, d + 1)
+			else
+				out[k] = v
+			end
+		end
+	end
+	return out
+end
+
+local function PersistSyncedDomainPayload(guid, domain, payload, updatedAt, seq)
+	local g = tostring(guid or "")
+	local d = tostring(domain or "")
+	if g == "" or d == "" or type(payload) ~= "table" then
+		return false
+	end
+
+	local charStore = EnsureCharStoreByGuid(g)
+	if type(charStore) ~= "table" then
+		return false
+	end
+
+	local cacheRoot = charStore.CHARINFO_SYNC
+	if type(cacheRoot) ~= "table" then
+		cacheRoot = {}
+		charStore.CHARINFO_SYNC = cacheRoot
+	end
+	cacheRoot.domains = type(cacheRoot.domains) == "table" and cacheRoot.domains or {}
+
+	cacheRoot.domains[d] = {
+		payload = CloneSyncPayload(payload, 0),
+		updatedAt = tonumber(updatedAt) or 0,
+		seq = tonumber(seq) or 0,
+	}
+	return true
+end
+
+local function GetPersistedDomainPayload(guid, domain)
+	local g = tostring(guid or "")
+	local d = tostring(domain or "")
+	if g == "" or d == "" then return nil end
+	local charStore = EnsureCharStoreByGuid(g)
+	if type(charStore) ~= "table" then return nil end
+	local cacheRoot = charStore.CHARINFO_SYNC
+	if type(cacheRoot) ~= "table" or type(cacheRoot.domains) ~= "table" then
+		return nil
+	end
+	local node = cacheRoot.domains[d]
+	if type(node) ~= "table" or type(node.payload) ~= "table" then
+		return nil
+	end
+	return node.payload, tonumber(node.updatedAt) or 0, tonumber(node.seq) or 0
+end
+
+local function GetLatestOrCachedDomainPayload(domain, guid)
+	local rec = GetLatestDomainRecordForGuid(domain, guid)
+	if rec and type(rec.payload) == "table" then
+		PersistSyncedDomainPayload(guid, domain, rec.payload, rec.updatedAt, rec.seq)
+		return rec.payload, "sync", rec
+	end
+	local cached = GetPersistedDomainPayload(guid, domain)
+	if type(cached) == "table" then
+		return cached, "cache", nil
+	end
+	return nil, "none", nil
+end
+
+local function RegisterSyncCacheListeners()
+	if CHARINFO._syncListenersRegistered then
+		return true
+	end
+	local comm = GMS and GMS.Comm or nil
+	if type(comm) ~= "table" or type(comm.RegisterRecordListener) ~= "function" then
+		return false
+	end
+
+	local domains = { "roster_meta", "MYTHICPLUS_V1", "RAIDS_V1", "EQUIPMENT_V1" }
+	for i = 1, #domains do
+		local domainKey = domains[i]
+		comm:RegisterRecordListener(domainKey, function(record)
+			if type(record) ~= "table" or type(record.payload) ~= "table" then return end
+			local targetGuid = tostring(record.charGUID or record.originGUID or "")
+			if targetGuid == "" then return end
+			PersistSyncedDomainPayload(targetGuid, domainKey, record.payload, record.updatedAt, record.seq)
+		end)
+	end
+
+	CHARINFO._syncListenersRegistered = true
+	return true
+end
+
+local function RequestDomainSyncForGuid(guid, domain, reason)
+	local g = tostring(guid or "")
+	local d = tostring(domain or "")
+	if g == "" or d == "" then return false end
+
+	local key = g .. "|" .. d
+	local nowTs = GetTime and GetTime() or 0
+	local last = tonumber(CHARINFO._syncRequestAt[key]) or 0
+	if (nowTs - last) < 12 then
+		return false
+	end
+	CHARINFO._syncRequestAt[key] = nowTs
+
+	local comm = GMS and GMS.Comm or nil
+	if type(comm) ~= "table" or type(comm.RequestCharacterDomain) ~= "function" then
+		return false
+	end
+	local ok = comm:RequestCharacterDomain(g, d, {
+		preferWhisper = true,
+		cooldown = 12,
+		reason = tostring(reason or "charinfo"),
+	})
+	return ok == true
+end
+
 local function NormalizeAccountCharacterRows(rows)
 	local out = {}
 	if type(rows) ~= "table" then
@@ -1542,6 +1719,32 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			data.mythic.hasData = (score and score > 0) or (#rows > 0)
 			data.mythic.source = "Local module data"
 		end
+		if not data.mythic.hasData and playerGuid ~= "" then
+			local mpBucket = GetCharScopedModuleBucket(playerGuid, "MythicPlus")
+			if type(mpBucket) == "table" then
+				local score = tonumber(mpBucket.score)
+				local rows = BuildMythicRows(mpBucket.dungeons)
+				data.mythic.score = score or data.mythic.score
+				data.mythic.rows = rows
+				data.mythic.hasData = (score and score > 0) or (#rows > 0)
+				if data.mythic.hasData then
+					data.mythic.source = "Saved character DB"
+				end
+			end
+		end
+		if not data.mythic.hasData and playerGuid ~= "" then
+			local payloadLocalM, payloadLocalMSource = GetLatestOrCachedDomainPayload("MYTHICPLUS_V1", playerGuid)
+			if type(payloadLocalM) == "table" then
+				local rows = BuildMythicRows(payloadLocalM.dungeons)
+				local score = tonumber(payloadLocalM.score)
+				data.mythic.rows = rows
+				data.mythic.score = score or data.mythic.score
+				data.mythic.hasData = (score and score > 0) or (#rows > 0)
+				if data.mythic.hasData then
+					data.mythic.source = (payloadLocalMSource == "cache") and "Saved character DB" or "Synced MYTHICPLUS_V1"
+				end
+			end
+		end
 
 		local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true)) or nil
 		local raidStore = raids and raids._options and raids._options.raids or nil
@@ -1551,10 +1754,22 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		data.raids.hasData = (#data.raids.rows > 0) or (data.raids.summary ~= "-" and data.raids.summary ~= "")
 		data.raids.source = "Local module data"
 		if not data.raids.hasData and playerGuid ~= "" then
-			local recRLocal = GetLatestDomainRecordForGuid("RAIDS_V1", playerGuid)
-			if recRLocal and type(recRLocal.payload) == "table" and type(recRLocal.payload.raids) == "table" then
-				local rowsLocal = BuildRaidRows(recRLocal.payload.raids, raidCatalog)
-				local summaryLocal = BuildRaidStatusFromRaidsStore(recRLocal.payload.raids)
+			local raidsBucket = GetCharScopedModuleBucket(playerGuid, "RAIDS")
+			local bucketRaids = type(raidsBucket) == "table" and raidsBucket.raids or nil
+			if type(bucketRaids) == "table" then
+				data.raids.summary = BuildRaidStatusFromRaidsStore(bucketRaids)
+				data.raids.rows = BuildRaidRows(bucketRaids, raidCatalog)
+				data.raids.hasData = (#data.raids.rows > 0) or (data.raids.summary ~= "-" and data.raids.summary ~= "")
+				if data.raids.hasData then
+					data.raids.source = "Saved character DB"
+				end
+			end
+		end
+		if not data.raids.hasData and playerGuid ~= "" then
+			local payloadLocalR, payloadLocalRSource = GetLatestOrCachedDomainPayload("RAIDS_V1", playerGuid)
+			if type(payloadLocalR) == "table" and type(payloadLocalR.raids) == "table" then
+				local rowsLocal = BuildRaidRows(payloadLocalR.raids, raidCatalog)
+				local summaryLocal = BuildRaidStatusFromRaidsStore(payloadLocalR.raids)
 				if summaryLocal ~= "" and summaryLocal ~= "-" then
 					data.raids.summary = summaryLocal
 				end
@@ -1563,7 +1778,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 				end
 				data.raids.hasData = (#data.raids.rows > 0) or (data.raids.summary ~= "-" and data.raids.summary ~= "")
 				if data.raids.hasData then
-					data.raids.source = "Synced RAIDS_V1"
+					data.raids.source = (payloadLocalRSource == "cache") and "Saved character DB" or "Synced RAIDS_V1"
 				end
 			end
 		end
@@ -1591,10 +1806,10 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			data.equipment.source = "Local memory buffer"
 		end
 		if type(eqSnapshot) ~= "table" then
-			local recEquipLocal = GetLatestDomainRecordForGuid("EQUIPMENT_V1", playerGuid)
-			if recEquipLocal and type(recEquipLocal.payload) == "table" and type(recEquipLocal.payload.snapshot) == "table" then
-				eqSnapshot = recEquipLocal.payload.snapshot
-				data.equipment.source = "Synced EQUIPMENT_V1"
+			local payloadLocalE, payloadLocalESource = GetLatestOrCachedDomainPayload("EQUIPMENT_V1", playerGuid)
+			if type(payloadLocalE) == "table" and type(payloadLocalE.snapshot) == "table" then
+				eqSnapshot = payloadLocalE.snapshot
+				data.equipment.source = (payloadLocalESource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V1"
 			end
 		end
 		local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(eqSnapshot)
@@ -1635,76 +1850,94 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			data.general.guild = tostring(member.guild or "-")
 		end
 
-		local recMeta = GetLatestDomainRecordForGuid("roster_meta", targetGuid)
-		if recMeta and type(recMeta.payload) == "table" then
-			local p = recMeta.payload
+		-- Always render structural placeholders in context mode:
+		-- raids list (known instances) and equipment slots should be visible
+		-- even when no synced payload exists yet.
+		local baseRaidCatalog = BuildRaidCatalogLookup()
+		data.raids.rows = BuildRaidRows(nil, baseRaidCatalog)
+		local baseEquipRows, baseEquipIlvl, baseEquipSlots = BuildEquipmentRowsFromSnapshot(nil)
+		data.equipment.rows = baseEquipRows
+		data.equipment.ilvl = baseEquipIlvl
+		data.equipment.slots = baseEquipSlots
+
+		local payloadMeta, payloadMetaSource = GetLatestOrCachedDomainPayload("roster_meta", targetGuid)
+		if type(payloadMeta) == "table" then
+			local p = payloadMeta
 			local v = tostring(p.version or "")
 			if v ~= "" then data.gmsVersion = v end
 			local score = tonumber(p.mplus)
 			if score and score >= 0 then
 				data.mythic.score = score
 				data.mythic.hasData = true
-				data.mythic.source = "Synced roster_meta"
+				data.mythic.source = (payloadMetaSource == "cache") and "Saved character DB" or "Synced roster_meta"
 			end
 			local raid = tostring(p.raid or p.best_in_raid or "")
 			if raid ~= "" and raid ~= "-" then
 				data.raids.summary = raid
 				data.raids.hasData = true
-				data.raids.source = "Synced roster_meta"
+				data.raids.source = (payloadMetaSource == "cache") and "Saved character DB" or "Synced roster_meta"
 			end
 			local ilvl = tonumber(p.ilvl)
 			if ilvl and ilvl > 0 then
 				data.equipment.ilvl = ilvl
 				data.equipment.hasData = true
-				data.equipment.source = "Synced roster_meta"
+				data.equipment.source = (payloadMetaSource == "cache") and "Saved character DB" or "Synced roster_meta"
 			end
 			local talentText = tostring(p.talents or "")
 			if talentText ~= "" then
 				data.talents.summary = talentText
 				data.talents.hasData = true
-				data.talents.source = "Synced roster_meta"
+				data.talents.source = (payloadMetaSource == "cache") and "Saved character DB" or "Synced roster_meta"
 			end
 			local pvpText = tostring(p.pvp or "")
 			if pvpText ~= "" then
 				data.pvp.summary = pvpText
 				data.pvp.hasData = true
-				data.pvp.source = "Synced roster_meta"
+				data.pvp.source = (payloadMetaSource == "cache") and "Saved character DB" or "Synced roster_meta"
 			end
+		else
+			RequestDomainSyncForGuid(targetGuid, "roster_meta", "charinfo-context")
 		end
 
-		local recM = GetLatestDomainRecordForGuid("MYTHICPLUS_V1", targetGuid)
-		if recM and type(recM.payload) == "table" then
-			local rows = BuildMythicRows(recM.payload.dungeons)
-			local score = tonumber(recM.payload.score)
+		local payloadM, payloadMSource = GetLatestOrCachedDomainPayload("MYTHICPLUS_V1", targetGuid)
+		if type(payloadM) == "table" then
+			local rows = BuildMythicRows(payloadM.dungeons)
+			local score = tonumber(payloadM.score)
 			data.mythic.rows = rows
 			data.mythic.score = score or data.mythic.score
 			data.mythic.hasData = (score and score > 0) or (#rows > 0) or data.mythic.hasData
-			data.mythic.source = "Synced MYTHICPLUS_V1"
+			data.mythic.source = (payloadMSource == "cache") and "Saved character DB" or "Synced MYTHICPLUS_V1"
+		else
+			RequestDomainSyncForGuid(targetGuid, "MYTHICPLUS_V1", "charinfo-context")
 		end
 
-		local recR = GetLatestDomainRecordForGuid("RAIDS_V1", targetGuid)
-		if recR and type(recR.payload) == "table" then
-			local raidCatalog = BuildRaidCatalogLookup()
-			local rows = BuildRaidRows(recR.payload.raids, raidCatalog)
-			local summary = BuildRaidStatusFromRaidsStore(recR.payload.raids)
+		local payloadR, payloadRSource = GetLatestOrCachedDomainPayload("RAIDS_V1", targetGuid)
+		if type(payloadR) == "table" then
+			local raidCatalog = baseRaidCatalog
+			local rows = BuildRaidRows(payloadR.raids, raidCatalog)
+			local summary = BuildRaidStatusFromRaidsStore(payloadR.raids)
 			if summary ~= "" and summary ~= "-" then
 				data.raids.summary = summary
 			end
 			data.raids.rows = rows
 			data.raids.hasData = (#rows > 0) or (data.raids.summary ~= "-") or data.raids.hasData
-			data.raids.source = "Synced RAIDS_V1"
+			data.raids.source = (payloadRSource == "cache") and "Saved character DB" or "Synced RAIDS_V1"
+		else
+			RequestDomainSyncForGuid(targetGuid, "RAIDS_V1", "charinfo-context")
 		end
 
-		local recEquip = GetLatestDomainRecordForGuid("EQUIPMENT_V1", targetGuid)
-		if recEquip and type(recEquip.payload) == "table" then
-			local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(recEquip.payload.snapshot)
+		local payloadEquip, payloadEquipSource = GetLatestOrCachedDomainPayload("EQUIPMENT_V1", targetGuid)
+		if type(payloadEquip) == "table" then
+			local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(payloadEquip.snapshot)
 			if ilvl and ilvl > 0 then
 				data.equipment.ilvl = ilvl
 			end
 			data.equipment.rows = rows
 			data.equipment.slots = slots
 			data.equipment.hasData = (#rows > 0) or (data.equipment.ilvl and data.equipment.ilvl > 0) or data.equipment.hasData
-			data.equipment.source = "Synced EQUIPMENT_V1"
+			data.equipment.source = (payloadEquipSource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V1"
+		else
+			RequestDomainSyncForGuid(targetGuid, "EQUIPMENT_V1", "charinfo-context")
 		end
 
 		if not data.talents.hasData then
@@ -1781,6 +2014,7 @@ local function AddNoDataHint(parent, text)
 	line:SetText("|cffffb366" .. tostring(text or LT("CHARINFO_NO_DATA", "No data available.")) .. "|r")
 	if line.label then
 		line.label:SetFontObject(GameFontNormalSmallOutline)
+		line.label:SetWordWrap(true)
 	end
 	parent:AddChild(line)
 end
@@ -1815,13 +2049,29 @@ local function AddValueLine(parent, leftText, rightText)
 	row:SetLayout("Flow")
 	parent:AddChild(row)
 
+	local avail = 420
+	if parent and parent.content and type(parent.content.GetWidth) == "function" then
+		local w = tonumber(parent.content:GetWidth()) or 0
+		if w > 0 then
+			avail = w
+		end
+	end
+	if avail < 260 then
+		avail = 260
+	end
+	local leftW = math.floor(avail * 0.36)
+	if leftW < 92 then leftW = 92 end
+	if leftW > 140 then leftW = 140 end
+	local rightW = avail - leftW - 24
+	if rightW < 130 then rightW = 130 end
+
 	local left = AceGUI:Create("Label")
-	left:SetWidth(140)
+	left:SetWidth(leftW)
 	left:SetText("|cff9d9d9d" .. tostring(leftText or "-") .. "|r")
 	row:AddChild(left)
 
 	local right = AceGUI:Create("Label")
-	right:SetWidth(280)
+	right:SetWidth(rightW)
 	local rt = tostring(rightText or "-")
 	if rt:find("|c", 1, true) then
 		right:SetText(rt)
@@ -2240,20 +2490,37 @@ function CHARINFO:TryRegisterPage()
 		contentRow:SetLayout("List")
 		wrapper:AddChild(contentRow)
 
-		local pageWidth = 1080
+		local pageWidth = 0
+		if root and root.frame and type(root.frame.GetWidth) == "function" then
+			local fw = tonumber(root.frame:GetWidth()) or 0
+			if fw > pageWidth then pageWidth = fw end
+		end
+		if root and root.content and type(root.content.GetWidth) == "function" then
+			local rw = tonumber(root.content:GetWidth()) or 0
+			if rw > pageWidth then pageWidth = rw end
+		end
+		if scroller and scroller.frame and type(scroller.frame.GetWidth) == "function" then
+			local sfw = tonumber(scroller.frame:GetWidth()) or 0
+			if sfw > pageWidth then pageWidth = sfw end
+		end
 		if scroller and scroller.content and type(scroller.content.GetWidth) == "function" then
 			local sw = tonumber(scroller.content:GetWidth()) or 0
-			if sw > 0 then pageWidth = sw end
+			if sw > pageWidth then pageWidth = sw end
 		end
-		if pageWidth <= 0 and root and root.frame and type(root.frame.GetWidth) == "function" then
-			local w = tonumber(root.frame:GetWidth()) or 1080
-			if w > 0 then pageWidth = w end
+		if pageWidth <= 0 then
+			pageWidth = 560
 		end
-		local innerWidth = pageWidth - 40
-		if innerWidth < 860 then innerWidth = 860 end
+		local innerWidth = pageWidth - 30
+		if innerWidth < 320 then innerWidth = 320 end
 		local colGap = 8
-		local colWidth = math.floor((innerWidth - colGap) / 2)
-		if colWidth < 420 then colWidth = 420 end
+		local useTwoColumns = innerWidth >= 820
+		local colWidth
+		if useTwoColumns then
+			colWidth = math.floor((innerWidth - colGap) / 2)
+		else
+			colWidth = innerWidth
+		end
+		if colWidth < 260 then colWidth = 260 end
 
 		local opts = (type(CHARINFO._options) == "table") and CHARINFO._options or nil
 		local lastUpdate = (opts and tonumber(opts.lastUpdate)) or 0
@@ -2878,7 +3145,7 @@ function CHARINFO:TryRegisterPage()
 			local accountClassWidth = 120
 			local accountStateWidth = 80
 			local accountNameWidth = colWidth - accountClassWidth - accountStateWidth - 48
-			if accountNameWidth < 200 then accountNameWidth = 200 end
+			if accountNameWidth < 140 then accountNameWidth = 140 end
 
 			for i = 1, #details.accountChars.rows do
 				local rowData = details.accountChars.rows[i]
@@ -2972,33 +3239,47 @@ function CHARINFO:TryRegisterPage()
 		for i = 1, #leftPinned do pinned[leftPinned[i]] = true end
 		for i = 1, #rightPinned do pinned[rightPinned[i]] = true end
 
-		local pinnedRow = AceGUI:Create("SimpleGroup")
-		pinnedRow:SetFullWidth(true)
-		pinnedRow:SetLayout("Table")
-		pinnedRow:SetUserData("table", {
-			columns = { colWidth, colWidth },
-			spaceH = colGap,
-			alignV = "TOP",
-		})
-		contentRow:AddChild(pinnedRow)
+		if useTwoColumns then
+			local pinnedRow = AceGUI:Create("SimpleGroup")
+			pinnedRow:SetFullWidth(true)
+			pinnedRow:SetLayout("Table")
+			pinnedRow:SetUserData("table", {
+				columns = { colWidth, colWidth },
+				spaceH = colGap,
+				alignV = "TOP",
+			})
+			contentRow:AddChild(pinnedRow)
 
-		local leftStack = AceGUI:Create("SimpleGroup")
-		leftStack:SetLayout("List")
-		leftStack:SetWidth(colWidth)
-		leftStack:SetUserData("cell", { alignV = "TOP" })
-		pinnedRow:AddChild(leftStack)
+			local leftStack = AceGUI:Create("SimpleGroup")
+			leftStack:SetLayout("List")
+			leftStack:SetWidth(colWidth)
+			leftStack:SetUserData("cell", { alignV = "TOP" })
+			pinnedRow:AddChild(leftStack)
 
-		local rightStack = AceGUI:Create("SimpleGroup")
-		rightStack:SetLayout("List")
-		rightStack:SetWidth(colWidth)
-		rightStack:SetUserData("cell", { alignV = "TOP" })
-		pinnedRow:AddChild(rightStack)
+			local rightStack = AceGUI:Create("SimpleGroup")
+			rightStack:SetLayout("List")
+			rightStack:SetWidth(colWidth)
+			rightStack:SetUserData("cell", { alignV = "TOP" })
+			pinnedRow:AddChild(rightStack)
 
-		for i = 1, #leftPinned do
-			RenderCardInto(leftStack, leftPinned[i])
-		end
-		for i = 1, #rightPinned do
-			RenderCardInto(rightStack, rightPinned[i])
+			for i = 1, #leftPinned do
+				RenderCardInto(leftStack, leftPinned[i])
+			end
+			for i = 1, #rightPinned do
+				RenderCardInto(rightStack, rightPinned[i])
+			end
+		else
+			local singleStack = AceGUI:Create("SimpleGroup")
+			singleStack:SetFullWidth(true)
+			singleStack:SetLayout("List")
+			contentRow:AddChild(singleStack)
+
+			for i = 1, #leftPinned do
+				RenderCardInto(singleStack, leftPinned[i])
+			end
+			for i = 1, #rightPinned do
+				RenderCardInto(singleStack, rightPinned[i])
+			end
 		end
 
 		-- Remaining cards (not pinned) are rendered as free cards below.
@@ -3148,6 +3429,7 @@ end
 function CHARINFO:OnEnable()
 	-- Initialize character-specific options
 	SafeCall(CHARINFO.InitializeOptions, CHARINFO)
+	SafeCall(RegisterSyncCacheListeners)
 
 	-- Ensure we attempt to initialize again when player fully logs in / enters world
 	if type(self.RegisterEvent) == "function" then
@@ -3165,6 +3447,7 @@ function CHARINFO:OnEnable()
 	if type(self.RegisterEvent) == "function" then
 		self:RegisterEvent("PLAYER_LOGIN", function()
 			SafeCall(CHARINFO.TryIntegrateWithUIIfAvailable, CHARINFO)
+			SafeCall(RegisterSyncCacheListeners)
 		end)
 	end
 

@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "COMM",
 	SHORT_NAME   = "Comm",
 	DISPLAY_NAME = "Kommunikation",
-	VERSION      = "1.2.3",
+	VERSION      = "1.2.5",
 }
 
 ---@diagnostic disable: undefined-global
@@ -76,6 +76,8 @@ Comm._recordListeners = Comm._recordListeners or {}
 Comm._requestCooldown = Comm._requestCooldown or {}
 Comm._chunkInbox = Comm._chunkInbox or {}
 Comm._relayTicker = Comm._relayTicker or nil
+Comm._warnThrottle = Comm._warnThrottle or {}
+Comm._manualRequestCooldown = Comm._manualRequestCooldown or {}
 
 Comm.SYNC_CFG = Comm.SYNC_CFG or {
 	SMALL_PUSH_MAX = 900,
@@ -183,7 +185,8 @@ local function CompareRecordFreshness(a, b)
 	return 0
 end
 
-local function ValidateRecord(record)
+local function ValidateRecord(record, opts)
+	opts = opts or {}
 	if type(record) ~= "table" then return false, "record-not-table" end
 	if type(record.key) ~= "string" or record.key == "" then return false, "missing-key" end
 	if type(record.originGUID) ~= "string" or record.originGUID == "" then return false, "missing-origin" end
@@ -198,9 +201,26 @@ local function ValidateRecord(record)
 	if not serialized then return false, "payload-serialize-failed" end
 	local checksum = ComputeChecksumFromString(serialized)
 	if checksum ~= record.checksum then
+		if opts.allowChecksumMismatch then
+			return true, "checksum-mismatch-soft"
+		end
 		return false, "checksum-mismatch"
 	end
 	return true
+end
+
+local function CommThrottled(bucket, key, msg, ...)
+	local b = tostring(bucket or "generic")
+	local k = tostring(key or "")
+	local map = Comm._warnThrottle
+	map[b] = type(map[b]) == "table" and map[b] or {}
+	local nowTs = now()
+	local last = tonumber(map[b][k]) or 0
+	if (nowTs - last) < 15 then
+		return
+	end
+	map[b][k] = nowTs
+	LOCAL_LOG("COMM", msg, ...)
 end
 
 local function BuildMeta(record, payloadSize)
@@ -466,6 +486,39 @@ function Comm:PublishCharacterRecord(domain, payload, opts)
 	return self:PublishRecord(domain, charGUID, payload, opts)
 end
 
+function Comm:RequestCharacterDomain(charGUID, domain, opts)
+	opts = type(opts) == "table" and opts or {}
+	local cGuid = tostring(charGUID or "")
+	local d = tostring(domain or "")
+	if cGuid == "" then return false, "no-char-guid" end
+	if d == "" then return false, "no-domain" end
+
+	local originGuid = tostring(opts.originGUID or cGuid)
+	if originGuid == "" then
+		originGuid = cGuid
+	end
+	local key = BuildRecordKey(originGuid, cGuid, d)
+	local preferWhisper = (opts.preferWhisper == true)
+	local targetName = tostring(opts.targetName or "")
+	local cooldown = tonumber(opts.cooldown) or 12
+	if cooldown < 1 then cooldown = 1 end
+
+	local cooldownKey = key .. ":" .. (preferWhisper and "W" or "G")
+	local nowTs = now()
+	local lastReq = tonumber(self._manualRequestCooldown[cooldownKey]) or 0
+	if (nowTs - lastReq) < cooldown then
+		return false, "cooldown"
+	end
+	self._manualRequestCooldown[cooldownKey] = nowTs
+
+	local ok = SendSyncRequest(key, (targetName ~= "" and targetName or nil), preferWhisper)
+	if ok then
+		LOCAL_LOG("COMM", "Manual sync request sent", key, (preferWhisper and "WHISPER" or "GUILD"), tostring(opts.reason or ""))
+		return true, key
+	end
+	return false, "send-failed"
+end
+
 local function CleanupChunkInbox()
 	local ttl = tonumber(Comm.SYNC_CFG.CHUNK_TTL) or 120
 	local cutoff = now() - ttl
@@ -513,10 +566,13 @@ local function HandleChunkPacket(senderGUID, senderName, channel, d)
 		return
 	end
 
-	local valid, reason = ValidateRecord(record)
+	local valid, reason = ValidateRecord(record, { allowChecksumMismatch = true })
 	if not valid then
 		LOCAL_LOG("WARN", "Invalid chunked record", reason, record and record.key or "")
 		return
+	end
+	if reason == "checksum-mismatch-soft" then
+		CommThrottled("sync_checksum_chunk", tostring(record and record.key or ""), "Chunked sync checksum mismatch accepted (compat)", tostring(record and record.key or ""))
 	end
 
 	local stored = StoreIfNewer(record, senderGUID, channel)
@@ -565,10 +621,13 @@ end
 
 local function HandleSyncPush(senderGUID, channel, d)
 	local record = d and d.r
-	local valid, reason = ValidateRecord(record)
+	local valid, reason = ValidateRecord(record, { allowChecksumMismatch = true })
 	if not valid then
 		LOCAL_LOG("WARN", "Invalid sync push record", reason, record and record.key or "")
 		return
+	end
+	if reason == "checksum-mismatch-soft" then
+		CommThrottled("sync_checksum_push", tostring(record and record.key or ""), "Sync checksum mismatch accepted (compat)", tostring(record and record.key or ""), tostring(channel or ""))
 	end
 	local stored = StoreIfNewer(record, senderGUID, channel)
 	if stored then

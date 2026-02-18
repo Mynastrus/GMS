@@ -56,7 +56,7 @@ local METADATA = {
 	INTERN_NAME  = "LOGS",
 	SHORT_NAME   = "Logs",
 	DISPLAY_NAME = "Logging Console",
-	VERSION      = "1.4.2",
+	VERSION      = "1.4.5",
 }
 
 -- ###########################################################################
@@ -655,6 +655,30 @@ local function HumanizeCommMessage(raw, data)
 	end
 	if msg == "Relay announce batch sent" then
 		return LT("LOGS_HUMAN_COMM_RELAY_SENT_FMT", "Sent relay announce batch (%s records)", tostring(d[1] or "?"))
+	end
+	if msg == "Manual sync request sent" then
+		return LT(
+			"LOGS_HUMAN_COMM_MANUAL_REQ_SENT_FMT",
+			"Requested sync for %s via %s (%s)",
+			tostring(d[1] or "?"),
+			tostring(d[2] or "?"),
+			tostring(d[3] or "-")
+		)
+	end
+	if msg == "Chunked sync checksum mismatch accepted (compat)" then
+		return LT(
+			"LOGS_HUMAN_COMM_CHUNK_CHECKSUM_COMPAT_FMT",
+			"Accepted chunked sync checksum mismatch for %s (compatibility mode)",
+			tostring(d[1] or "?")
+		)
+	end
+	if msg == "Sync checksum mismatch accepted (compat)" then
+		return LT(
+			"LOGS_HUMAN_COMM_SYNC_CHECKSUM_COMPAT_FMT",
+			"Accepted sync checksum mismatch for %s via %s (compatibility mode)",
+			tostring(d[1] or "?"),
+			tostring(d[2] or "?")
+		)
 	end
 	if msg == "Source GUID mismatch" then
 		return LT("LOGS_HUMAN_COMM_SOURCE_MISMATCH_FMT", "Rejected packet due to source mismatch (%s from %s)", tostring(d[1] or "?"), tostring(d[2] or "?"))
@@ -1343,12 +1367,13 @@ local function BuildLogRow(entry, totalWidth)
 	if hasDetails then
 		detailsButtonWidth = 86
 	end
-	if detailsButtonWidth > 0 then
+	local hasMsg = (msg ~= "")
+	if detailsButtonWidth > 0 and hasMsg then
 		msgWidth = msgWidth - detailsButtonWidth
 		if msgWidth < 120 then msgWidth = 120 end
 	end
 
-	if msg ~= "" then
+	if hasMsg then
 		local body = AceGUI:Create("Label")
 		body:SetWidth(msgWidth)
 		body:SetText("|cffd8d8d8" .. msg .. "|r")
@@ -1691,6 +1716,9 @@ local function RegisterLogsUI()
 					visibleCount = visibleCount + 1
 					scroller:AddChild(BuildLogRow(e, contentWidth))
 				end
+			end
+			if scroller and type(scroller.DoLayout) == "function" then
+				scroller:DoLayout()
 			end
 			if type(LOGS._updateSourceButtonText) == "function" then
 				pcall(LOGS._updateSourceButtonText)
