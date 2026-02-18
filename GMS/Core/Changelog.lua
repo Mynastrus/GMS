@@ -34,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.9",
+	VERSION      = "1.3.10",
 }
 
 -- ###########################################################################
@@ -108,6 +108,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 -- ###########################################################################
 
 local RELEASES = {
+	{
+		version = "1.4.9",
+		date = "2026-02-18",
+		title_en = "Unified logs filtering, submenu reliability fix, and expanded locale-native logs text",
+		title_de = "Einheitlicher Logs-Filter, stabiler Submenu-Fix und erweiterte native Logs-Lokalisierung",
+		notes_en = {
+			"Reworked the Logs header into one unified Filter button with nested Levels and Sources submenus.",
+			"Fixed Blizzard UIDropDownMenu submenu population so Levels/Sources lists render reliably instead of showing empty second-level menus.",
+			"Localized the new Logs filter/details/status key set in all maintained locale files (DE, ES, FR, IT, KO, PT, RU, ZH-CN, ZH-TW) to avoid mixed-language fallback text.",
+			"Added and refined release-facing project content and infrastructure updates, including the bilingual CurseForge start page and rule-set clarifications around localization/release hygiene.",
+			"Applied additional module/core maintenance updates across Comm, AccountInfo, CharInfo, Equipment, MythicPlus, and Raids to keep the 1.4.9 baseline consistent.",
+		},
+		notes_de = {
+			"Der Logs-Header wurde auf einen einzigen Filter-Button mit verschachtelten Untermenues fuer Level und Quellen umgestellt.",
+			"Die Befuellung der Blizzard-UIDropDownMenu-Submenues wurde korrigiert, sodass Level/Quellen wieder zuverlaessig angezeigt werden statt leerer zweiter Menueebenen.",
+			"Der neue Logs-Filter/Details/Status-Key-Satz wurde in allen gepflegten Locale-Dateien (DE, ES, FR, IT, KO, PT, RU, ZH-CN, ZH-TW) nativ lokalisiert, um gemischte Fallback-Texte zu vermeiden.",
+			"Release-relevante Projektinhalte und Infrastruktur wurden ergaenzt/geschaerft, inklusive zweisprachiger CurseForge-Startseite und praezisierter Lokalisierungs-/Release-Regeln.",
+			"Zusaetzliche Modul-/Core-Wartungsupdates in Comm, AccountInfo, CharInfo, Equipment, MythicPlus und Raids runden die 1.4.9-Baseline konsistent ab.",
+		},
+	},
 	{
 		version = "1.4.8",
 		date = "2026-02-18",
