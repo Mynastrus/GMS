@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "COMM",
 	SHORT_NAME   = "Comm",
 	DISPLAY_NAME = "Kommunikation",
-	VERSION      = "1.2.6",
+	VERSION      = "1.2.10",
 }
 
 ---@diagnostic disable: undefined-global
@@ -78,14 +78,27 @@ Comm._chunkInbox = Comm._chunkInbox or {}
 Comm._relayTicker = Comm._relayTicker or nil
 Comm._warnThrottle = Comm._warnThrottle or {}
 Comm._manualRequestCooldown = Comm._manualRequestCooldown or {}
+Comm._senderGuidCache = Comm._senderGuidCache or nil
+Comm._relayQueue = Comm._relayQueue or {}
+Comm._relayQueuedByKey = Comm._relayQueuedByKey or {}
+Comm._relayFlushTicker = Comm._relayFlushTicker or nil
+Comm._listenerDispatchQueue = Comm._listenerDispatchQueue or {}
+Comm._listenerDispatchTicker = Comm._listenerDispatchTicker or nil
+Comm._chunkCompleteQueue = Comm._chunkCompleteQueue or {}
+Comm._chunkCompleteTicker = Comm._chunkCompleteTicker or nil
 
 Comm.SYNC_CFG = Comm.SYNC_CFG or {
 	SMALL_PUSH_MAX = 900,
 	CHUNK_SIZE = 700,
 	CHUNK_TTL = 120,
-	REQUEST_COOLDOWN = 5,
-	RELAY_INTERVAL = 180,
-	RELAY_BATCH = 20,
+	REQUEST_COOLDOWN = 12,
+	RELAY_INTERVAL = 300,
+	RELAY_BATCH = 8,
+	RELAY_STAGGER = 0.20,
+	LISTENER_DISPATCH_INTERVAL = 0.05,
+	LISTENER_DISPATCH_BUDGET = 8,
+	CHUNK_PROCESS_INTERVAL = 0.05,
+	CHUNK_PROCESS_BUDGET = 1,
 }
 
 local COMM_SYNC_DEFAULTS = {
@@ -99,6 +112,41 @@ local function NormalizeName(name)
 	return string.lower(name:gsub("%s+", ""))
 end
 
+local GUILD_SENDER_CACHE_TTL = 10
+
+local function RebuildSenderGuidCache()
+	local cache = {
+		builtAt = now(),
+		realm = NormalizeName((GetRealmName and GetRealmName()) or ""),
+		byFull = {},
+		byShort = {},
+	}
+	if not IsInGuild or not IsInGuild() then
+		Comm._senderGuidCache = cache
+		return cache
+	end
+	if type(GetNumGuildMembers) ~= "function" or type(GetGuildRosterInfo) ~= "function" then
+		Comm._senderGuidCache = cache
+		return cache
+	end
+
+	for i = 1, GetNumGuildMembers() do
+		local name, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, guid = GetGuildRosterInfo(i)
+		if type(name) == "string" and name ~= "" and type(guid) == "string" and guid ~= "" then
+			local full = NormalizeName(name)
+			local short = NormalizeName(name:match("^([^%-]+)") or name)
+			if full ~= "" then
+				cache.byFull[full] = guid
+			end
+			if short ~= "" then
+				cache.byShort[short] = guid
+			end
+		end
+	end
+	Comm._senderGuidCache = cache
+	return cache
+end
+
 local function ResolveSenderGUIDFromGuildRoster(sender)
 	if type(sender) ~= "string" or sender == "" then return nil end
 	if not IsInGuild or not IsInGuild() then return nil end
@@ -108,21 +156,31 @@ local function ResolveSenderGUIDFromGuildRoster(sender)
 
 	local senderNorm = NormalizeName(sender)
 	local senderShort = NormalizeName(sender:match("^([^%-]+)") or sender)
-	local realmName = NormalizeName((GetRealmName and GetRealmName()) or "")
+	local cached = Comm._senderGuidCache
+	if type(cached) ~= "table" or ((now() - (tonumber(cached.builtAt or 0) or 0)) >= GUILD_SENDER_CACHE_TTL) then
+		cached = RebuildSenderGuidCache()
+	end
+
+	local realmName = NormalizeName((cached and cached.realm) or "")
 	local senderWithLocalRealm = senderShort
 	if realmName ~= "" then
 		senderWithLocalRealm = senderShort .. "-" .. realmName
 	end
 
-	for i = 1, GetNumGuildMembers() do
-		local name, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, guid = GetGuildRosterInfo(i)
-		if name and guid then
-			local full = NormalizeName(name)
-			local short = NormalizeName(name:match("^([^%-]+)") or name)
-			if full == senderNorm or short == senderShort or full == senderWithLocalRealm then
-				return guid
-			end
-		end
+	local byFull = type(cached and cached.byFull) == "table" and cached.byFull or {}
+	local byShort = type(cached and cached.byShort) == "table" and cached.byShort or {}
+	local guid = byFull[senderNorm] or byShort[senderShort] or byFull[senderWithLocalRealm]
+	if type(guid) == "string" and guid ~= "" then
+		return guid
+	end
+
+	-- Fallback: one immediate rebuild for transient roster/cache mismatches.
+	cached = RebuildSenderGuidCache()
+	byFull = type(cached.byFull) == "table" and cached.byFull or {}
+	byShort = type(cached.byShort) == "table" and cached.byShort or {}
+	guid = byFull[senderNorm] or byShort[senderShort] or byFull[senderWithLocalRealm]
+	if type(guid) == "string" and guid ~= "" then
+		return guid
 	end
 	return nil
 end
@@ -306,6 +364,44 @@ function Comm:SendData(subPrefix, data, priority, target, targetName)
 	return ok
 end
 
+local function EnsureListenerDispatchTicker()
+	if Comm._listenerDispatchTicker then
+		return
+	end
+	if not C_Timer or type(C_Timer.NewTicker) ~= "function" then
+		local queue = Comm._listenerDispatchQueue
+		while type(queue) == "table" and #queue > 0 do
+			local item = table.remove(queue, 1)
+			if type(item) == "table" and type(item.cb) == "function" then
+				pcall(item.cb, item.record, item.senderGUID, item.channel)
+			end
+		end
+		return
+	end
+	local interval = tonumber(Comm.SYNC_CFG.LISTENER_DISPATCH_INTERVAL) or 0.05
+	if interval < 0.01 then interval = 0.01 end
+	Comm._listenerDispatchTicker = C_Timer.NewTicker(interval, function()
+		local queue = Comm._listenerDispatchQueue
+		if type(queue) ~= "table" or #queue <= 0 then
+			local t = Comm._listenerDispatchTicker
+			if t and type(t.Cancel) == "function" then
+				pcall(function() t:Cancel() end)
+			end
+			Comm._listenerDispatchTicker = nil
+			return
+		end
+		local budget = tonumber(Comm.SYNC_CFG.LISTENER_DISPATCH_BUDGET) or 8
+		if budget < 1 then budget = 1 end
+		while budget > 0 and #queue > 0 do
+			local item = table.remove(queue, 1)
+			if type(item) == "table" and type(item.cb) == "function" then
+				pcall(item.cb, item.record, item.senderGUID, item.channel)
+			end
+			budget = budget - 1
+		end
+	end)
+end
+
 local function StoreIfNewer(record, senderGUID, channel)
 	local store = GetSyncStore()
 	if type(store) ~= "table" then return false, "no-store" end
@@ -335,9 +431,15 @@ local function StoreIfNewer(record, senderGUID, channel)
 		for i = 1, #listeners do
 			local cb = listeners[i]
 			if type(cb) == "function" then
-				pcall(cb, records[record.key], senderGUID, channel)
+				Comm._listenerDispatchQueue[#Comm._listenerDispatchQueue + 1] = {
+					cb = cb,
+					record = records[record.key],
+					senderGUID = senderGUID,
+					channel = channel,
+				}
 			end
 		end
+		EnsureListenerDispatchTicker()
 	end
 	return true
 end
@@ -519,6 +621,65 @@ function Comm:RequestCharacterDomain(charGUID, domain, opts)
 	return false, "send-failed"
 end
 
+local function ProcessChunkCompleteItem(item)
+	if type(item) ~= "table" then return end
+	local serialized = tostring(item.serialized or "")
+	if serialized == "" then return end
+
+	local ok, record = AceSerializer:Deserialize(serialized)
+	if not ok or type(record) ~= "table" then
+		LOCAL_LOG("WARN", "Chunk reassembly deserialize failed", tostring(item.senderGUID or ""), tostring(item.senderName or ""))
+		return
+	end
+
+	local valid, reason = ValidateRecord(record, { allowChecksumMismatch = true })
+	if not valid then
+		LOCAL_LOG("WARN", "Invalid chunked record", reason, record and record.key or "")
+		return
+	end
+	if reason == "checksum-mismatch-soft" then
+		CommThrottled("sync_checksum_chunk", tostring(record and record.key or ""), "Chunked sync checksum mismatch accepted (compat)", tostring(record and record.key or ""))
+	end
+
+	local stored = StoreIfNewer(record, item.senderGUID, item.channel)
+	if stored then
+		LOCAL_LOG("COMM", "Stored chunked sync record", record.key, item.channel or "")
+	end
+end
+
+local function EnsureChunkCompleteTicker()
+	if Comm._chunkCompleteTicker then
+		return
+	end
+	if not C_Timer or type(C_Timer.NewTicker) ~= "function" then
+		local queue = Comm._chunkCompleteQueue
+		while type(queue) == "table" and #queue > 0 do
+			ProcessChunkCompleteItem(table.remove(queue, 1))
+		end
+		return
+	end
+
+	local interval = tonumber(Comm.SYNC_CFG.CHUNK_PROCESS_INTERVAL) or 0.05
+	if interval < 0.01 then interval = 0.01 end
+	Comm._chunkCompleteTicker = C_Timer.NewTicker(interval, function()
+		local queue = Comm._chunkCompleteQueue
+		if type(queue) ~= "table" or #queue <= 0 then
+			local t = Comm._chunkCompleteTicker
+			if t and type(t.Cancel) == "function" then
+				pcall(function() t:Cancel() end)
+			end
+			Comm._chunkCompleteTicker = nil
+			return
+		end
+		local budget = tonumber(Comm.SYNC_CFG.CHUNK_PROCESS_BUDGET) or 1
+		if budget < 1 then budget = 1 end
+		while budget > 0 and #queue > 0 do
+			ProcessChunkCompleteItem(table.remove(queue, 1))
+			budget = budget - 1
+		end
+	end)
+end
+
 local function CleanupChunkInbox()
 	local ttl = tonumber(Comm.SYNC_CFG.CHUNK_TTL) or 120
 	local cutoff = now() - ttl
@@ -559,26 +720,13 @@ local function HandleChunkPacket(senderGUID, senderName, channel, d)
 	end
 	local serialized = table.concat(chunks, "")
 	Comm._chunkInbox[inboxKey] = nil
-
-	local ok, record = AceSerializer:Deserialize(serialized)
-	if not ok or type(record) ~= "table" then
-		LOCAL_LOG("WARN", "Chunk reassembly deserialize failed", senderGUID or "", senderName or "")
-		return
-	end
-
-	local valid, reason = ValidateRecord(record, { allowChecksumMismatch = true })
-	if not valid then
-		LOCAL_LOG("WARN", "Invalid chunked record", reason, record and record.key or "")
-		return
-	end
-	if reason == "checksum-mismatch-soft" then
-		CommThrottled("sync_checksum_chunk", tostring(record and record.key or ""), "Chunked sync checksum mismatch accepted (compat)", tostring(record and record.key or ""))
-	end
-
-	local stored = StoreIfNewer(record, senderGUID, channel)
-	if stored then
-		LOCAL_LOG("COMM", "Stored chunked sync record", record.key, channel or "")
-	end
+	Comm._chunkCompleteQueue[#Comm._chunkCompleteQueue + 1] = {
+		serialized = serialized,
+		senderGUID = senderGUID,
+		senderName = senderName,
+		channel = channel,
+	}
+	EnsureChunkCompleteTicker()
 end
 
 local function HandleSyncAnnounce(senderName, senderGUID, d)
@@ -651,6 +799,45 @@ local function HandleSyncPacket(senderName, senderGUID, channel, d)
 	end
 end
 
+local function EnsureRelayFlushTicker()
+	if Comm._relayFlushTicker then
+		return
+	end
+	if not C_Timer or type(C_Timer.NewTicker) ~= "function" then
+		-- Fallback: no ticker available, flush everything immediately.
+		local queue = Comm._relayQueue
+		while type(queue) == "table" and #queue > 0 do
+			local item = table.remove(queue, 1)
+			if type(item) == "table" then
+				Comm._relayQueuedByKey[tostring(item.key or "")] = nil
+				SendSyncAnnounce(item.record, item.payloadSize or 0)
+			end
+		end
+		return
+	end
+
+	local interval = tonumber(Comm.SYNC_CFG.RELAY_STAGGER) or 0.20
+	if interval < 0.05 then interval = 0.05 end
+	Comm._relayFlushTicker = C_Timer.NewTicker(interval, function()
+		local queue = Comm._relayQueue
+		if type(queue) ~= "table" or #queue <= 0 then
+			local t = Comm._relayFlushTicker
+			if t and type(t.Cancel) == "function" then
+				pcall(function() t:Cancel() end)
+			end
+			Comm._relayFlushTicker = nil
+			return
+		end
+
+		local item = table.remove(queue, 1)
+		if type(item) ~= "table" then
+			return
+		end
+		Comm._relayQueuedByKey[tostring(item.key or "")] = nil
+		SendSyncAnnounce(item.record, item.payloadSize or 0)
+	end)
+end
+
 function Comm:BroadcastRelayAnnounces(limit)
 	local store = GetSyncStore()
 	if type(store) ~= "table" then return 0 end
@@ -669,20 +856,28 @@ function Comm:BroadcastRelayAnnounces(limit)
 		return at > bt
 	end)
 
-	local sent = 0
+	local enqueued = 0
 	for i = 1, #list do
-		if sent >= maxCount then break end
+		if enqueued >= maxCount then break end
 		local rec = list[i]
-		local payloadSerialized = SerializePayload(rec.payload)
-		local payloadSize = payloadSerialized and #payloadSerialized or 0
-		if SendSyncAnnounce(rec, payloadSize) then
-			sent = sent + 1
+		local key = tostring(rec.key or "")
+		if key ~= "" and not self._relayQueuedByKey[key] then
+			local payloadSerialized = SerializePayload(rec.payload)
+			local payloadSize = payloadSerialized and #payloadSerialized or 0
+			self._relayQueue[#self._relayQueue + 1] = {
+				key = key,
+				record = rec,
+				payloadSize = payloadSize,
+			}
+			self._relayQueuedByKey[key] = true
+			enqueued = enqueued + 1
 		end
 	end
-	if sent > 0 then
-		LOCAL_LOG("COMM", "Relay announce batch sent", sent)
+	if enqueued > 0 then
+		EnsureRelayFlushTicker()
+		LOCAL_LOG("COMM", "Relay announce batch queued", enqueued)
 	end
-	return sent
+	return enqueued
 end
 
 function Comm:OnCommReceive(prefix, msg, channel, sender)

@@ -52,7 +52,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.11",
+	VERSION      = "1.3.13",
 }
 
 -- ###########################################################################
@@ -114,6 +114,10 @@ end
 local LOGIN_DELAY_SEC       = 4.0
 local LOGIN_SECOND_PASS_SEC = 12.0
 local CHANGE_DEBOUNCE_SEC   = 0.35
+local SCAN_BATCH_SIZE       = 2
+local SCAN_BATCH_DELAY_SEC  = 0.02
+local SLOT_SCAN_BATCH_SIZE  = 1
+local SLOT_SCAN_DELAY_SEC   = 0.02
 
 local STORE_POLL_MAX_TRIES = 25
 local STORE_POLL_INTERVAL  = 1.0
@@ -124,6 +128,7 @@ local EQUIP_SYNC_DOMAIN    = "EQUIPMENT_V1"
 -- ###########################################################################
 
 EQUIP._scanToken = EQUIP._scanToken or 0
+EQUIP._slotScanToken = EQUIP._slotScanToken or 0
 EQUIP._pollTries = EQUIP._pollTries or 0
 EQUIP._storePollActive = EQUIP._storePollActive or false
 
@@ -461,28 +466,101 @@ function EQUIP:_PublishSnapshotToGuild(snapshot, reason)
 	return comm:PublishCharacterRecord(EQUIP_SYNC_DOMAIN, payload)
 end
 
-local function _scanPlayerEquipment()
-	local guid = _getPlayerGuid()
+local function _scanEquipmentSlot(slotId)
+	local itemLoc = nil
+	if type(ItemLocation) == "table" and type(ItemLocation.CreateFromEquipmentSlot) == "function" then
+		itemLoc = ItemLocation:CreateFromEquipmentSlot(slotId)
+	end
+	if type(C_Item) == "table" and itemLoc and type(C_Item.DoesItemExist) == "function" and C_Item.DoesItemExist(itemLoc) then
+		local link = type(C_Item.GetItemLink) == "function" and C_Item.GetItemLink(itemLoc) or nil
+		return _parseItemLink(link, itemLoc, slotId)
+	end
+	return nil
+end
 
+local function _getCurrentSnapshotSlotsCopy()
+	local out = {}
+	local store = _getEquipmentStore()
+	local base = nil
+	if type(store) == "table" and type(store.snapshot) == "table" and type(store.snapshot.slots) == "table" then
+		base = store.snapshot.slots
+	elseif type(EQUIP._mem) == "table"
+		and type(EQUIP._mem.snapshot) == "table"
+		and type(EQUIP._mem.snapshot.slots) == "table" then
+		base = EQUIP._mem.snapshot.slots
+	end
+	if type(base) ~= "table" then
+		return out
+	end
+	for k, v in pairs(base) do
+		out[k] = v
+	end
+	return out
+end
+
+local function _scanPlayerEquipmentAsync(scanToken, done)
+	if type(done) ~= "function" then return end
+	local guid = _getPlayerGuid()
 	local slots = {}
-	for _, slotId in ipairs(INV_SLOTS) do
-		local itemLoc = nil
-		if type(ItemLocation) == "table" and type(ItemLocation.CreateFromEquipmentSlot) == "function" then
-			itemLoc = ItemLocation:CreateFromEquipmentSlot(slotId)
+	local idx = 1
+
+	local function step()
+		if scanToken ~= (EQUIP._scanToken or 0) then return end
+		local stopAt = math.min(idx + SCAN_BATCH_SIZE - 1, #INV_SLOTS)
+		for i = idx, stopAt do
+			local slotId = INV_SLOTS[i]
+			slots[slotId] = _scanEquipmentSlot(slotId)
 		end
-		if type(C_Item) == "table" and itemLoc and type(C_Item.DoesItemExist) == "function" and C_Item.DoesItemExist(itemLoc) then
-			local link = type(C_Item.GetItemLink) == "function" and C_Item.GetItemLink(itemLoc) or nil
-			slots[slotId] = _parseItemLink(link, itemLoc, slotId)
-		else
-			slots[slotId] = nil
+		idx = stopAt + 1
+
+		if idx <= #INV_SLOTS then
+			_schedule(SCAN_BATCH_DELAY_SEC, step)
+			return
 		end
+
+		done({
+			guid  = guid,
+			ts    = _nowEpoch(),
+			slots = slots,
+		})
 	end
 
-	return {
-		guid  = guid,
-		ts    = _nowEpoch(),
-		slots = slots,
-	}
+	step()
+end
+
+local function _scanSpecificSlotsAsync(scanToken, slotIds, done)
+	if type(done) ~= "function" then return end
+	if type(slotIds) ~= "table" or #slotIds <= 0 then
+		done({ guid = _getPlayerGuid(), ts = _nowEpoch(), slots = {} })
+		return
+	end
+
+	local guid = _getPlayerGuid()
+	local slots = {}
+	local idx = 1
+
+	local function step()
+		if scanToken ~= (EQUIP._slotScanToken or 0) then return end
+		local stopAt = math.min(idx + SLOT_SCAN_BATCH_SIZE - 1, #slotIds)
+		for i = idx, stopAt do
+			local slotId = tonumber(slotIds[i]) or 0
+			if slotId > 0 then
+				slots[slotId] = _scanEquipmentSlot(slotId)
+			end
+		end
+		idx = stopAt + 1
+		if idx <= #slotIds then
+			_schedule(SLOT_SCAN_DELAY_SEC, step)
+			return
+		end
+		done({
+			guid = guid,
+			ts = _nowEpoch(),
+			slots = slots,
+		})
+	end
+
+	step()
 end
 
 -- ###########################################################################
@@ -563,14 +641,61 @@ function EQUIP:_ScheduleScan(delaySec, reason)
 	_schedule(delaySec or 0, function()
 		if token ~= self._scanToken then return end
 
-		local snap = _scanPlayerEquipment()
-		local ok = self:SaveSnapshot(snap, reason)
+		_scanPlayerEquipmentAsync(token, function(snap)
+			if token ~= self._scanToken then return end
+			local ok = self:SaveSnapshot(snap, reason)
 
-		if ok then
-			LOCAL_LOG("INFO", "Equipment scanned + saved", tostring(reason or "unknown"))
-		else
-			LOCAL_LOG("WARN", "Equipment scan produced invalid snapshot", tostring(reason or "unknown"))
+			if ok then
+				LOCAL_LOG("INFO", "Equipment scanned + saved", tostring(reason or "unknown"))
+			else
+				LOCAL_LOG("WARN", "Equipment scan produced invalid snapshot", tostring(reason or "unknown"))
+			end
+		end)
+	end)
+end
+
+function EQUIP:_ScheduleSlotScan(slotIds, delaySec, reason)
+	local list = {}
+	local seen = {}
+	if type(slotIds) == "table" then
+		for i = 1, #slotIds do
+			local sid = tonumber(slotIds[i]) or 0
+			if sid >= 1 and sid <= 19 and not seen[sid] then
+				seen[sid] = true
+				list[#list + 1] = sid
+			end
 		end
+	end
+	if #list <= 0 then
+		return self:_ScheduleScan(delaySec, reason)
+	end
+
+	self._slotScanToken = (self._slotScanToken or 0) + 1
+	local token = self._slotScanToken
+
+	_schedule(delaySec or 0, function()
+		if token ~= self._slotScanToken then return end
+		_scanSpecificSlotsAsync(token, list, function(partial)
+			if token ~= self._slotScanToken then return end
+			local mergedSlots = _getCurrentSnapshotSlotsCopy()
+			local changed = type(partial) == "table" and partial.slots or {}
+			for i = 1, #list do
+				local sid = list[i]
+				mergedSlots[sid] = changed[sid]
+			end
+
+			local snap = {
+				guid = _getPlayerGuid(),
+				ts = _nowEpoch(),
+				slots = mergedSlots,
+			}
+			local ok = self:SaveSnapshot(snap, reason or "equip-slot-changed")
+			if ok then
+				LOCAL_LOG("INFO", "Equipment slot-scan + saved", tostring(reason or "equip-slot-changed"))
+			else
+				LOCAL_LOG("WARN", "Equipment slot-scan produced invalid snapshot", tostring(reason or "equip-slot-changed"))
+			end
+		end)
 	end)
 end
 
@@ -580,13 +705,18 @@ function EQUIP:_OnPlayerLogin()
 	self:_ScheduleScan(LOGIN_SECOND_PASS_SEC, "login-second-pass")
 end
 
-function EQUIP:_OnEquipmentChanged()
+function EQUIP:_OnEquipmentChanged(_, slotId)
+	local sid = tonumber(slotId) or 0
+	if sid >= 1 and sid <= 19 then
+		self:_ScheduleSlotScan({ sid }, CHANGE_DEBOUNCE_SEC, "equip-slot-changed")
+		return
+	end
 	self:_ScheduleScan(CHANGE_DEBOUNCE_SEC, "equip-changed")
 end
 
-function EQUIP:_OnUnitInventoryChanged(unit)
+function EQUIP:_OnUnitInventoryChanged(_, unit)
 	if unit ~= "player" then return end
-	self:_ScheduleScan(CHANGE_DEBOUNCE_SEC, "unit-inv-changed")
+	self:_ScheduleScan(CHANGE_DEBOUNCE_SEC + 0.15, "unit-inv-changed")
 end
 
 -- ###########################################################################

@@ -62,6 +62,8 @@ GMS:RegisterLocale("deDE", {
 	UI_CMD_OPEN_HELP = "Oeffnet die GMS UI (/gms ui [page])",
 	UI_DOCK_DASHBOARD_TOOLTIP = "Zeigt das Addon-Dashboard an",
 	UI_DOCK_SETTINGS_TOOLTIP = "Einstellungen",
+	UI_FOOTER_MEM_FMT = "GMS: %.1f MB (%.1f%%)",
+	UI_FOOTER_MEM_UNAVAILABLE = "Speicher: n/v",
 
 	LOGS_HEADER_TITLE = "Log-Konsole",
 	LOGS_FILTER = "Filter:",
@@ -380,4 +382,3 @@ GMS:RegisterLocale("deDE", {
 	ROSTER_TOOLTIP_LINKED_CHARS = "Verknüpfte Gildencharaktere",
 	ROSTER_TOOLTIP_LINKED_CHARS_NONE = "Keine verknüpften Gildencharaktere",
 })
-

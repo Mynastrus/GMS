@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.0.23",
+	VERSION      = "1.1.4",
 }
 
 local LibStub = LibStub
@@ -49,6 +49,7 @@ local UnitGUID                   = UnitGUID
 local UnitExists                 = UnitExists
 local UnitIsPlayer               = UnitIsPlayer
 local C_Timer                    = C_Timer
+local C_Spell                    = C_Spell
 local C_ClassTalents             = C_ClassTalents
 local C_Traits                   = C_Traits
 local C_PvP                      = C_PvP
@@ -61,11 +62,9 @@ local LoadAddOn                  = LoadAddOn
 local CastSpellByID              = CastSpellByID
 local GetSpellTexture            = GetSpellTexture
 local GetSpellCooldown           = GetSpellCooldown
-local BOOKTYPE_SPELL             = BOOKTYPE_SPELL
-local GetNumSpellTabs            = GetNumSpellTabs
-local GetSpellTabInfo            = GetSpellTabInfo
-local GetSpellBookItemInfo       = GetSpellBookItemInfo
-local GetSpellBookItemName       = GetSpellBookItemName
+local FindSpellBookSlotBySpellID = FindSpellBookSlotBySpellID
+local IsPlayerSpell              = IsPlayerSpell
+local IsSpellKnownOrOverridesKnown = IsSpellKnownOrOverridesKnown
 local EJ_SelectInstance          = EJ_SelectInstance
 local EJ_GetNumTiers             = EJ_GetNumTiers
 local EJ_SelectTier              = EJ_SelectTier
@@ -152,6 +151,7 @@ CHARINFO._integrated     = CHARINFO._integrated or false
 CHARINFO._ticker         = CHARINFO._ticker or nil
 CHARINFO._uiDataTicker   = CHARINFO._uiDataTicker or nil
 CHARINFO._uiDataLastSig  = CHARINFO._uiDataLastSig or nil
+CHARINFO._uiBuildToken   = CHARINFO._uiBuildToken or 0
 CHARINFO._resizeRefreshPending = CHARINFO._resizeRefreshPending or false
 CHARINFO._raidWaitAnimTicker = CHARINFO._raidWaitAnimTicker or nil
 CHARINFO._raidWaitAnimStep = CHARINFO._raidWaitAnimStep or 0
@@ -169,6 +169,9 @@ local OPTIONS_DEFAULTS = {
 	lastUpdate = 0,
 	cardOrder = { "MYTHIC", "EQUIPMENT", "RAIDS", "OVERVIEW", "ACCOUNT", "TALENTS", "PVP" },
 }
+
+local CHARINFO_UI_RENDER_DELAY = 0.02
+local CHARINFO_UI_RENDER_BATCH = 1
 
 -- Icon: nimm einen, der bei dir existiert (du kannst ihn per /run testen)
 local ICON = "Interface\\Icons\\Achievement_character_human_male"
@@ -746,17 +749,6 @@ local function NormalizeSearchText(raw)
 	return s
 end
 
-local function SplitTokens(raw)
-	local out = {}
-	local s = NormalizeSearchText(raw)
-	for token in s:gmatch("%S+") do
-		if #token >= 3 then
-			out[#out + 1] = token
-		end
-	end
-	return out
-end
-
 local function GetSpellCooldownRemaining(spellID)
 	local sid = tonumber(spellID or 0) or 0
 	if sid <= 0 then return 0, 0, 0 end
@@ -791,82 +783,128 @@ local function FormatCooldownShort(seconds)
 	return string.format("%ds", s)
 end
 
-local function BuildKnownSpellIndex()
-	local idx = {}
-	local bookType = BOOKTYPE_SPELL or "spell"
-	if type(GetNumSpellTabs) ~= "function" or type(GetSpellTabInfo) ~= "function" or type(GetSpellBookItemInfo) ~= "function" then
-		return idx
-	end
-	local tabs = tonumber(GetNumSpellTabs() or 0) or 0
-	for tab = 1, tabs do
-		local _, _, offset, numSpells = GetSpellTabInfo(tab)
-		offset = tonumber(offset or 0) or 0
-		numSpells = tonumber(numSpells or 0) or 0
-		for i = 1, numSpells do
-			local slot = offset + i
-			local stype, spellID = GetSpellBookItemInfo(slot, bookType)
-			if stype == "SPELL" and tonumber(spellID or 0) and tonumber(spellID or 0) > 0 then
-				local sname = nil
-				if type(GetSpellBookItemName) == "function" then
-					sname = select(1, GetSpellBookItemName(slot, bookType))
-				end
-				if (not sname or sname == "") and C_Spell and type(C_Spell.GetSpellName) == "function" then
-					sname = C_Spell.GetSpellName(spellID)
-				end
-				if type(sname) == "string" and sname ~= "" then
-					idx[#idx + 1] = {
-						id = tonumber(spellID) or 0,
-						name = sname,
-						norm = NormalizeSearchText(sname),
-					}
-				end
-			end
-		end
-	end
-	return idx
+local KNOWN_PORTAL_BY_MAPID = {
+	[556] = { 1254555 },
+	[438] = { 410080 },
+	[456] = { 424142 },
+	[507] = { 445424 },
+	[2] = { 131204 },
+	[56] = { 131205 },
+	[57] = { 131225 },
+	[58] = { 131206 },
+	[59] = { 131228 },
+	[60] = { 131222 },
+	[76] = { 131232 },
+	[77] = { 131231, 131229 },
+	[78] = { 131229, 131231 },
+	[161] = { 159898, 159899, 159897 },
+	[163] = { 159895 },
+	[164] = { 159897, 159898 },
+	[165] = { 159899, 159898 },
+	[166] = { 159900, 159901, 159896 },
+	[167] = { 159902 },
+	[168] = { 159901, 159900, 159896 },
+	[169] = { 159896, 159900, 159901 },
+	[198] = { 424163, 424153 },
+	[199] = { 424153, 424163 },
+	[200] = { 393764 },
+	[206] = { 410078 },
+	[210] = { 393766 },
+	[227] = { 373262 },
+	[234] = { 373262 },
+	[239] = { 1254551 },
+	[244] = { 424187, 467553 },
+	[245] = { 410071, 445418 },
+	[247] = { 467553, 424187 },
+	[248] = { 424167 },
+	[251] = { 410074 },
+	[353] = { 445418, 410071 },
+	[369] = { 373274 },
+	[370] = { 373274 },
+	[375] = { 354464, 354468 },
+	[376] = { 354462, 354466 },
+	[377] = { 354468, 354464 },
+	[378] = { 354465, 354469 },
+	[379] = { 354463, 354467 },
+	[380] = { 354469, 354465 },
+	[381] = { 354466, 354462 },
+	[382] = { 354467, 354463 },
+	[391] = { 367416 },
+	[392] = { 367416 },
+	[399] = { 393256, 393276 },
+	[400] = { 393262 },
+	[401] = { 393279, 393267 },
+	[402] = { 393273, 393283 },
+	[403] = { 393222 },
+	[404] = { 393276, 393256 },
+	[405] = { 393267, 393279 },
+	[406] = { 393283, 424197, 393273 },
+	[463] = { 424197, 393283 },
+	[464] = { 424197, 393283 },
+	[499] = { 445444, 445414 },
+	[500] = { 445443, 445440 },
+	[501] = { 445269, 445441, 1216786 },
+	[502] = { 445416, 445417 },
+	[503] = { 445417, 445416 },
+	[504] = { 445441, 1216786, 445269 },
+	[505] = { 445414, 445444 },
+	[506] = { 445440, 445443 },
+	[525] = { 1216786, 445441, 445269 },
+	[542] = { 1237215 },
+	[557] = { 1254400 },
+	[558] = { 1254572 },
+	[559] = { 1254563 },
+	[560] = { 1254559 },
+}
+
+if type(UnitFactionGroup) == "function" and UnitFactionGroup("player") == "Horde" then
+	KNOWN_PORTAL_BY_MAPID[353] = { 464256, 410071 }
+	KNOWN_PORTAL_BY_MAPID[245] = { 410071, 464256 }
+	KNOWN_PORTAL_BY_MAPID[247] = { 467555, 424187 }
+	KNOWN_PORTAL_BY_MAPID[244] = { 424187, 467555 }
 end
 
-local function FindPortalSpellForDungeonName(dungeonName)
-	local dname = tostring(dungeonName or "")
-	if dname == "" then return nil, nil end
-	local dnorm = NormalizeSearchText(dname)
-	if dnorm == "" then return nil, nil end
-	local dtokens = SplitTokens(dnorm)
-	if #dtokens <= 0 then return nil, nil end
+local IsPortalSpellKnown
 
-	local nowTs = tonumber(GetTime and GetTime() or 0) or 0
-	local cache = CHARINFO._spellIndexCache
-	if type(cache) ~= "table" or (nowTs - tonumber(CHARINFO._spellIndexAt or 0)) > 15 then
-		cache = BuildKnownSpellIndex()
-		CHARINFO._spellIndexCache = cache
-		CHARINFO._spellIndexAt = nowTs
-	end
-
-	local best = nil
-	local bestScore = -1
-	for i = 1, #cache do
-		local s = cache[i]
-		local snorm = tostring(s.norm or "")
-		if snorm ~= "" then
-			local score = 0
-			if snorm:find(dnorm, 1, true) then
-				score = score + 100
-			end
-			for t = 1, #dtokens do
-				if snorm:find(dtokens[t], 1, true) then
-					score = score + 10
-				end
-			end
-			if score > bestScore then
-				bestScore = score
-				best = s
-			end
+IsPortalSpellKnown = function(spellID)
+	local sid = tonumber(spellID or 0) or 0
+	if sid <= 0 then return false end
+	if type(FindSpellBookSlotBySpellID) == "function" then
+		local slot = FindSpellBookSlotBySpellID(sid)
+		if type(slot) == "number" and slot > 0 then
+			return true
 		end
 	end
-	if type(best) == "table" and bestScore >= 30 then
-		return tonumber(best.id or 0) or 0, tostring(best.name or "")
+	if type(IsPlayerSpell) == "function" and IsPlayerSpell(sid) then
+		return true
 	end
-	return nil, nil
+	if type(IsSpellKnownOrOverridesKnown) == "function" and IsSpellKnownOrOverridesKnown(sid) then
+		return true
+	end
+	return false
+end
+
+local function ResolvePortalSpellForDungeon(mapId)
+	local mid = tonumber(mapId or 0) or 0
+	local candidates = KNOWN_PORTAL_BY_MAPID[mid]
+	if type(candidates) == "table" and #candidates > 0 then
+		local firstValid = nil
+		for i = 1, #candidates do
+			local sid = tonumber(candidates[i] or 0) or 0
+			if sid > 0 then
+				firstValid = firstValid or sid
+				if IsPortalSpellKnown(sid) then
+					local sname = C_Spell and type(C_Spell.GetSpellName) == "function" and C_Spell.GetSpellName(sid) or ""
+					return sid, tostring(sname or ""), true
+				end
+			end
+		end
+		if firstValid then
+			local sname = C_Spell and type(C_Spell.GetSpellName) == "function" and C_Spell.GetSpellName(firstValid) or ""
+			return firstValid, tostring(sname or ""), false
+		end
+	end
+	return nil, nil, false
 end
 
 local function BuildEJDungeonNameIndex()
@@ -1589,6 +1627,91 @@ local function RequestDomainSyncForGuid(guid, domain, reason)
 	return ok == true
 end
 
+local CHARINFO_SYNC_QUEUE_INTERVAL = 0.9
+local CHARINFO_SYNC_QUEUE_MAX_PER_TICK = 1
+
+local function EnsureContextSyncQueue()
+	CHARINFO._contextSyncQueue = type(CHARINFO._contextSyncQueue) == "table" and CHARINFO._contextSyncQueue or {}
+	CHARINFO._contextSyncPending = type(CHARINFO._contextSyncPending) == "table" and CHARINFO._contextSyncPending or {}
+	if CHARINFO._contextSyncTicker or not C_Timer or type(C_Timer.NewTicker) ~= "function" then
+		return
+	end
+	CHARINFO._contextSyncTicker = C_Timer.NewTicker(CHARINFO_SYNC_QUEUE_INTERVAL, function()
+		local queue = CHARINFO._contextSyncQueue
+		local pending = CHARINFO._contextSyncPending
+		if type(queue) ~= "table" or #queue <= 0 then
+			if CHARINFO._contextSyncTicker and type(CHARINFO._contextSyncTicker.Cancel) == "function" then
+				pcall(function() CHARINFO._contextSyncTicker:Cancel() end)
+			end
+			CHARINFO._contextSyncTicker = nil
+			return
+		end
+
+		local sent = 0
+		while sent < CHARINFO_SYNC_QUEUE_MAX_PER_TICK and #queue > 0 do
+			local req = table.remove(queue, 1)
+			local reqKey = type(req) == "table" and tostring(req.key or "") or ""
+			if reqKey ~= "" then
+				pending[reqKey] = nil
+			end
+			if type(req) == "table" then
+				local ok = RequestDomainSyncForGuid(req.guid, req.domain, req.reason or "charinfo-context-queued")
+				if ok then
+					sent = sent + 1
+				end
+			end
+		end
+	end)
+end
+
+local function QueueDomainSyncForGuid(guid, domain, reason)
+	local g = tostring(guid or "")
+	local d = tostring(domain or "")
+	if g == "" or d == "" then return false end
+
+	EnsureContextSyncQueue()
+	local queue = CHARINFO._contextSyncQueue
+	local pending = CHARINFO._contextSyncPending
+	if type(queue) ~= "table" or type(pending) ~= "table" then
+		return RequestDomainSyncForGuid(g, d, reason)
+	end
+
+	local key = g .. "|" .. d
+	if pending[key] then
+		return false
+	end
+
+	-- Respect current request cooldown before queueing to avoid churn.
+	local nowTs = GetTime and GetTime() or 0
+	local last = tonumber(CHARINFO._syncRequestAt[key]) or 0
+	if (nowTs - last) < 12 then
+		return false
+	end
+
+	pending[key] = true
+	queue[#queue + 1] = {
+		key = key,
+		guid = g,
+		domain = d,
+		reason = tostring(reason or "charinfo-context"),
+	}
+	return true
+end
+
+local function RequestContextBootstrapOnce(guid, reason)
+	local g = tostring(guid or "")
+	if g == "" then return false end
+	CHARINFO._contextSyncBootstrapSent = type(CHARINFO._contextSyncBootstrapSent) == "table" and CHARINFO._contextSyncBootstrapSent or {}
+	if CHARINFO._contextSyncBootstrapSent[g] then
+		return false
+	end
+	local ok = QueueDomainSyncForGuid(g, "roster_meta", reason or "charinfo-context-bootstrap")
+	if ok then
+		CHARINFO._contextSyncBootstrapSent[g] = true
+	end
+	return ok
+end
+
 local function NormalizeAccountCharacterRows(rows)
 	local out = {}
 	if type(rows) ~= "table" then
@@ -1898,8 +2021,6 @@ local function BuildCharData(player, ctxGuid, ctxName)
 				data.pvp.hasData = true
 				data.pvp.source = (payloadMetaSource == "cache") and "Saved character DB" or "Synced roster_meta"
 			end
-		else
-			RequestDomainSyncForGuid(targetGuid, "roster_meta", "charinfo-context")
 		end
 
 		local payloadM, payloadMSource = GetLatestOrCachedDomainPayload("MYTHICPLUS_V1", targetGuid)
@@ -1910,8 +2031,6 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			data.mythic.score = score or data.mythic.score
 			data.mythic.hasData = (score and score > 0) or (#rows > 0) or data.mythic.hasData
 			data.mythic.source = (payloadMSource == "cache") and "Saved character DB" or "Synced MYTHICPLUS_V1"
-		else
-			RequestDomainSyncForGuid(targetGuid, "MYTHICPLUS_V1", "charinfo-context")
 		end
 
 		local payloadR, payloadRSource = GetLatestOrCachedDomainPayload("RAIDS_V1", targetGuid)
@@ -1925,8 +2044,6 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			data.raids.rows = rows
 			data.raids.hasData = (#rows > 0) or (data.raids.summary ~= "-") or data.raids.hasData
 			data.raids.source = (payloadRSource == "cache") and "Saved character DB" or "Synced RAIDS_V1"
-		else
-			RequestDomainSyncForGuid(targetGuid, "RAIDS_V1", "charinfo-context")
 		end
 
 		local payloadEquip, payloadEquipSource = GetLatestOrCachedDomainPayload("EQUIPMENT_V1", targetGuid)
@@ -1939,8 +2056,16 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			data.equipment.slots = slots
 			data.equipment.hasData = (#rows > 0) or (data.equipment.ilvl and data.equipment.ilvl > 0) or data.equipment.hasData
 			data.equipment.source = (payloadEquipSource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V1"
-		else
-			RequestDomainSyncForGuid(targetGuid, "EQUIPMENT_V1", "charinfo-context")
+		end
+
+		-- CharInfo bootstrap: exactly one request per target/context-open.
+		local needsBootstrap = false
+		if type(payloadMeta) ~= "table" then needsBootstrap = true end
+		if type(payloadM) ~= "table" then needsBootstrap = true end
+		if type(payloadR) ~= "table" then needsBootstrap = true end
+		if type(payloadEquip) ~= "table" then needsBootstrap = true end
+		if needsBootstrap then
+			RequestContextBootstrapOnce(targetGuid, "charinfo-context")
 		end
 
 		if not data.talents.hasData then
@@ -2299,6 +2424,17 @@ local function StopUIDataTicker()
 		pcall(function() t:Cancel() end)
 	end
 	CHARINFO._uiDataTicker = nil
+	CHARINFO._uiBuildToken = (tonumber(CHARINFO._uiBuildToken or 0) or 0) + 1
+end
+
+local function StopContextSyncQueue()
+	local t = CHARINFO._contextSyncTicker
+	if t and type(t.Cancel) == "function" then
+		pcall(function() t:Cancel() end)
+	end
+	CHARINFO._contextSyncTicker = nil
+	CHARINFO._contextSyncQueue = {}
+	CHARINFO._contextSyncPending = {}
 end
 
 local function StopRaidWaitAnimTicker()
@@ -2308,6 +2444,61 @@ local function StopRaidWaitAnimTicker()
 	end
 	CHARINFO._raidWaitAnimTicker = nil
 	CHARINFO._raidWaitAnimStep = 0
+end
+
+local function StartUIBuildQueue(tasks, scroller, outer)
+	CHARINFO._uiBuildToken = (tonumber(CHARINFO._uiBuildToken or 0) or 0) + 1
+	local token = CHARINFO._uiBuildToken
+	local queue = type(tasks) == "table" and tasks or {}
+	local idx = 1
+	local total = #queue
+	if total <= 0 then
+		return
+	end
+
+	local function FlushLayout()
+		if token ~= CHARINFO._uiBuildToken then return end
+		if scroller and type(scroller.DoLayout) == "function" then
+			pcall(function() scroller:DoLayout() end)
+		end
+		if outer and type(outer.DoLayout) == "function" then
+			pcall(function() outer:DoLayout() end)
+		end
+	end
+
+	local function Step()
+		if token ~= CHARINFO._uiBuildToken then
+			return
+		end
+		local budget = tonumber(CHARINFO_UI_RENDER_BATCH) or 1
+		if budget < 1 then budget = 1 end
+		while budget > 0 and idx <= total do
+			local fn = queue[idx]
+			idx = idx + 1
+			if type(fn) == "function" then
+				pcall(fn)
+			end
+			budget = budget - 1
+		end
+		FlushLayout()
+
+		if idx <= total then
+			if C_Timer and type(C_Timer.After) == "function" then
+				C_Timer.After(tonumber(CHARINFO_UI_RENDER_DELAY) or 0.02, Step)
+			else
+				while idx <= total and token == CHARINFO._uiBuildToken do
+					local fn = queue[idx]
+					idx = idx + 1
+					if type(fn) == "function" then
+						pcall(fn)
+					end
+				end
+				FlushLayout()
+			end
+		end
+	end
+
+	Step()
 end
 
 local function StartRaidWaitAnimTicker(labelWidget, baseText, spinnerWidgets)
@@ -2356,6 +2547,8 @@ end
 
 function CHARINFO:StartUIDataTicker(ctxState)
 	StopUIDataTicker()
+	StopContextSyncQueue()
+	CHARINFO._contextSyncBootstrapSent = {}
 	if not C_Timer or type(C_Timer.NewTicker) ~= "function" then return end
 
 	local state = type(ctxState) == "table" and ctxState or nil
@@ -2604,11 +2797,7 @@ function CHARINFO:TryRegisterPage()
 				rowGroup:SetLayout("Flow")
 				card:AddChild(rowGroup)
 
-				local portalSpellID, portalSpellName = nil, nil
-				local hasTimedTenPlus = (tonumber(row.level) or 0) >= 10 and (row.completed == true)
-				if hasTimedTenPlus then
-					portalSpellID, portalSpellName = FindPortalSpellForDungeonName(row.name)
-				end
+				local portalSpellID, portalSpellName, hasPortalSpell = ResolvePortalSpellForDungeon(row.mapId)
 
 				local portalIcon = AceGUI:Create("Icon")
 				portalIcon:SetWidth(portalW)
@@ -2620,7 +2809,7 @@ function CHARINFO:TryRegisterPage()
 					portalIcon:SetImage("Interface\\PetBattles\\PetBattle-LockIcon")
 				end
 				if portalIcon.image and type(portalIcon.image.SetDesaturated) == "function" then
-					portalIcon.image:SetDesaturated(not (portalSpellID and hasTimedTenPlus))
+					portalIcon.image:SetDesaturated(not hasPortalSpell)
 				end
 				if portalIcon.frame then
 					local cd = portalIcon.frame._gmsCd
@@ -2631,7 +2820,7 @@ function CHARINFO:TryRegisterPage()
 							portalIcon.frame._gmsCd = cd
 						end
 					end
-					if cd and type(cd.SetCooldown) == "function" and portalSpellID then
+					if cd and type(cd.SetCooldown) == "function" and hasPortalSpell and portalSpellID then
 						local _, start, duration = GetSpellCooldownRemaining(portalSpellID)
 						cd:SetCooldown(tonumber(start or 0) or 0, tonumber(duration or 0) or 0)
 					end
@@ -2639,17 +2828,17 @@ function CHARINFO:TryRegisterPage()
 				portalIcon:SetCallback("OnEnter", function(widget)
 					if not GameTooltip or not widget or not widget.frame then return end
 					GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
-					if portalSpellID then
+					if portalSpellID and hasPortalSpell then
 						local remain = select(1, GetSpellCooldownRemaining(portalSpellID))
 						GameTooltip:SetText(tostring(portalSpellName or "Mythic+ Portal"), 1, 1, 1)
 						GameTooltip:AddLine(string.format("|cff9d9d9dCooldown:|r %s", FormatCooldownShort(remain)), 1, 1, 1)
 						GameTooltip:AddLine("|cff03A9F4Klick: Instanzportal zaubern|r", 1, 1, 1)
-					elseif hasTimedTenPlus then
+					elseif portalSpellID then
 						GameTooltip:SetText("|cffffcc00Kein passender Portalzauber gefunden|r", 1, 1, 1)
-						GameTooltip:AddLine("|cff9d9d9dMöglicherweise nicht gelernt oder kein Spellbook-Match.|r", 1, 1, 1)
+						GameTooltip:AddLine("|cff9d9d9dPortalzauber-ID erkannt, aber nicht im Spellbook/als gelernt verfügbar.|r", 1, 1, 1)
 					else
 						GameTooltip:SetText("|cff9d9d9dPortal nicht verfügbar|r", 1, 1, 1)
-						GameTooltip:AddLine("|cff9d9d9dFreischaltung ab +10 in Time.|r", 1, 1, 1)
+						GameTooltip:AddLine("|cff9d9d9dKein passender Portalzauber für diesen Dungeon gefunden.|r", 1, 1, 1)
 					end
 					GameTooltip:Show()
 				end)
@@ -2657,7 +2846,7 @@ function CHARINFO:TryRegisterPage()
 					if GameTooltip then GameTooltip:Hide() end
 				end)
 				portalIcon:SetCallback("OnClick", function()
-					if portalSpellID and hasTimedTenPlus and type(CastSpellByID) == "function" then
+					if portalSpellID and hasPortalSpell and type(CastSpellByID) == "function" then
 						pcall(CastSpellByID, portalSpellID)
 					end
 				end)
@@ -3241,6 +3430,12 @@ function CHARINFO:TryRegisterPage()
 		local pinned = {}
 		for i = 1, #leftPinned do pinned[leftPinned[i]] = true end
 		for i = 1, #rightPinned do pinned[rightPinned[i]] = true end
+		local renderQueue = {}
+		local function EnqueueCard(parent, cardId)
+			renderQueue[#renderQueue + 1] = function()
+				RenderCardInto(parent, cardId)
+			end
+		end
 
 		if useTwoColumns then
 			local pinnedRow = AceGUI:Create("SimpleGroup")
@@ -3266,10 +3461,10 @@ function CHARINFO:TryRegisterPage()
 			pinnedRow:AddChild(rightStack)
 
 			for i = 1, #leftPinned do
-				RenderCardInto(leftStack, leftPinned[i])
+				EnqueueCard(leftStack, leftPinned[i])
 			end
 			for i = 1, #rightPinned do
-				RenderCardInto(rightStack, rightPinned[i])
+				EnqueueCard(rightStack, rightPinned[i])
 			end
 		else
 			local singleStack = AceGUI:Create("SimpleGroup")
@@ -3278,10 +3473,10 @@ function CHARINFO:TryRegisterPage()
 			contentRow:AddChild(singleStack)
 
 			for i = 1, #leftPinned do
-				RenderCardInto(singleStack, leftPinned[i])
+				EnqueueCard(singleStack, leftPinned[i])
 			end
 			for i = 1, #rightPinned do
-				RenderCardInto(singleStack, rightPinned[i])
+				EnqueueCard(singleStack, rightPinned[i])
 			end
 		end
 
@@ -3290,26 +3485,23 @@ function CHARINFO:TryRegisterPage()
 		for i = 1, #order do
 			local id = order[i]
 			if not pinned[id] then
-				local freeRow = AceGUI:Create("SimpleGroup")
-				freeRow:SetFullWidth(true)
-				freeRow:SetLayout("Flow")
-				contentRow:AddChild(freeRow)
+				renderQueue[#renderQueue + 1] = function()
+					local freeRow = AceGUI:Create("SimpleGroup")
+					freeRow:SetFullWidth(true)
+					freeRow:SetLayout("Flow")
+					contentRow:AddChild(freeRow)
 
-				local freeCol = AceGUI:Create("SimpleGroup")
-				freeCol:SetLayout("List")
-				freeCol:SetFullWidth(true)
-				freeRow:AddChild(freeCol)
+					local freeCol = AceGUI:Create("SimpleGroup")
+					freeCol:SetLayout("List")
+					freeCol:SetFullWidth(true)
+					freeRow:AddChild(freeCol)
 
-				RenderCardInto(freeCol, id)
+					RenderCardInto(freeCol, id)
+				end
 			end
 		end
 
-		if C_Timer and type(C_Timer.After) == "function" then
-			C_Timer.After(0, function()
-				if scroller and type(scroller.DoLayout) == "function" then scroller:DoLayout() end
-				if outer and type(outer.DoLayout) == "function" then outer:DoLayout() end
-			end)
-		end
+		StartUIBuildQueue(renderQueue, scroller, outer)
 
 		CHARINFO:StartUIDataTicker({
 			from = ctxFrom or "charinfo",
@@ -3459,6 +3651,7 @@ end
 
 function CHARINFO:OnDisable()
 	StopUIDataTicker()
+	StopContextSyncQueue()
 	StopRaidWaitAnimTicker()
 	if self._ticker then
 		local ticker = self._ticker

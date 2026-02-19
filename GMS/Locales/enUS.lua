@@ -62,6 +62,8 @@ GMS:RegisterLocale("enUS", {
 	UI_CMD_OPEN_HELP = "Opens the GMS UI (/gms ui [page])",
 	UI_DOCK_DASHBOARD_TOOLTIP = "Shows the addon dashboard",
 	UI_DOCK_SETTINGS_TOOLTIP = "Settings",
+	UI_FOOTER_MEM_FMT = "GMS: %.1f MB (%.1f%%)",
+	UI_FOOTER_MEM_UNAVAILABLE = "Memory: n/a",
 
 	LOGS_HEADER_TITLE = "Logging Console",
 	LOGS_FILTER = "Filter:",

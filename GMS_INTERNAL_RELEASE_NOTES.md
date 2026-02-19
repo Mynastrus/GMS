@@ -18,10 +18,24 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [ ] (noch keine Eintraege)
 
 ### Changed
-- [ ] (noch keine Eintraege)
+- [x] CharInfo auf gestaffeltes UI-Rendering umgestellt (frameweise Card-Build, Build-Token-Abbruch) zur Reduktion von UI-Spikes beim Seitenaufbau.  
+  Dateien: `GMS/Modules/CharInfo.lua`
+- [x] Logs-UI auf inkrementelles Update umgestellt: neue Einträge werden oben angefügt statt Voll-Rebuild bei jeder Änderung; Voll-Render bleibt für Filter/Resize/Initial.  
+  Dateien: `GMS/Core/Logs.lua`
+- [x] UI-Footer um Live-Metrik erweitert und auf GMS-spezifische Anzeige reduziert (`GMS MB` + Prozentanteil am gesamten Addon-Speicher).  
+  Dateien: `GMS/Core/UI.lua`, `GMS/Locales/enUS.lua`, `GMS/Locales/deDE.lua`
+- [x] Comm/Roster-Dispatch entkoppelt (asynchrone Listener-/Chunk-Verarbeitung, batchweise Hydrierung) und Missing-Domain-Fetches weiter gestaffelt.  
+  Dateien: `GMS/Core/Comm.lua`, `GMS/Modules/Roster.lua`
 
 ### Fixed
-- [ ] (noch keine Eintraege)
+- [x] CharInfo-Context-Sync reduziert auf einmaligen Bootstrap-Request pro Ziel/Öffnung, um Request-Bursts und Whisper-Spam zu vermeiden.  
+  Dateien: `GMS/Modules/CharInfo.lua`
+- [x] Mythic+-Portalprüfung in CharInfo auf feste mapId->spellId-Mappings + tatsächliche Spellbook/Known-Checks umgestellt; Name-/Spellbook-Fallback entfernt.  
+  Dateien: `GMS/Modules/CharInfo.lua`
+- [x] Equipment-Lag bei Gear-Wechsel reduziert: slotbasierter Teilsync statt Vollscan pro Event, plus sanftere Scan-Batches.  
+  Dateien: `GMS/Modules/Equipment.lua`
+- [x] UI-Footer-Metrik robust gemacht (kein Nil-Call mehr auf Gesamt-AddOn-Memory-Berechnung im Laufzeitpfad).  
+  Dateien: `GMS/Core/UI.lua`
 
 ### Rules/Infra
 - [ ] (noch keine Eintraege)

@@ -43,6 +43,11 @@ local UISpecialFrames            = UISpecialFrames
 local GameFontNormalOutline      = GameFontNormalOutline
 local GameFontNormalLarge        = GameFontNormalLarge
 local GameFontNormalSmallOutline = GameFontNormalSmallOutline
+local C_Timer                    = C_Timer
+local UpdateAddOnMemoryUsage     = UpdateAddOnMemoryUsage
+local GetAddOnMemoryUsage        = GetAddOnMemoryUsage
+local GetNumAddOns               = GetNumAddOns
+local GetAddOnInfo               = GetAddOnInfo
 ---@diagnostic enable: undefined-global
 
 -- ###########################################################################
@@ -54,7 +59,7 @@ local METADATA = {
 	INTERN_NAME  = "UI",
 	SHORT_NAME   = "UI",
 	DISPLAY_NAME = "Guild Management System",
-	VERSION      = "1.0.7",
+	VERSION      = "1.0.9",
 }
 
 -- ###########################################################################
@@ -137,6 +142,8 @@ UI._headerContent     = UI._headerContent or nil -- SimpleGroup (wird von außen
 UI._footerContent     = UI._footerContent or nil -- SimpleGroup (wird von außen befüllt)
 UI._statusLabelWidget = UI._statusLabelWidget or nil -- AceGUI Label widget (optional)
 UI._statusLabelFS     = UI._statusLabelFS or nil -- FontString für farbige Codes (optional)
+UI._footerMetricsFS   = UI._footerMetricsFS or nil -- Right aligned metrics text
+UI._metricsTicker     = UI._metricsTicker or nil
 
 local DEFAULTS = {
 	profile = {
@@ -187,6 +194,48 @@ local function CopyTableSafe(src)
 		end
 	end
 	return out
+end
+
+local function ToMB(kb)
+	local n = tonumber(kb or 0) or 0
+	if n < 0 then n = 0 end
+	return n / 1024
+end
+
+local function ResolveGMSMemoryKB()
+	if type(UpdateAddOnMemoryUsage) == "function" then
+		pcall(UpdateAddOnMemoryUsage)
+	end
+	if type(GetAddOnMemoryUsage) ~= "function" then
+		return nil
+	end
+
+	local byName = tonumber(GetAddOnMemoryUsage("GMS") or 0) or 0
+	if byName > 0 then
+		return byName
+	end
+
+	if type(GetNumAddOns) == "function" and type(GetAddOnInfo) == "function" then
+		for i = 1, GetNumAddOns() do
+			local name = GetAddOnInfo(i)
+			if tostring(name or "") == "GMS" then
+				return tonumber(GetAddOnMemoryUsage(i) or 0) or 0
+			end
+		end
+	end
+
+	return tonumber(GetAddOnMemoryUsage("GMS") or 0) or 0
+end
+
+local function ResolveTotalAddOnMemoryKB()
+	if type(GetNumAddOns) ~= "function" or type(GetAddOnMemoryUsage) ~= "function" then
+		return nil
+	end
+	local total = 0
+	for i = 1, GetNumAddOns() do
+		total = total + (tonumber(GetAddOnMemoryUsage(i) or 0) or 0)
+	end
+	return total
 end
 
 -- UI options (migrated to RegisterModuleOptions API)
@@ -304,6 +353,62 @@ function UI:Footer_Clear()
 end
 
 -- Status-Text: nutzt FontString (für Farbcodes), aber hängt als Label im FooterContent
+function UI:StopFooterMetricsTicker()
+	local t = self._metricsTicker
+	if t and type(t.Cancel) == "function" then
+		pcall(function() t:Cancel() end)
+	end
+	self._metricsTicker = nil
+end
+
+function UI:UpdateFooterMetrics()
+	local fs = self._footerMetricsFS
+	if not fs or type(fs.SetText) ~= "function" then
+		return
+	end
+
+	local addonKb = ResolveGMSMemoryKB()
+	local totalKb = nil
+	if type(GetNumAddOns) == "function" and type(GetAddOnMemoryUsage) == "function" then
+		totalKb = 0
+		for i = 1, GetNumAddOns() do
+			totalKb = totalKb + (tonumber(GetAddOnMemoryUsage(i) or 0) or 0)
+		end
+	end
+
+	local text
+	if addonKb == nil then
+		text = (type(GMS.T) == "function" and GMS:T("UI_FOOTER_MEM_UNAVAILABLE")) or "Memory: n/a"
+	else
+		local addonMb = ToMB(addonKb)
+		local pct = 0
+		if totalKb and totalKb > 0 then
+			pct = (addonKb / totalKb) * 100
+		end
+		text = (type(GMS.T) == "function" and GMS:T("UI_FOOTER_MEM_FMT", addonMb, pct))
+			or string.format("GMS: %.1f MB (%.1f%%)", addonMb, pct)
+	end
+
+	fs:SetText("|cff8fb3ff" .. tostring(text or "") .. "|r")
+end
+
+function UI:StartFooterMetricsTicker()
+	if self._metricsTicker then
+		return
+	end
+	self:UpdateFooterMetrics()
+	if not C_Timer or type(C_Timer.NewTicker) ~= "function" then
+		return
+	end
+	self._metricsTicker = C_Timer.NewTicker(1.0, function()
+		if not UI._frame or not UI._frame:IsShown() then
+			UI:StopFooterMetricsTicker()
+			return
+		end
+		UI:UpdateFooterMetrics()
+	end)
+end
+
 function UI:SetStatusText(msg)
 	msg = tostring(msg or "")
 	if not AceGUI then return end
@@ -861,6 +966,13 @@ function UI:CreateFrame()
 	content_footer:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 0)
 	content_footer:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 0)
 
+	local metricsFS = content_footer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmallOutline")
+	metricsFS:SetPoint("RIGHT", content_footer, "RIGHT", -2, -1)
+	metricsFS:SetJustifyH("RIGHT")
+	metricsFS:SetJustifyV("MIDDLE")
+	metricsFS:SetText("")
+	UI._footerMetricsFS = metricsFS
+
 	-- Register frames in UI state
 	UI._headerFrame = content_header
 	UI._footerFrame = content_footer
@@ -880,6 +992,7 @@ function UI:CreateFrame()
 	if UI._footerContent then
 		UI:SetStatusText((type(GMS.T) == "function" and GMS:T("UI_STATUS_READY")) or "Status: ready")
 	end
+	UI:UpdateFooterMetrics()
 
 	-- Background fürs Content (wie gehabt)
 	local bg = content:CreateTexture(nil, "BACKGROUND")
@@ -911,6 +1024,7 @@ function UI:CreateFrame()
 
 	f:SetScript("OnShow", function()
 		UI:SetIconFallback()
+		UI:StartFooterMetricsTicker()
 		UI:RightDockEnsure(f)
 
 		if not UI._rightDockSeeded then
@@ -925,6 +1039,7 @@ function UI:CreateFrame()
 	end)
 
 	f:SetScript("OnHide", function()
+		UI:StopFooterMetricsTicker()
 		UI:SaveWindowState()
 	end)
 

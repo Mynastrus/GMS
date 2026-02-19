@@ -59,7 +59,7 @@ local METADATA = {
 	INTERN_NAME  = "LOGS",
 	SHORT_NAME   = "Logs",
 	DISPLAY_NAME = "Logging Console",
-	VERSION      = "1.4.7",
+	VERSION      = "1.4.9",
 }
 
 -- ###########################################################################
@@ -160,10 +160,14 @@ LOGS._slashRegistered = false
 
 LOGS._ticker = nil
 LOGS._volatileProfile = nil
+LOGS._uiRenderToken = 0
 
 -- Notify batching (avoid ingest per log line)
 LOGS._notifyPending = false
 LOGS._notifyScheduled = false
+
+local LOGS_UI_RENDER_DELAY = 0.02
+local LOGS_UI_RENDER_BATCH = 25
 
 -- ###########################################################################
 -- #	HELPERS
@@ -1200,6 +1204,7 @@ function GMS:Logs_Clear()
 	LOGS._entries = p.entries
 	if LOGS._db then LOGS._db.profile.entries = LOGS._entries end
 	markProfileDirty(p)
+	LOGS._uiRenderToken = (tonumber(LOGS._uiRenderToken) or 0) + 1
 
 	-- optional: ingest cursor bleibt (damit wir nicht alles erneut reinziehen)
 	if LOGS._ui and LOGS._ui.scroller then
@@ -1831,27 +1836,25 @@ local function RegisterLogsUI()
 		scroller:SetFullHeight(true)
 		root:AddChild(scroller)
 
-		local function RenderAll()
-			LOGS:IngestGlobalBuffer()
-
-			scroller:ReleaseChildren()
-			local entries = LOGS._entries or {}
-			local contentWidth = (scroller.content and scroller.content.GetWidth and scroller.content:GetWidth()) or
+		local function ResolveContentWidth()
+			local width = (scroller.content and scroller.content.GetWidth and scroller.content:GetWidth()) or
 				(scroller.frame and scroller.frame.GetWidth and scroller.frame:GetWidth()) or
 				(root and root.frame and root.frame.GetWidth and root.frame:GetWidth()) or 900
-			contentWidth = math.max(520, contentWidth - 24)
-			local visibleCount = 0
-			local totalCount = #entries
+			return math.max(520, width - 24)
+		end
+
+		local function ResolveVisibleCount(entries)
+			local count = 0
 			for i = #entries, 1, -1 do
 				local e = entries[i]
 				if e and isEntryVisible(e) then
-					visibleCount = visibleCount + 1
-					scroller:AddChild(BuildLogRow(e, contentWidth))
+					count = count + 1
 				end
 			end
-			if scroller and type(scroller.DoLayout) == "function" then
-				scroller:DoLayout()
-			end
+			return count
+		end
+
+		local function ApplyStatus(visibleCount, totalCount)
 			if type(LOGS._updateSourceButtonText) == "function" then
 				pcall(LOGS._updateSourceButtonText)
 			end
@@ -1860,13 +1863,112 @@ local function RegisterLogsUI()
 			end
 		end
 
+		local function RenderAll()
+			LOGS:IngestGlobalBuffer()
+
+			scroller:ReleaseChildren()
+			local entries = LOGS._entries or {}
+			local contentWidth = ResolveContentWidth()
+			local visibleEntries = {}
+			local totalCount = #entries
+			for i = #entries, 1, -1 do
+				local e = entries[i]
+				if e and isEntryVisible(e) then
+					visibleEntries[#visibleEntries + 1] = e
+				end
+			end
+			local visibleCount = #visibleEntries
+			LOGS._uiRenderToken = (tonumber(LOGS._uiRenderToken) or 0) + 1
+			local token = LOGS._uiRenderToken
+			local idx = 1
+
+			local function Finalize()
+				if token ~= LOGS._uiRenderToken then return end
+				if scroller and type(scroller.DoLayout) == "function" then
+					scroller:DoLayout()
+				end
+				if LOGS._ui then
+					LOGS._ui.contentWidth = contentWidth
+					LOGS._ui.visibleCount = visibleCount
+					LOGS._ui.totalCount = totalCount
+				end
+				ApplyStatus(visibleCount, totalCount)
+			end
+
+			local function Step()
+				if token ~= LOGS._uiRenderToken then
+					return
+				end
+				local budget = tonumber(LOGS_UI_RENDER_BATCH) or 25
+				if budget < 1 then budget = 1 end
+
+				while budget > 0 and idx <= visibleCount do
+					scroller:AddChild(BuildLogRow(visibleEntries[idx], contentWidth))
+					idx = idx + 1
+					budget = budget - 1
+				end
+
+				if scroller and type(scroller.DoLayout) == "function" then
+					scroller:DoLayout()
+				end
+
+				if idx <= visibleCount then
+					if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+						C_Timer.After(tonumber(LOGS_UI_RENDER_DELAY) or 0.02, Step)
+					else
+						while idx <= visibleCount and token == LOGS._uiRenderToken do
+							scroller:AddChild(BuildLogRow(visibleEntries[idx], contentWidth))
+							idx = idx + 1
+						end
+						Finalize()
+					end
+					return
+				end
+
+				Finalize()
+			end
+
+			Step()
+		end
+
 		local function PrependEntry(entry)
 			if not scroller or not scroller.children then
 				RenderAll()
 				return
 			end
-			-- Always do a full re-render to keep column widths and line layout in sync.
-			RenderAll()
+
+			local width = (LOGS._ui and tonumber(LOGS._ui.contentWidth)) or ResolveContentWidth()
+			local row = BuildLogRow(entry, width)
+			scroller:AddChild(row)
+
+			local children = scroller.children
+			if type(children) == "table" and #children > 1 then
+				local last = table.remove(children, #children)
+				table.insert(children, 1, last)
+			end
+
+			local entries = LOGS._entries or {}
+			local totalCount = #entries
+			local visibleCount = ResolveVisibleCount(entries)
+
+			local childrenCount = (type(children) == "table" and #children) or 0
+			while type(children) == "table" and childrenCount > visibleCount do
+				local tail = table.remove(children, childrenCount)
+				if tail and type(tail.Release) == "function" then
+					pcall(function() tail:Release() end)
+				end
+				childrenCount = childrenCount - 1
+			end
+
+			if scroller and type(scroller.DoLayout) == "function" then
+				scroller:DoLayout()
+			end
+			if LOGS._ui then
+				LOGS._ui.contentWidth = width
+				LOGS._ui.visibleCount = visibleCount
+				LOGS._ui.totalCount = totalCount
+			end
+			ApplyStatus(visibleCount, totalCount)
 		end
 
 		LOGS._ui = {

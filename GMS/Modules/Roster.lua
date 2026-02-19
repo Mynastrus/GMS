@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.1.0",
+	VERSION      = "1.1.6",
 }
 
 local LibStub = LibStub
@@ -154,6 +154,13 @@ local REQUIRED_SYNC_DOMAINS = {
 	raid = "RAIDS_V1",
 	mythicplus = "MYTHICPLUS_V1",
 }
+
+local META_HEARTBEAT_MIN_INTERVAL = 30
+local META_HEARTBEAT_FORCE_MIN_INTERVAL = 15
+local META_LEGACY_BROADCAST_INTERVAL = 90
+local ACCOUNT_HEARTBEAT_MIN_INTERVAL = 120
+local META_HELLO_ANN_MIN_INTERVAL = 180
+local META_HELLO_RESP_MIN_INTERVAL = 120
 
 -- ###########################################################################
 -- #	NAME NORMALIZATION
@@ -784,55 +791,22 @@ function Roster:SetMemberMeta(guid, meta, seenAt, opts)
 	return true
 end
 
-local function GetBestDomainRecordMeta(targetGuid, syncDomain)
-	local guid = tostring(targetGuid or "")
-	local domain = tostring(syncDomain or "")
-	if guid == "" or domain == "" then return nil end
-	local comm = GMS and GMS.Comm or nil
-	if type(comm) ~= "table" or type(comm.GetRecordsByDomain) ~= "function" then
-		return nil
-	end
-	local records = comm:GetRecordsByDomain(domain)
-	if type(records) ~= "table" then return nil end
-	local best = nil
-	local bestTs = -1
-	local bestSeq = -1
-	for i = 1, #records do
-		local rec = records[i]
-		if type(rec) == "table" then
-			local originGuid = tostring(rec.originGUID or "")
-			local charGuid = tostring(rec.charGUID or "")
-			if originGuid == guid or charGuid == guid then
-				local ts = tonumber(rec.updatedAt or 0) or 0
-				local seq = tonumber(rec.seq or 0) or 0
-				if ts > bestTs or (ts == bestTs and seq > bestSeq) then
-					bestTs = ts
-					bestSeq = seq
-					best = rec
-				end
-			end
-		end
-	end
-	if type(best) ~= "table" then return nil end
-	return {
-		ts_server = tonumber(best.updatedAt or 0) or 0,
-		source_guid = tostring(best.originGUID or ""),
-		is_self_report = tostring(best.originGUID or "") == guid,
-	}
-end
-
 function Roster:GetRequiredDomainStatusForGuid(guid)
 	local g = tostring(guid or "")
 	if g == "" then return {} end
 	local out = {}
-	for key, syncDomain in pairs(REQUIRED_SYNC_DOMAINS) do
-		local meta = GetBestDomainRecordMeta(g, syncDomain)
-		if type(meta) == "table" then
-			out[key] = meta
-		end
-	end
 	local row = self:GetMemberMeta(g)
 	if type(row) == "table" and type(row._freshness) == "table" then
+		for key in pairs(REQUIRED_SYNC_DOMAINS) do
+			local f = row._freshness[key]
+			if type(f) == "table" then
+				out[key] = {
+					ts_server = tonumber(f.ts_server or 0) or 0,
+					source_guid = tostring(f.source_guid or g),
+					is_self_report = f.is_self_report == true,
+				}
+			end
+		end
 		local f = row._freshness.roster_meta
 		if type(f) == "table" then
 			out.roster_meta = {
@@ -1122,6 +1096,7 @@ function Roster:_ProcessSyncNeedRequest(req)
 	reqTbl.state = type(reqTbl.state) == "table" and reqTbl.state or {}
 	local missing = type(reqTbl.missing) == "table" and reqTbl.missing or {}
 	local have = type(reqTbl.have) == "table" and reqTbl.have or {}
+	local startedFetch = false
 
 	for i = 1, #missing do
 		local d = tostring(missing[i] or "")
@@ -1158,8 +1133,8 @@ function Roster:_ProcessSyncNeedRequest(req)
 				state.candidates = list
 				if #list <= 0 then
 					state.done = true
-				else
-					self:_TryFetchFromCandidate(reqTbl, d)
+				elseif not startedFetch then
+					startedFetch = self:_TryFetchFromCandidate(reqTbl, d) or startedFetch
 				end
 			end
 		end
@@ -1278,12 +1253,16 @@ function Roster:RequestMissingDomainsForGuid(guid, reason)
 	if targetGuid == selfGuid then return false end
 	if not IsInGuild or not IsInGuild() then return false end
 
-	local missing = self:GetMissingRequiredDomainsForGuid(targetGuid)
-	if #missing <= 0 then return false end
-
 	local nowTs = (GetTime and GetTime()) or 0
 	local last = tonumber(self._syncNeedCooldown[targetGuid] or 0) or 0
 	if (nowTs - last) < 30 then
+		return false
+	end
+
+	local missing = self:GetMissingRequiredDomainsForGuid(targetGuid)
+	if #missing <= 0 then
+		-- Short cooldown to avoid hot-loop checks for already-complete targets.
+		self._syncNeedCooldown[targetGuid] = nowTs - 20
 		return false
 	end
 	self._syncNeedCooldown[targetGuid] = nowTs
@@ -1316,7 +1295,8 @@ end
 
 function Roster:BroadcastMetaHeartbeat(force)
 	local nowTs = (GetTime and GetTime()) or 0
-	if not force and (nowTs - (self._lastMetaHeartbeat or 0)) < 10 then
+	local minInterval = force and META_HEARTBEAT_FORCE_MIN_INTERVAL or META_HEARTBEAT_MIN_INTERVAL
+	if (nowTs - (self._lastMetaHeartbeat or 0)) < minInterval then
 		return false
 	end
 
@@ -1359,28 +1339,37 @@ function Roster:BroadcastMetaHeartbeat(force)
 		})
 	end
 
-	comm:SendData("ROSTER_META", {
-		op = force and "ANN" or "UPD",
-		guid = guid,
-		name = payload.name,
-		realm = payload.realm,
-		name_full = payload.name_full,
-		level = payload.level,
-		class = payload.class,
-		classFile = payload.classFile,
-		race = payload.race,
-		faction = payload.faction,
-		version = payload.version,
-		ilvl = payload.ilvl,
-		mplus = payload.mythicplus or payload.mplus,
-		mythicplus = payload.mythicplus or payload.mplus,
-		raid = payload.raid,
-		best_in_raid = payload.best_in_raid,
-		ts = tsServer,
-		ts_server = tsServer,
-	}, "BULK", "GUILD")
+	local lastLegacy = tonumber(self._lastLegacyMetaBroadcast or 0) or 0
+	local shouldSendLegacy = force or ((nowTs - lastLegacy) >= META_LEGACY_BROADCAST_INTERVAL)
+	if shouldSendLegacy then
+		local canAnnounce = false
+		if force then
+			local lastAnn = tonumber(self._lastHelloAnnounceAt or 0) or 0
+			if (nowTs - lastAnn) >= META_HELLO_ANN_MIN_INTERVAL then
+				canAnnounce = true
+				self._lastHelloAnnounceAt = nowTs
+			end
+		end
+		comm:SendData("ROSTER_META", {
+			op = canAnnounce and "ANN" or "UPD",
+			guid = guid,
+			version = payload.version,
+			ilvl = payload.ilvl,
+			mplus = payload.mythicplus or payload.mplus,
+			mythicplus = payload.mythicplus or payload.mplus,
+			raid = payload.raid,
+			best_in_raid = payload.best_in_raid,
+			ts = tsServer,
+			ts_server = tsServer,
+		}, "BULK", "GUILD")
+		self._lastLegacyMetaBroadcast = nowTs
+	end
 
-	self:PublishLocalAccountLinks("roster-heartbeat", false)
+	local lastAccountBeat = tonumber(self._lastAccountHeartbeatPublish or 0) or 0
+	if force or ((nowTs - lastAccountBeat) >= ACCOUNT_HEARTBEAT_MIN_INTERVAL) then
+		self:PublishLocalAccountLinks("roster-heartbeat", false)
+		self._lastAccountHeartbeatPublish = nowTs
+	end
 
 	self._lastMetaHeartbeat = nowTs
 	return true
@@ -1443,19 +1432,20 @@ function Roster:InitCommMetaSync()
 		if op == "ANN" and senderName ~= "" then
 			local selfGuid = tostring((type(UnitGUID) == "function" and UnitGUID("player")) or "")
 			if selfGuid ~= "" and selfGuid ~= guid then
+				Roster._helloRespAt = type(Roster._helloRespAt) == "table" and Roster._helloRespAt or {}
+				local respKey = tostring(guid)
+				local nowTs = (GetTime and GetTime()) or 0
+				local lastResp = tonumber(Roster._helloRespAt[respKey] or 0) or 0
+				if (nowTs - lastResp) < META_HELLO_RESP_MIN_INTERVAL then
+					return
+				end
+				Roster._helloRespAt[respKey] = nowTs
+
 				local resp = CollectLocalMetaPayload()
 				local respTs = tonumber(resp.ts_server) or (type(GetServerTime) == "function" and tonumber(GetServerTime()) or 0) or 0
 				comm:SendData("ROSTER_META", {
 					op = "RESP",
 					guid = selfGuid,
-					name = resp.name,
-					realm = resp.realm,
-					name_full = resp.name_full,
-					level = resp.level,
-					class = resp.class,
-					classFile = resp.classFile,
-					race = resp.race,
-					faction = resp.faction,
 					version = resp.version,
 					ilvl = resp.ilvl,
 					mplus = resp.mythicplus or resp.mplus,
@@ -1575,18 +1565,8 @@ function Roster:InitCommMetaSync()
 	end
 
 	if type(comm.GetRecordsByDomain) == "function" then
-		local function HydrateDomain(domain, fn)
-			local records = comm:GetRecordsByDomain(domain)
-			if type(records) ~= "table" then return end
-			for i = 1, #records do
-				local rec = records[i]
-				if type(rec) == "table" then
-					pcall(fn, rec)
-				end
-			end
-		end
-
-		HydrateDomain("roster_meta", function(record)
+		local hydrateHandlers = {}
+		hydrateHandlers[#hydrateHandlers + 1] = { domain = "roster_meta", fn = function(record)
 			local payload = record.payload
 			if type(payload) ~= "table" then return end
 			Roster:SetMemberMeta(record.originGUID, {
@@ -1608,9 +1588,9 @@ function Roster:InitCommMetaSync()
 				sourceGUID = record.originGUID,
 				isSelfReport = (tostring(record.originGUID or "") == tostring(record.charGUID or "")),
 			})
-		end)
+		end }
 
-		HydrateDomain("EQUIPMENT_V1", function(record)
+		hydrateHandlers[#hydrateHandlers + 1] = { domain = "EQUIPMENT_V1", fn = function(record)
 			local payload = record.payload
 			if type(payload) ~= "table" or type(payload.snapshot) ~= "table" then return end
 			local ilvl = BuildItemLevelFromEquipmentSnapshot(payload.snapshot)
@@ -1621,9 +1601,9 @@ function Roster:InitCommMetaSync()
 					isSelfReport = (tostring(record.originGUID or "") == tostring(record.charGUID or "")),
 				})
 			end
-		end)
+		end }
 
-		HydrateDomain("MYTHICPLUS_V1", function(record)
+		hydrateHandlers[#hydrateHandlers + 1] = { domain = "MYTHICPLUS_V1", fn = function(record)
 			local payload = record.payload
 			if type(payload) ~= "table" then return end
 			local mplus = tonumber(payload.score)
@@ -1634,9 +1614,9 @@ function Roster:InitCommMetaSync()
 					isSelfReport = (tostring(record.originGUID or "") == tostring(record.charGUID or "")),
 				})
 			end
-		end)
+		end }
 
-		HydrateDomain("RAIDS_V1", function(record)
+		hydrateHandlers[#hydrateHandlers + 1] = { domain = "RAIDS_V1", fn = function(record)
 			local payload = record.payload
 			if type(payload) ~= "table" or type(payload.raids) ~= "table" then return end
 			local raid = BuildRaidStatusFromRaidsStore(payload.raids)
@@ -1647,9 +1627,9 @@ function Roster:InitCommMetaSync()
 					isSelfReport = (tostring(record.originGUID or "") == tostring(record.charGUID or "")),
 				})
 			end
-		end)
+		end }
 
-		HydrateDomain("ACCOUNT_CHARS_V1", function(record)
+		hydrateHandlers[#hydrateHandlers + 1] = { domain = "ACCOUNT_CHARS_V1", fn = function(record)
 			Roster:SetMemberMeta(record.originGUID, {}, record.updatedAt or ((GetTime and GetTime()) or 0), {
 				domain = "account",
 				sourceGUID = record.originGUID,
@@ -1660,13 +1640,58 @@ function Roster:InitCommMetaSync()
 				sourceGUID = record.originGUID,
 				isSelfReport = (tostring(record.originGUID or "") == tostring(record.charGUID or "")),
 			})
-		end)
+		end }
+
+		local function HydrateInBatches()
+			local queue = {}
+			for i = 1, #hydrateHandlers do
+				local def = hydrateHandlers[i]
+				local records = comm:GetRecordsByDomain(def.domain)
+				if type(records) == "table" and #records > 0 then
+					queue[#queue + 1] = {
+						records = records,
+						fn = def.fn,
+						idx = 1,
+					}
+				end
+			end
+			if #queue <= 0 then return end
+
+			local function Step()
+				local budget = 20
+				while budget > 0 and #queue > 0 do
+					local head = queue[1]
+					local rec = head.records[head.idx]
+					if type(rec) == "table" then
+						pcall(head.fn, rec)
+					end
+					head.idx = head.idx + 1
+					budget = budget - 1
+					if head.idx > #head.records then
+						table.remove(queue, 1)
+					end
+				end
+				if #queue > 0 and C_Timer and type(C_Timer.After) == "function" then
+					C_Timer.After(0.02, Step)
+				end
+			end
+
+			if C_Timer and type(C_Timer.After) == "function" then
+				C_Timer.After(0, Step)
+			else
+				while #queue > 0 do
+					Step()
+				end
+			end
+		end
+
+		HydrateInBatches()
 	end
 
 	self._commInited = true
 
 	if not self._commTicker and C_Timer and type(C_Timer.NewTicker) == "function" then
-		self._commTicker = C_Timer.NewTicker(120, function()
+		self._commTicker = C_Timer.NewTicker(240, function()
 			Roster:BroadcastMetaHeartbeat()
 		end)
 	end
