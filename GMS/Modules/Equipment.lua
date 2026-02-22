@@ -52,7 +52,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.13",
+	VERSION      = "1.3.14",
 }
 
 -- ###########################################################################
@@ -345,7 +345,15 @@ end
 local INV_SLOTS = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }
 
 local function _getPlayerGuid()
-	return UnitGUID and UnitGUID("player") or nil
+	local guid = UnitGUID and UnitGUID("player") or nil
+	if type(guid) == "string" and guid ~= "" then
+		return guid
+	end
+	local charKey = _getCharKey()
+	if type(charKey) == "string" and charKey ~= "" then
+		return charKey
+	end
+	return nil
 end
 
 local function _splitKeepingEmpty(input, sep)
@@ -578,12 +586,21 @@ function EQUIP:SaveSnapshot(snapshot, reason)
 	end
 
 	if not snapshot.guid or snapshot.guid == "" then
-		LOCAL_LOG("WARN", "SaveSnapshot: missing guid")
-		return false
+		local fallbackGuid = _getPlayerGuid()
+		if type(fallbackGuid) == "string" and fallbackGuid ~= "" then
+			snapshot.guid = fallbackGuid
+		else
+			LOCAL_LOG("WARN", "SaveSnapshot: missing guid")
+			return false
+		end
 	end
 
 	if not snapshot.ts then
 		snapshot.ts = _nowEpoch()
+		if not snapshot.ts then
+			local now = tonumber(GetTime and GetTime() or 0) or 0
+			snapshot.ts = math.floor(now)
+		end
 	end
 
 	if type(snapshot.slots) ~= "table" then
@@ -741,6 +758,7 @@ function EQUIP:OnEnable()
 	-- PLAYER_LOGIN may already be gone by the time Ace enables the module.
 	-- Ensure login scans still run on reload/late enable.
 	if IsLoggedIn and IsLoggedIn() then
+		self:_ScheduleScan(1.0, "enable-initial")
 		self:_OnPlayerLogin()
 	end
 

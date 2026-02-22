@@ -35,7 +35,7 @@ local METADATA = {
 	INTERN_NAME  = "ACCOUNTINFO",
 	SHORT_NAME   = "AccountInfo",
 	DISPLAY_NAME = "Account Information",
-	VERSION      = "1.0.9",
+	VERSION      = "1.0.10",
 }
 
 local ACCOUNT_CHARS_SYNC_DOMAIN = "ACCOUNT_CHARS_V1"
@@ -176,21 +176,17 @@ function AccountInfo:PersistProfileSettings()
 	local validChoices = self:GetMainCharacterChoiceMap()
 	if type(validChoices) ~= "table" then validChoices = {} end
 	local hasAnyChoice = (next(validChoices) ~= nil)
-	if validatedMainGuid ~= "" then
-		if validChoices[validatedMainGuid] == nil and hasAnyChoice then
-			validatedMainGuid = ""
-		end
+	if validatedMainGuid ~= "" and validChoices[validatedMainGuid] == nil and hasAnyChoice then
+		-- Keep user-selected GUID if choices are temporarily incomplete (avoid main-char flip on reload).
+		-- It will become visible again once tracking data is present.
+		validatedMainGuid = tostring(opts.mainCharacterGUID or validatedMainGuid)
 	end
 	-- Keep persisted main-character preference whenever possible.
 	if validatedMainGuid == "" and persistedMainGuid ~= "" then
-		if validChoices[persistedMainGuid] ~= nil or not hasAnyChoice then
-			validatedMainGuid = persistedMainGuid
-		end
+		validatedMainGuid = persistedMainGuid
 	end
 	if validatedMainGuid == "" and playerGuid ~= "" then
-		if validChoices[playerGuid] ~= nil or not hasAnyChoice then
-			validatedMainGuid = playerGuid
-		end
+		validatedMainGuid = playerGuid
 	end
 	if validatedMainGuid == "" and hasAnyChoice then
 		for guid in pairs(validChoices) do
@@ -769,6 +765,16 @@ function AccountInfo:PublishLocalAccountLinks(reason, force)
 		opts = GMS:GetModuleOptions(MODULE_NAME)
 	end
 	local mainGuid = type(opts) == "table" and tostring(opts.mainCharacterGUID or "") or ""
+	local persistedMainGuid = ""
+	if type(links.profileSettings) == "table" then
+		persistedMainGuid = tostring(links.profileSettings.mainCharacterGUID or "")
+	end
+	if persistedMainGuid == "" then
+		local fallback = GetAccountProfileFallbackStore()
+		if type(fallback) == "table" then
+			persistedMainGuid = tostring(fallback.mainCharacterGUID or "")
+		end
+	end
 	if mainGuid ~= "" then
 		local exists = false
 		for i = 1, #chars do
@@ -781,37 +787,16 @@ function AccountInfo:PublishLocalAccountLinks(reason, force)
 			mainGuid = ""
 		end
 	end
-	if mainGuid == "" and type(links.profileSettings) == "table" then
-		local storedMain = tostring(links.profileSettings.mainCharacterGUID or "")
-		if storedMain ~= "" then
-			for i = 1, #chars do
-				if tostring(chars[i].guid or "") == storedMain then
-					mainGuid = storedMain
-					break
-				end
-			end
-		end
-	end
-	if mainGuid == "" then
-		local fallback = GetAccountProfileFallbackStore()
-		if type(fallback) == "table" then
-			local storedMain = tostring(fallback.mainCharacterGUID or "")
-			if storedMain ~= "" then
-				for i = 1, #chars do
-					if tostring(chars[i].guid or "") == storedMain then
-						mainGuid = storedMain
-						break
-					end
-				end
+	if mainGuid == "" and persistedMainGuid ~= "" then
+		for i = 1, #chars do
+			if tostring(chars[i].guid or "") == persistedMainGuid then
+				mainGuid = persistedMainGuid
+				break
 			end
 		end
 	end
 	if mainGuid == "" then
 		mainGuid = guid
-	end
-	if type(opts) == "table" and tostring(opts.mainCharacterGUID or "") ~= mainGuid then
-		opts.mainCharacterGUID = mainGuid
-		self:PersistProfileSettings()
 	end
 	local mainName = ""
 	for i = 1, #chars do
@@ -1291,7 +1276,6 @@ end
 function AccountInfo:OnEnable()
 	self:InitializeOptions()
 	self:RestoreProfileSettings()
-	self:PersistProfileSettings()
 	self:HydrateSyncedAccountStoreFromComm(true)
 	local comm = GMS and GMS.Comm
 	if type(comm) == "table" and type(comm.RegisterRecordListener) == "function" then

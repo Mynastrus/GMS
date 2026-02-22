@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.9",
+	VERSION      = "1.1.10",
 }
 
 local LibStub = LibStub
@@ -1788,32 +1788,61 @@ local function RequestContextBootstrapOnce(guid, reason)
 	return ok
 end
 
-local function NormalizeAccountCharacterRows(rows)
+local function NormalizeAccountCharacterRows(rows, selectedGuid)
 	local out = {}
 	if type(rows) ~= "table" then
 		return out
 	end
+	local selfGuid = tostring(selectedGuid or "")
 
 	for i = 1, #rows do
 		local r = rows[i]
 		if type(r) == "table" then
-			out[#out + 1] = {
-				guid = tostring(r.guid or ""),
-				name_full = tostring(r.name_full or r.name or "-"),
-				level = tonumber(r.level or 0) or 0,
-				class = tostring(r.class or "-"),
-				classFile = tostring(r.classFile or r.classFileName or ""),
-				online = (r.online == true),
-			}
+			local rowGuid = tostring(r.guid or "")
+			if not (rowGuid ~= "" and rowGuid == selfGuid) then
+				local rowName = tostring(r.name_full or r.name or rowGuid or "-")
+				rowName = rowName:gsub("^%s+", ""):gsub("%s+$", "")
+				if rowName == "" then rowName = (rowGuid ~= "" and rowGuid) or "-" end
+
+				local rowClass = tostring(r.class or "-")
+				local rowClassFile = tostring(r.classFile or r.classFileName or "")
+				local rowLevel = tonumber(r.level or 0) or 0
+				local rowOnline = (r.online == true)
+
+				if rowGuid ~= "" then
+					local member = GetRosterMemberByGuid(rowGuid)
+					if type(member) == "table" then
+						local memberName = tostring(member.name_full or member.name or "")
+						memberName = memberName:gsub("^%s+", ""):gsub("%s+$", "")
+						if memberName ~= "" then rowName = memberName end
+						if rowClass == "-" then rowClass = tostring(member.class or rowClass) end
+						if rowClassFile == "" then rowClassFile = tostring(member.classFileName or rowClassFile) end
+						if rowLevel <= 0 then rowLevel = tonumber(member.level or 0) or rowLevel end
+						rowOnline = member.online == true
+					end
+				end
+
+				out[#out + 1] = {
+					guid = rowGuid,
+					name_full = rowName,
+					level = rowLevel,
+					class = rowClass,
+					classFile = rowClassFile,
+					online = rowOnline,
+				}
+			end
 		elseif type(r) == "string" and r ~= "" then
-			out[#out + 1] = {
-				guid = "",
-				name_full = tostring(r),
-				level = 0,
-				class = "-",
-				classFile = "",
-				online = false,
-			}
+			local s = tostring(r):gsub("^%s+", ""):gsub("%s+$", "")
+			if s ~= "" and s ~= selfGuid then
+				out[#out + 1] = {
+					guid = "",
+					name_full = s,
+					level = 0,
+					class = "-",
+					classFile = "",
+					online = false,
+				}
+			end
 		end
 	end
 
@@ -1828,7 +1857,7 @@ local function GetAccountCharactersForGuid(guid)
 	if type(accountInfo) == "table" and type(accountInfo.GetLinkedAccountGuildCharactersForGuid) == "function" then
 		local ok, rows, hasData, source = pcall(accountInfo.GetLinkedAccountGuildCharactersForGuid, accountInfo, g)
 		if ok and type(rows) == "table" then
-			local normalized = NormalizeAccountCharacterRows(rows)
+			local normalized = NormalizeAccountCharacterRows(rows, g)
 			local hasRows = (hasData == true) or (#normalized > 0)
 			return normalized, hasRows, tostring(source or "AccountInfo account guild links")
 		end

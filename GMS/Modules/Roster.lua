@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.1.15",
+	VERSION      = "1.1.17",
 }
 
 local LibStub = LibStub
@@ -684,20 +684,68 @@ local function IsSelfReportForGuid(guid, sourceGuid, explicitFlag)
 	return tostring(guid or "") ~= "" and tostring(guid or "") == tostring(sourceGuid or "")
 end
 
-local function ShouldAcceptDomainUpdate(existing, incomingTs, incomingIsSelf)
+local function BuildLocalAccountGuidSet()
+	local set = {}
+	local selfGuid = tostring((type(UnitGUID) == "function" and UnitGUID("player")) or "")
+	if selfGuid ~= "" then
+		set[selfGuid] = true
+	end
+
+	local ai = GMS and (GMS:GetModule("ACCOUNTINFO", true) or GMS:GetModule("AccountInfo", true)) or nil
+	if type(ai) == "table" and type(ai.GetAccountLinkStore) == "function" then
+		local links = ai:GetAccountLinkStore()
+		local chars = type(links) == "table" and type(links.chars) == "table" and links.chars or nil
+		if type(chars) == "table" then
+			for guid in pairs(chars) do
+				local g = tostring(guid or "")
+				if g ~= "" then set[g] = true end
+			end
+		end
+	end
+	return set
+end
+
+local function ShouldAcceptDomainUpdate(existing, incomingTs, incomingSourceGuid, incomingIsSelf, targetProtectedByLocalAccount, sourceProtectedByLocalAccount)
+	if tonumber(incomingTs or 0) <= 0 then
+		return false
+	end
+	if tostring(incomingSourceGuid or "") == "" then
+		return false
+	end
 	if type(existing) ~= "table" then
+		if targetProtectedByLocalAccount and not sourceProtectedByLocalAccount then
+			return false
+		end
 		return true
 	end
+
 	local oldTs = tonumber(existing.ts_server or 0) or 0
 	local oldSelf = (existing.is_self_report == true)
+	local oldSourceGuid = tostring(existing.source_guid or "")
+
+	if targetProtectedByLocalAccount and not sourceProtectedByLocalAccount then
+		return false
+	end
+
+	if targetProtectedByLocalAccount and sourceProtectedByLocalAccount then
+		-- For own account (incl. twinks): only own-account sources may write.
+		-- Newer-or-equal timestamps from own sources are accepted.
+		return incomingTs >= oldTs
+	end
+
 	if oldSelf and not incomingIsSelf then
 		return false
 	end
 	if incomingIsSelf and not oldSelf then
-		return true
+		return incomingTs >= oldTs
 	end
-	if incomingTs < oldTs then
+
+	-- For foreign GUIDs strictly newer data wins.
+	if incomingTs <= oldTs then
 		return false
+	end
+	if oldSourceGuid ~= "" and oldSourceGuid == tostring(incomingSourceGuid or "") then
+		return true
 	end
 	return true
 end
@@ -746,12 +794,15 @@ function Roster:SetMemberMeta(guid, meta, seenAt, opts)
 	local sourceGuid = tostring(opts.sourceGUID or guid)
 	local domain = tostring(opts.domain or "roster_meta")
 	local isSelfReport = IsSelfReportForGuid(guid, sourceGuid, opts.isSelfReport)
+	local localAccountGuidSet = BuildLocalAccountGuidSet()
+	local targetProtectedByLocalAccount = localAccountGuidSet[tostring(guid or "")] == true
+	local sourceProtectedByLocalAccount = localAccountGuidSet[tostring(sourceGuid or "")] == true
 	store[guid] = store[guid] or {}
 	local row = store[guid]
 	row._freshness = type(row._freshness) == "table" and row._freshness or {}
 
 	local existing = row._freshness[domain]
-	if not ShouldAcceptDomainUpdate(existing, t, isSelfReport) then
+	if not ShouldAcceptDomainUpdate(existing, t, sourceGuid, isSelfReport, targetProtectedByLocalAccount, sourceProtectedByLocalAccount) then
 		return false
 	end
 
@@ -845,23 +896,46 @@ local function GetAccountInfoModule()
 	return GMS and (GMS:GetModule("ACCOUNTINFO", true) or GMS:GetModule("AccountInfo", true)) or nil
 end
 
-local function NormalizeLinkedRows(rows)
+local function NormalizeLinkedRows(rows, selectedGuid)
 	if type(rows) ~= "table" then
 		return {}
 	end
+	local selfGuid = tostring(selectedGuid or "")
 	local out = {}
 	for i = 1, #rows do
 		local r = rows[i]
 		if type(r) == "table" then
-			local nameFull = tostring(r.name_full or r.name or r.guid or "")
-			nameFull = nameFull:gsub("^%s+", ""):gsub("%s+$", "")
-			if nameFull ~= "" then
-				r.name_full = nameFull
-				out[#out + 1] = r
+			local rowGuid = tostring(r.guid or "")
+			if not (rowGuid ~= "" and rowGuid == selfGuid) then
+				local nameFull = tostring(r.name_full or r.name or rowGuid or "")
+				nameFull = nameFull:gsub("^%s+", ""):gsub("%s+$", "")
+				if nameFull ~= "" then
+					local row = {
+						guid = rowGuid,
+						name_full = nameFull,
+						level = tonumber(r.level or 0) or 0,
+						class = tostring(r.class or "-"),
+						classFile = tostring(r.classFile or r.classFileName or ""),
+						online = (r.online == true),
+					}
+					if rowGuid ~= "" and type(Roster.GetMemberByGUID) == "function" then
+						local member = Roster:GetMemberByGUID(rowGuid)
+						if type(member) == "table" then
+							local memberName = tostring(member.name_full or member.name or "")
+							memberName = memberName:gsub("^%s+", ""):gsub("%s+$", "")
+							if memberName ~= "" then row.name_full = memberName end
+							if row.class == "-" then row.class = tostring(member.class or row.class) end
+							if row.classFile == "" then row.classFile = tostring(member.classFileName or row.classFile) end
+							if row.level <= 0 then row.level = tonumber(member.level or 0) or row.level end
+							row.online = member.online == true
+						end
+					end
+					out[#out + 1] = row
+				end
 			end
 		elseif type(r) == "string" and r ~= "" then
 			local nameFull = tostring(r):gsub("^%s+", ""):gsub("%s+$", "")
-			if nameFull ~= "" then
+			if nameFull ~= "" and nameFull ~= selfGuid then
 				out[#out + 1] = {
 					guid = "",
 					name_full = nameFull,
@@ -912,7 +986,7 @@ function Roster:GetLinkedAccountGuildCharactersForGuid(guid)
 	local ai = GetAccountInfoModule()
 	if type(ai) == "table" and type(ai.GetLinkedAccountGuildCharactersForGuid) == "function" then
 		local rows, hasData, source = ai:GetLinkedAccountGuildCharactersForGuid(guid)
-		rows = NormalizeLinkedRows(rows)
+		rows = NormalizeLinkedRows(rows, guid)
 		if hasData == nil then
 			hasData = (#rows > 0)
 		end

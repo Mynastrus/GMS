@@ -47,6 +47,12 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
   Files: `GMS/Modules/AccountInfo.lua`
 - [x] CharInfo header/general normalization hardened for missing/empty values to prevent blank names and invalid zero-level header states.
   Files: `GMS/Modules/CharInfo.lua`
+- [x] Equipment snapshot persistence path hardened for reload timing: guid/ts fallbacks and guaranteed early post-enable scan.
+  Files: `GMS/Modules/Equipment.lua`
+- [x] Unified roster merge policy now enforces strict freshness metadata (`ts_server + domain + source_guid`) and own-account authority for own GUID/twinks.
+  Files: `GMS/Modules/Roster.lua`
+- [x] Linked account character normalization in Roster/CharInfo now enriches names from roster cache and filters self-entries consistently.
+  Files: `GMS/Modules/Roster.lua`, `GMS/Modules/CharInfo.lua`
 
 ### Fixed
 - [x] Repeated Release Notes auto-open on reload mitigated when option-layer seen-version is unstable.
@@ -61,6 +67,10 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
   Files: `GMS/Modules/Roster.lua`, `GMS/Locales/enUS.lua`, `GMS/Locales/deDE.lua`
 - [x] Removed Lua 5.1-incompatible `goto` label in roster linked-row normalization that caused module load warnings.
   Files: `GMS/Modules/Roster.lua`
+- [x] Main-character selection no longer resets to current character during enable/publish cycles when options are temporarily incomplete.
+  Files: `GMS/Modules/AccountInfo.lua`
+- [x] Linked-character panels/tooltips no longer show GUID-only fallback rows when valid roster names are available.
+  Files: `GMS/Modules/Roster.lua`, `GMS/Modules/CharInfo.lua`
 
 ### Rules/Infra
 - [ ] (noch keine Eintraege)
