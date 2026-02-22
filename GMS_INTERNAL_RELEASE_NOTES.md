@@ -28,6 +28,8 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
   Dateien: `GMS/Core/Comm.lua`, `GMS/Modules/Roster.lua`
 - [x] Dashboard-Statusanzeige bereinigt und Footer-Metrik-Textlayout/Typografie auf einheitliche Darstellung mit lokalisierbaren Label-Keys umgestellt.  
   Dateien: `GMS/Core/Dashboard.lua`, `GMS/Core/UI.lua`, `GMS/Locales/enUS.lua`, `GMS/Locales/deDE.lua`
+- [x] Dashboard als echte Status-Startseite erweitert (Ready-Übersicht für Extensions/Module inkl. Versionen), damit der Systemzustand direkt auf der Home-Page sichtbar ist.  
+  Dateien: `GMS/Core/Dashboard.lua`, `GMS/Locales/enUS.lua`, `GMS/Locales/deDE.lua`
 
 ### Fixed
 - [x] CharInfo-Context-Sync reduziert auf einmaligen Bootstrap-Request pro Ziel/Öffnung, um Request-Bursts und Whisper-Spam zu vermeiden.  
@@ -42,6 +44,16 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
   Dateien: `GMS/Modules/CharInfo.lua`
 - [x] UI-CPU-Metrikpfad auf Retail-kompatible API-Reihenfolge erweitert (`C_AddOns.*` bevorzugt, Legacy-Fallback) und Footer-CPU-Berechnung/Fallbacks für stabile Anzeige nachgeschärft.  
   Dateien: `GMS/Core/UI.lua`
+- [x] Account/Twink-Erkennung gehärtet: Account-Links liefern nur noch Daten, wenn der ausgewählte Charakter tatsächlich im verknüpften Account-Datensatz vorhanden ist; falsche Zuordnungen (eigener Char als Referenz für fremde Chars) werden unterbunden.  
+  Dateien: `GMS/Modules/AccountInfo.lua`
+- [x] GuildLog-Persistenz und Laufzeitverhalten stabilisiert: Fallback-Mirroring nach `GMS_Guild_DB` ergänzt sowie Roster-Refresh/Scan-Last deutlich gedrosselt, um Session-Verluste und Lag-Spitzen zu reduzieren.  
+  Dateien: `GMS/Modules/GuildLog.lua`
+- [x] Fehlende Roster-Spalte `Zone` wiederhergestellt (Header + Zellen-Rendering + Lokalisierungskeys), damit der Aufenthaltsort von Spielern direkt in der Liste sichtbar ist.  
+  Dateien: `GMS/Modules/Roster.lua`, `GMS/Locales/enUS.lua`, `GMS/Locales/deDE.lua`
+- [x] Roster-Spaltenausrichtung nach `Zone`-Einführung nachgeschärft: Zonentext wird nun begrenzt (Clipping) und ohne Umbruch gerendert, damit Header und Zeilen wieder synchron bleiben.  
+  Dateien: `GMS/Modules/Roster.lua`
+- [x] CharInfo-Mythic-Karte zeigt nun auch ohne Sync-/Run-Daten die Standard-Mythic+ Dungeons als Platzhalterzeilen, damit die Struktur immer sichtbar bleibt.  
+  Dateien: `GMS/Modules/CharInfo.lua`
 
 ### Rules/Infra
 - [x] Projektregeln erweitert: Retail-First-API-Pflicht (`C_*` bevorzugt, Legacy nur Fallback) sowie verbindliche Beachtung von `GMS_INTERNAL_RELEASE_NOTES.md` und `GMS_PLAYER_SYNC_BASELINE.md`.  

@@ -63,7 +63,7 @@ local METADATA = {
 	INTERN_NAME  = "UI",
 	SHORT_NAME   = "UI",
 	DISPLAY_NAME = "Guild Management System",
-	VERSION      = "1.0.29",
+	VERSION      = "1.0.30",
 }
 
 -- ###########################################################################
@@ -551,8 +551,6 @@ function UI:UpdateFooterMetrics()
 
 	local addonMb = ToMB(addonKb or 0)
 	local labelMem = (type(GMS.T) == "function" and GMS:T("UI_FOOTER_LABEL_MEMORY")) or "Memory:"
-	local labelCpu = (type(GMS.T) == "function" and GMS:T("UI_FOOTER_LABEL_CPU")) or "CPU:"
-	local valueNA = (type(GMS.T) == "function" and GMS:T("UI_FOOTER_VALUE_NA")) or "n/a"
 	local cLabel = "|cff9f9f9f"
 	local cValue = "|cffffffff"
 	local cReset = "|r"
@@ -593,22 +591,18 @@ function UI:UpdateFooterMetrics()
 		self._cpuPrevTotalMs = (totalCpuMs and totalCpuMs > 0) and totalCpuMs or nil
 		self._cpuPrevSampleAt = (sampleAt > 0) and sampleAt or nil
 		text = string.format(
-			"%s%s%s %s%.2f MB%s   %s%s%s %s%.3f%%%s",
+			"%s%s%s %s%.2f MB%s",
 			cLabel, labelMem, cReset,
-			cValue, addonMb, cReset,
-			cLabel, labelCpu, cReset,
-			cValue, cpuPct, cReset
+			cValue, addonMb, cReset
 		)
 	else
 		self._cpuPrevAddonMs = nil
 		self._cpuPrevTotalMs = nil
 		self._cpuPrevSampleAt = nil
 		text = string.format(
-			"%s%s%s %s%.2f MB%s   %s%s%s %s%s%s",
+			"%s%s%s %s%.2f MB%s",
 			cLabel, labelMem, cReset,
-			cValue, addonMb, cReset,
-			cLabel, labelCpu, cReset,
-			cValue, valueNA, cReset
+			cValue, addonMb, cReset
 		)
 	end
 

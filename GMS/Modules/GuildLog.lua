@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "GUILDLOG",
 	SHORT_NAME   = "GuildLog",
 	DISPLAY_NAME = "Guild Log",
-	VERSION      = "1.1.15",
+	VERSION      = "1.1.16",
 }
 
 local LibStub = LibStub
@@ -30,6 +30,8 @@ local IsInGuild = IsInGuild
 local GetNumGuildMembers = GetNumGuildMembers
 local GetGuildRosterInfo = GetGuildRosterInfo
 local GetRealmName = GetRealmName
+local GetGuildInfo = GetGuildInfo
+local UnitFactionGroup = UnitFactionGroup
 local C_GuildInfo = C_GuildInfo
 local GuildRoster = GuildRoster
 local C_Timer = C_Timer
@@ -98,6 +100,9 @@ local OPTIONS_DEFAULTS = {
 
 local UI_RENDER_LIMIT = 300
 local UI_RENDER_CHUNK_SIZE = 40
+local POLL_INTERVAL_SECONDS = 45
+local MIN_REFRESH_INTERVAL_SECONDS = 12
+local MIN_SCAN_INTERVAL_SECONDS = 0.8
 
 local function GetScopedOptions()
 	if type(GMS.InitializeStandardDatabases) == "function" then
@@ -247,6 +252,9 @@ end
 local function ResetPendingPersist()
 	GuildLog._pendingPersist = NewPendingPersistFlags()
 end
+
+local EnsureLegacyGuildBucket
+local MirrorOptionsToLegacy
 
 local function EnsurePendingPersist()
 	local p = GuildLog._pendingPersist
@@ -435,6 +443,13 @@ local function EnsureOptions()
 	else
 		opts = current or {}
 		GuildLog._optionsBound = false
+		local legacy = EnsureLegacyGuildBucket()
+		if type(legacy) == "table" and opts ~= legacy then
+			opts.chatEcho = (legacy.chatEcho == true)
+			opts.maxEntries = ClampMaxEntries(legacy.maxEntries)
+			opts.entries = type(legacy.entries) == "table" and legacy.entries or opts.entries
+			opts.memberHistory = type(legacy.memberHistory) == "table" and legacy.memberHistory or opts.memberHistory
+		end
 	end
 
 	if opts.chatEcho == nil then opts.chatEcho = false end
@@ -461,7 +476,10 @@ local function SyncOptionsToScoped()
 	local opts = EnsureOptionsCompat()
 	if type(opts) ~= "table" then return opts end
 	local scoped = GetScopedOptions()
-	if type(scoped) ~= "table" then return opts end
+	if type(scoped) ~= "table" then
+		MirrorOptionsToLegacy(opts)
+		return opts
+	end
 
 	-- If runtime started in RAM fallback and guild-scoped storage becomes available
 	-- later, merge pending runtime mutations explicitly into persistent scoped data.
@@ -476,6 +494,7 @@ local function SyncOptionsToScoped()
 
 	GuildLog._options = scoped
 	GuildLog._optionsBound = true
+	MirrorOptionsToLegacy(scoped)
 	ResetPendingPersist()
 	return scoped
 end
@@ -497,6 +516,52 @@ local function GetCurrentGuildKeySafe()
 		return tostring(GMS:GetGuildStorageKey() or "")
 	end
 	return ""
+end
+
+local function BuildFallbackGuildKey()
+	local guild = ""
+	if type(GetGuildInfo) == "function" then
+		guild = tostring(GetGuildInfo("player") or "")
+	end
+	if guild == "" then
+		return ""
+	end
+	local realm = (type(GetRealmName) == "function") and tostring(GetRealmName() or "") or ""
+	local faction = (type(UnitFactionGroup) == "function") and tostring(UnitFactionGroup("player") or "") or ""
+	if realm ~= "" and faction ~= "" then
+		return string.format("%s|%s|%s", realm, faction, guild)
+	end
+	return guild
+end
+
+local function GetStableGuildKeyForPersistence()
+	local key = GetCurrentGuildKeySafe()
+	if key ~= "" then
+		return key
+	end
+	return BuildFallbackGuildKey()
+end
+
+EnsureLegacyGuildBucket = function()
+	if type(_G) ~= "table" then return nil end
+	_G.GMS_Guild_DB = type(_G.GMS_Guild_DB) == "table" and _G.GMS_Guild_DB or {}
+	local guildKey = GetStableGuildKeyForPersistence()
+	if guildKey == "" then return nil end
+	_G.GMS_Guild_DB[guildKey] = type(_G.GMS_Guild_DB[guildKey]) == "table" and _G.GMS_Guild_DB[guildKey] or {}
+	local guildBucket = _G.GMS_Guild_DB[guildKey]
+	guildBucket[MODULE_NAME] = type(guildBucket[MODULE_NAME]) == "table" and guildBucket[MODULE_NAME] or {}
+	return guildBucket[MODULE_NAME]
+end
+
+MirrorOptionsToLegacy = function(opts)
+	if type(opts) ~= "table" then return false end
+	local legacy = EnsureLegacyGuildBucket()
+	if type(legacy) ~= "table" then return false end
+	legacy.chatEcho = opts.chatEcho and true or false
+	legacy.maxEntries = ClampMaxEntries(opts.maxEntries)
+	legacy.entries = type(opts.entries) == "table" and opts.entries or {}
+	legacy.memberHistory = type(opts.memberHistory) == "table" and opts.memberHistory or {}
+	return true
 end
 
 local function SetChatEchoPersist(value, sourceTag)
@@ -1175,14 +1240,25 @@ function GuildLog:HasBeenInGuildBefore(guid)
 end
 
 function GuildLog:RequestRosterRefresh()
+	local nowTs = tonumber(GetTime and GetTime() or 0) or 0
+	local lastTs = tonumber(self._lastRosterRefreshAt or 0) or 0
+	if (nowTs - lastTs) < MIN_REFRESH_INTERVAL_SECONDS then
+		return false
+	end
+	self._lastRosterRefreshAt = nowTs
 	if C_GuildInfo and type(C_GuildInfo.GuildRoster) == "function" then
 		C_GuildInfo.GuildRoster()
 	elseif type(GuildRoster) == "function" then
 		GuildRoster()
 	end
+	return true
 end
 
 function GuildLog:ScheduleScan(forceRefresh, immediate)
+	local nowTs = tonumber(GetTime and GetTime() or 0) or 0
+	if not immediate and (nowTs - tonumber(self._lastScanAt or 0)) < MIN_SCAN_INTERVAL_SECONDS then
+		return
+	end
 	if self._scanScheduled and not immediate then return end
 	self._scanScheduled = true
 	self._scanToken = (tonumber(self._scanToken) or 0) + 1
@@ -1195,10 +1271,12 @@ function GuildLog:ScheduleScan(forceRefresh, immediate)
 	if immediate then
 		self._scanScheduled = false
 		self:ScanGuildChanges()
+		self._lastScanAt = tonumber(GetTime and GetTime() or 0) or nowTs
 		if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
 			C_Timer.After(0.35, function()
 				if token ~= GuildLog._scanToken then return end
 				GuildLog:ScanGuildChanges()
+				GuildLog._lastScanAt = tonumber(GetTime and GetTime() or 0) or nowTs
 			end)
 		end
 		return
@@ -1209,15 +1287,18 @@ function GuildLog:ScheduleScan(forceRefresh, immediate)
 			if token ~= GuildLog._scanToken then return end
 			GuildLog._scanScheduled = false
 			GuildLog:ScanGuildChanges()
+			GuildLog._lastScanAt = tonumber(GetTime and GetTime() or 0) or nowTs
 			-- Second pass catches late roster cache updates (e.g. note edits).
 			C_Timer.After(0.60, function()
 				if token ~= GuildLog._scanToken then return end
 				GuildLog:ScanGuildChanges()
+				GuildLog._lastScanAt = tonumber(GetTime and GetTime() or 0) or nowTs
 			end)
 		end)
 	else
 		self._scanScheduled = false
 		self:ScanGuildChanges()
+		self._lastScanAt = tonumber(GetTime and GetTime() or 0) or nowTs
 	end
 end
 
@@ -1524,16 +1605,15 @@ function GuildLog:OnEnable()
 	end
 
 	self:RegisterEvent("GUILD_ROSTER_UPDATE", function()
-		GuildLog:InitializeOptions()
-		GuildLog:ScheduleScan(true, true)
+		GuildLog:ScheduleScan(false, false)
 	end)
 	self:RegisterEvent("PLAYER_GUILD_UPDATE", function()
 		GuildLog:InitializeOptions()
-		GuildLog:ScheduleScan(true)
+		GuildLog:ScheduleScan(true, false)
 	end)
 
 	self:RequestRosterRefresh()
-	self:ScheduleScan(true, true)
+	self:ScheduleScan(false, true)
 
 	-- Retry options binding once after login in case DB became ready late.
 	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
@@ -1561,9 +1641,9 @@ function GuildLog:OnEnable()
 	end
 
 	if not self._pollTicker and type(C_Timer) == "table" and type(C_Timer.NewTicker) == "function" then
-		self._pollTicker = C_Timer.NewTicker(15, function()
+		self._pollTicker = C_Timer.NewTicker(POLL_INTERVAL_SECONDS, function()
 			GuildLog:RequestRosterRefresh()
-			GuildLog:ScheduleScan(false)
+			GuildLog:ScheduleScan(false, false)
 		end)
 	end
 

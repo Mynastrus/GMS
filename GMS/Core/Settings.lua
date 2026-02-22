@@ -26,7 +26,7 @@ local METADATA = {
 	INTERN_NAME  = "SETTINGS",
 	SHORT_NAME   = "Settings",
 	DISPLAY_NAME = "Einstellungen",
-	VERSION      = "1.1.4",
+	VERSION      = "1.1.5",
 }
 
 -- Blizzard Globals
@@ -598,6 +598,13 @@ local function BuildSettingsPage(root, id, isCached)
 	treeGroup:SetFullHeight(true)
 	treeGroup:SetTree(GetTreeData())
 	treeGroup:SetLayout("List")
+	treeGroup:SetStatusTable({
+		groups = {
+			GEN_ROOT = true,
+			EXT_ROOT = true,
+			MOD_ROOT = true,
+		},
+	})
 
 	treeGroup:SetCallback("OnGroupSelected", function(self, _, group)
 		local rawGroup = tostring(group or "")

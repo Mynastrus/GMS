@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.1.6",
+	VERSION      = "1.1.8",
 }
 
 local LibStub = LibStub
@@ -1986,9 +1986,16 @@ end
 -- ---------------------------------------------------------------------------
 local function BuildCell_Zone(row, member, ctx)
 	local ZONE = AceGUI:Create("Label")
-	ZONE:SetText(tostring(member.zone or ""))
+	local zoneText = tostring(member.zone or "")
+	if zoneText == "" then zoneText = "-" end
+	if #zoneText > 24 then
+		zoneText = zoneText:sub(1, 21) .. "..."
+	end
+	ZONE:SetText(zoneText)
 	ZONE.label:SetFontObject(GameFontNormalSmallOutline)
-	ZONE:SetWidth(220)
+	ZONE.label:SetJustifyH("LEFT")
+	ZONE.label:SetWordWrap(false)
+	ZONE:SetWidth(170)
 	row:AddChild(ZONE)
 end
 
@@ -2110,6 +2117,17 @@ local function EnsureDefaultRosterColumnsRegistered()
 		sortable = true,
 		sortKey = "realm",
 		buildCellFn = BuildCell_Realm,
+	})
+
+	Roster:API_RegisterRosterColumnDefinition({
+		id = "zone",
+		title = "Zone",
+		titleKey = "ROSTER_COL_ZONE",
+		width = 170,
+		order = 35,
+		sortable = true,
+		sortKey = "zone",
+		buildCellFn = BuildCell_Zone,
 	})
 
 	Roster:API_RegisterRosterColumnDefinition({

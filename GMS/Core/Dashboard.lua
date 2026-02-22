@@ -33,7 +33,7 @@ local METADATA = {
 	INTERN_NAME  = "DASHBOARD",
 	SHORT_NAME   = "Dashboard",
 	DISPLAY_NAME = "Dashboard",
-	VERSION      = "1.0.1",
+	VERSION      = "1.0.2",
 }
 
 -- ###########################################################################
@@ -84,6 +84,34 @@ local function DT(key, fallback, ...)
 	end
 	return tostring(fallback or key)
 end
+
+local function BuildRegistryRows(kind)
+	local rows = {}
+	local registry = type(GMS.REGISTRY) == "table" and GMS.REGISTRY or nil
+	local source = registry and registry[kind] or nil
+	if type(source) ~= "table" then
+		return rows
+	end
+	for key, entry in pairs(source) do
+		if type(entry) == "table" then
+			local display = ""
+			if type(GMS.ResolveRegistryDisplayName) == "function" then
+				display = tostring(GMS:ResolveRegistryDisplayName(entry, entry.displayName or entry.name or key))
+			else
+				display = tostring(entry.displayName or entry.name or key or "")
+			end
+			rows[#rows + 1] = {
+				name = display ~= "" and display or tostring(key or "-"),
+				version = tostring(entry.version or "-"),
+				ready = type(GMS.IsReady) == "function" and GMS:IsReady(tostring(entry.readyKey or "")) == true,
+			}
+		end
+	end
+	table.sort(rows, function(a, b)
+		return tostring(a.name or "") < tostring(b.name or "")
+	end)
+	return rows
+end
 -- ###########################################################################
 -- #	EXTENSION REGISTRATION
 -- ###########################################################################
@@ -111,7 +139,7 @@ local function RenderDashboard(root, id, isCached)
 	if isCached then return end
 
 	local scroll = AceGUI:Create("ScrollFrame")
-	scroll:SetLayout("Flow")
+	scroll:SetLayout("List")
 	scroll:SetFullWidth(true)
 	scroll:SetFullHeight(true)
 	root:AddChild(scroll)
@@ -120,7 +148,7 @@ local function RenderDashboard(root, id, isCached)
 	local infoGroup = AceGUI:Create("InlineGroup")
 	infoGroup:SetTitle(DT("DASHBOARD_INFO_TITLE", "General information"))
 	infoGroup:SetFullWidth(true)
-	infoGroup:SetLayout("Flow")
+	infoGroup:SetLayout("List")
 	scroll:AddChild(infoGroup)
 
 	local guildInfoMod = (type(GMS.GetModule) == "function") and GMS:GetModule("GuildInfo", true) or nil
@@ -153,6 +181,60 @@ local function RenderDashboard(root, id, isCached)
 		guildText
 	))
 	infoGroup:AddChild(lblInfo)
+
+	local extRows = BuildRegistryRows("EXT")
+	local modRows = BuildRegistryRows("MOD")
+	local extReady = 0
+	local modReady = 0
+	for i = 1, #extRows do
+		if extRows[i].ready then extReady = extReady + 1 end
+	end
+	for i = 1, #modRows do
+		if modRows[i].ready then modReady = modReady + 1 end
+	end
+
+	local summary = AceGUI:Create("InlineGroup")
+	summary:SetTitle(DT("DASHBOARD_STATUS_TITLE", "System status"))
+	summary:SetFullWidth(true)
+	summary:SetLayout("List")
+	scroll:AddChild(summary)
+
+	local summaryLabel = AceGUI:Create("Label")
+	summaryLabel:SetFullWidth(true)
+	summaryLabel:SetText(string.format(
+		DT("DASHBOARD_STATUS_SUMMARY_FMT", "Extensions ready: |cff4caf50%d|r / %d\nModules ready: |cff4caf50%d|r / %d"),
+		extReady, #extRows, modReady, #modRows
+	))
+	summary:AddChild(summaryLabel)
+
+	local function AddStatusList(titleKey, titleFallback, rows)
+		local group = AceGUI:Create("InlineGroup")
+		group:SetTitle(DT(titleKey, titleFallback))
+		group:SetFullWidth(true)
+		group:SetLayout("List")
+		scroll:AddChild(group)
+
+		if #rows <= 0 then
+			local empty = AceGUI:Create("Label")
+			empty:SetFullWidth(true)
+			empty:SetText("|cff9d9d9d" .. DT("DASHBOARD_STATUS_EMPTY", "No registry data available.") .. "|r")
+			group:AddChild(empty)
+			return
+		end
+
+		for i = 1, #rows do
+			local row = rows[i]
+			local item = AceGUI:Create("Label")
+			item:SetFullWidth(true)
+			local color = row.ready and "ff4caf50" or "ffff5c5c"
+			local state = row.ready and DT("DASHBOARD_READY", "READY") or DT("DASHBOARD_NOT_READY", "NOT READY")
+			item:SetText(string.format("|c%s%s|r  |cffd7d7d7%s|r  |cff9d9d9d(%s)|r", color, state, tostring(row.name or "-"), tostring(row.version or "-")))
+			group:AddChild(item)
+		end
+	end
+
+	AddStatusList("DASHBOARD_EXTENSIONS_TITLE", "Extensions", extRows)
+	AddStatusList("DASHBOARD_MODULES_TITLE", "Modules", modRows)
 
 	local hint = AceGUI:Create("Label")
 	hint:SetFullWidth(true)

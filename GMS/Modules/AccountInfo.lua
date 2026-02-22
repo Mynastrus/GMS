@@ -34,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "ACCOUNTINFO",
 	SHORT_NAME   = "AccountInfo",
 	DISPLAY_NAME = "Account Information",
-	VERSION      = "1.0.3",
+	VERSION      = "1.0.4",
 }
 
 local ACCOUNT_CHARS_SYNC_DOMAIN = "ACCOUNT_CHARS_V1"
@@ -160,11 +160,48 @@ function AccountInfo:PersistProfileSettings()
 	end
 	if type(opts) ~= "table" then return false end
 
+	local validatedMainGuid = tostring(opts.mainCharacterGUID or "")
+	local playerGuid = (type(UnitGUID) == "function") and tostring(UnitGUID("player") or "") or ""
+	local base = (type(links.chars) == "table") and links.chars[playerGuid] or nil
+	local guildKey = type(base) == "table" and tostring(base.guildKey or "") or ""
+	local chars = {}
+	if guildKey ~= "" and type(links.chars) == "table" then
+		for guid, entry in pairs(links.chars) do
+			if type(entry) == "table" and tostring(entry.guildKey or "") == guildKey then
+				chars[#chars + 1] = { guid = tostring(guid or "") }
+			end
+		end
+	end
+	if validatedMainGuid ~= "" then
+		local exists = false
+		for i = 1, #chars do
+			if tostring(chars[i].guid or "") == validatedMainGuid then
+				exists = true
+				break
+			end
+		end
+		if not exists then
+			validatedMainGuid = ""
+		end
+	end
+	if validatedMainGuid == "" then
+		for i = 1, #chars do
+			if tostring(chars[i].guid or "") == playerGuid then
+				validatedMainGuid = playerGuid
+				break
+			end
+		end
+	end
+	if validatedMainGuid == "" and #chars > 0 then
+		validatedMainGuid = tostring(chars[1].guid or "")
+	end
+	opts.mainCharacterGUID = validatedMainGuid
+
 	local payload = {
 		profileName = tostring(opts.profileName or ""),
 		profileBirthday = tostring(opts.profileBirthday or ""),
 		profileGender = NormalizeGenderValue(opts.profileGender),
-		mainCharacterGUID = tostring(opts.mainCharacterGUID or ""),
+		mainCharacterGUID = validatedMainGuid,
 		updatedAt = (type(time) == "function" and time()) or 0,
 	}
 
@@ -225,6 +262,10 @@ function AccountInfo:RestoreProfileSettings()
 	local storedBirthday = tostring(s.profileBirthday or "")
 	local storedMainGuid = tostring(s.mainCharacterGUID or "")
 	local storedGender = NormalizeGenderValue(s.profileGender)
+	local validMainChoices = self:GetMainCharacterChoiceMap()
+	if storedMainGuid ~= "" and type(validMainChoices) == "table" and validMainChoices[storedMainGuid] == nil then
+		storedMainGuid = ""
+	end
 
 	if storedName ~= "" then
 		opts.profileName = storedName
@@ -403,6 +444,17 @@ local function BuildGuildVerifiedLinkedRows(selectedGuid, chars, fallbackGuildKe
 	if type(chars) ~= "table" or #chars <= 0 then
 		return {}, false, "No same-account guild characters recorded yet."
 	end
+	local selectedKnown = false
+	for i = 1, #chars do
+		local row = chars[i]
+		if type(row) == "table" and tostring(row.guid or "") == guid then
+			selectedKnown = true
+			break
+		end
+	end
+	if not selectedKnown then
+		return {}, false, "Selected character has no account-link record."
+	end
 
 	local selectedGuildKey = tostring(fallbackGuildKey or "")
 	for i = 1, #chars do
@@ -460,6 +512,17 @@ local function BuildStoredLinkedRows(selectedGuid, chars, fallbackGuildKey, sour
 	if guid == "" then return {}, false, "No character GUID available." end
 	if type(chars) ~= "table" or #chars <= 0 then
 		return {}, false, "No same-account characters stored yet."
+	end
+	local selectedKnown = false
+	for i = 1, #chars do
+		local row = chars[i]
+		if type(row) == "table" and tostring(row.guid or "") == guid then
+			selectedKnown = true
+			break
+		end
+	end
+	if not selectedKnown then
+		return {}, false, "Selected character has no account-link record."
 	end
 
 	local selectedGuildKey = tostring(fallbackGuildKey or "")
@@ -575,6 +638,25 @@ function AccountInfo:PublishLocalAccountLinks(reason, force)
 		opts = GMS:GetModuleOptions(MODULE_NAME)
 	end
 	local mainGuid = type(opts) == "table" and tostring(opts.mainCharacterGUID or "") or ""
+	if mainGuid ~= "" then
+		local exists = false
+		for i = 1, #chars do
+			if tostring(chars[i].guid or "") == mainGuid then
+				exists = true
+				break
+			end
+		end
+		if not exists then
+			mainGuid = ""
+		end
+	end
+	if mainGuid == "" then
+		mainGuid = guid
+	end
+	if type(opts) == "table" and tostring(opts.mainCharacterGUID or "") ~= mainGuid then
+		opts.mainCharacterGUID = mainGuid
+		self:PersistProfileSettings()
+	end
 	local mainName = ""
 	for i = 1, #chars do
 		local row = chars[i]

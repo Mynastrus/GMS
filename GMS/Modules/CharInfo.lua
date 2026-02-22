@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.5",
+	VERSION      = "1.1.6",
 }
 
 local LibStub = LibStub
@@ -715,32 +715,87 @@ local function BuildEquipmentRowsFromSnapshot(snapshot)
 	return rows, ilvl, tonumber(slots) or 0
 end
 
-local function BuildMythicRows(dungeons)
-	if type(dungeons) ~= "table" then return {} end
+local function BuildMythicRows(dungeons, includeDefaults)
 	local rows = {}
-	for i = 1, #dungeons do
-		local d = dungeons[i]
-		if type(d) == "table" then
-			local name = tostring(d.name or "")
-			if name ~= "" then
-				local level = tonumber(d.level) or 0
-				local score = tonumber(d.score) or 0
-				rows[#rows + 1] = {
-					name = name,
-					level = level,
-					score = score,
-					mapId = tonumber(d.mapId or 0) or 0,
-					completed = (d.completed == true),
-				}
+	local byKey = {}
+	if type(dungeons) == "table" then
+		for i = 1, #dungeons do
+			local d = dungeons[i]
+			if type(d) == "table" then
+				local name = tostring(d.name or "")
+				local mapId = tonumber(d.mapId or 0) or 0
+				local key = (mapId > 0) and ("id:" .. tostring(mapId)) or ("name:" .. string.lower(name))
+				if name ~= "" and byKey[key] == nil then
+					local level = tonumber(d.level) or 0
+					local score = tonumber(d.score) or 0
+					rows[#rows + 1] = {
+						name = name,
+						level = level,
+						score = score,
+						mapId = mapId,
+						completed = (d.completed == true),
+						isPlaceholder = false,
+					}
+					byKey[key] = true
+				end
 			end
 		end
 	end
+
+	if includeDefaults == true and type(C_ChallengeMode) == "table" and type(C_ChallengeMode.GetMapTable) == "function" then
+		local maps = C_ChallengeMode.GetMapTable()
+		if type(maps) == "table" then
+			for i = 1, #maps do
+				local mapId = tonumber(maps[i] or 0) or 0
+				if mapId > 0 then
+					local mapName = ""
+					if type(C_ChallengeMode.GetMapUIInfo) == "function" then
+						mapName = tostring(select(1, C_ChallengeMode.GetMapUIInfo(mapId)) or "")
+					end
+					if mapName == "" then
+						mapName = "Dungeon " .. tostring(mapId)
+					end
+					local key = "id:" .. tostring(mapId)
+					if byKey[key] == nil then
+						rows[#rows + 1] = {
+							name = mapName,
+							level = 0,
+							score = 0,
+							mapId = mapId,
+							completed = false,
+							isPlaceholder = true,
+						}
+						byKey[key] = true
+					end
+				end
+			end
+		end
+	end
+
 	table.sort(rows, function(a, b)
 		if a.score ~= b.score then return a.score > b.score end
 		if a.level ~= b.level then return a.level > b.level end
 		return tostring(a.name) < tostring(b.name)
 	end)
 	return rows
+end
+
+local function HasMythicProgressData(score, rows)
+	if (tonumber(score) or 0) > 0 then
+		return true
+	end
+	if type(rows) ~= "table" then
+		return false
+	end
+	for i = 1, #rows do
+		local r = rows[i]
+		if type(r) == "table" then
+			if (tonumber(r.level) or 0) > 0 or (tonumber(r.score) or 0) > 0 then
+				return true
+			end
+		end
+	end
+	return false
 end
 
 local function NormalizeSearchText(raw)
@@ -1840,20 +1895,20 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		local mythic = GMS and GMS:GetModule("MythicPlus", true) or nil
 		if type(mythic) == "table" and type(mythic._options) == "table" then
 			local score = tonumber(mythic._options.score)
-			local rows = BuildMythicRows(mythic._options.dungeons)
+			local rows = BuildMythicRows(mythic._options.dungeons, true)
 			data.mythic.score = score
 			data.mythic.rows = rows
-			data.mythic.hasData = (score and score > 0) or (#rows > 0)
+			data.mythic.hasData = HasMythicProgressData(score, rows)
 			data.mythic.source = "Local module data"
 		end
 		if not data.mythic.hasData and playerGuid ~= "" then
 			local mpBucket = GetCharScopedModuleBucket(playerGuid, "MythicPlus")
 			if type(mpBucket) == "table" then
 				local score = tonumber(mpBucket.score)
-				local rows = BuildMythicRows(mpBucket.dungeons)
+				local rows = BuildMythicRows(mpBucket.dungeons, true)
 				data.mythic.score = score or data.mythic.score
 				data.mythic.rows = rows
-				data.mythic.hasData = (score and score > 0) or (#rows > 0)
+				data.mythic.hasData = HasMythicProgressData(score, rows)
 				if data.mythic.hasData then
 					data.mythic.source = "Saved character DB"
 				end
@@ -1862,15 +1917,18 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		if not data.mythic.hasData and playerGuid ~= "" then
 			local payloadLocalM, payloadLocalMSource = GetLatestOrCachedDomainPayload("MYTHICPLUS_V1", playerGuid)
 			if type(payloadLocalM) == "table" then
-				local rows = BuildMythicRows(payloadLocalM.dungeons)
+				local rows = BuildMythicRows(payloadLocalM.dungeons, true)
 				local score = tonumber(payloadLocalM.score)
 				data.mythic.rows = rows
 				data.mythic.score = score or data.mythic.score
-				data.mythic.hasData = (score and score > 0) or (#rows > 0)
+				data.mythic.hasData = HasMythicProgressData(score, rows)
 				if data.mythic.hasData then
 					data.mythic.source = (payloadLocalMSource == "cache") and "Saved character DB" or "Synced MYTHICPLUS_V1"
 				end
 			end
+		end
+		if #data.mythic.rows <= 0 then
+			data.mythic.rows = BuildMythicRows(nil, true)
 		end
 
 		local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true)) or nil
@@ -1981,6 +2039,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		-- raids list (known instances) and equipment slots should be visible
 		-- even when no synced payload exists yet.
 		local baseRaidCatalog = BuildRaidCatalogLookup()
+		data.mythic.rows = BuildMythicRows(nil, true)
 		data.raids.rows = BuildRaidRows(nil, baseRaidCatalog)
 		local baseEquipRows, baseEquipIlvl, baseEquipSlots = BuildEquipmentRowsFromSnapshot(nil)
 		data.equipment.rows = baseEquipRows
@@ -1993,7 +2052,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			local v = tostring(p.version or "")
 			if v ~= "" then data.gmsVersion = v end
 			local score = tonumber(p.mplus)
-			if score and score >= 0 then
+			if score and score > 0 then
 				data.mythic.score = score
 				data.mythic.hasData = true
 				data.mythic.source = (payloadMetaSource == "cache") and "Saved character DB" or "Synced roster_meta"
@@ -2026,11 +2085,11 @@ local function BuildCharData(player, ctxGuid, ctxName)
 
 		local payloadM, payloadMSource = GetLatestOrCachedDomainPayload("MYTHICPLUS_V1", targetGuid)
 		if type(payloadM) == "table" then
-			local rows = BuildMythicRows(payloadM.dungeons)
+			local rows = BuildMythicRows(payloadM.dungeons, true)
 			local score = tonumber(payloadM.score)
 			data.mythic.rows = rows
 			data.mythic.score = score or data.mythic.score
-			data.mythic.hasData = (score and score > 0) or (#rows > 0) or data.mythic.hasData
+			data.mythic.hasData = HasMythicProgressData(score, rows) or data.mythic.hasData
 			data.mythic.source = (payloadMSource == "cache") and "Saved character DB" or "Synced MYTHICPLUS_V1"
 		end
 
