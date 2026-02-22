@@ -27,6 +27,7 @@ local GetGuildInfo = GetGuildInfo
 local UnitFactionGroup = UnitFactionGroup
 local IsInGuild = IsInGuild
 local C_Timer = C_Timer
+local CreateFrame = CreateFrame
 ---@diagnostic enable: undefined-global
 
 local METADATA = {
@@ -34,7 +35,7 @@ local METADATA = {
 	INTERN_NAME  = "ACCOUNTINFO",
 	SHORT_NAME   = "AccountInfo",
 	DISPLAY_NAME = "Account Information",
-	VERSION      = "1.0.4",
+	VERSION      = "1.0.6",
 }
 
 local ACCOUNT_CHARS_SYNC_DOMAIN = "ACCOUNT_CHARS_V1"
@@ -352,15 +353,20 @@ end
 
 function AccountInfo:InitializeOptions()
 	if GMS and type(GMS.RegisterModuleOptions) == "function" then
-		pcall(function()
+		local ok, err = pcall(function()
 			GMS:RegisterModuleOptions(MODULE_NAME, OPTIONS_DEFAULTS, "GLOBAL")
 		end)
+		if not ok then
+			LOCAL_LOG("WARN", "AccountInfo option registration failed", tostring(err or "unknown"))
+		end
 	end
 	if GMS and type(GMS.GetModuleOptions) == "function" then
 		local ok, opts = pcall(GMS.GetModuleOptions, GMS, MODULE_NAME)
 		if ok and type(opts) == "table" then
 			self._options = opts
 			self:RestoreProfileSettings()
+		else
+			LOCAL_LOG("WARN", "AccountInfo options unavailable", tostring(opts or "unknown"))
 		end
 	end
 end
@@ -1140,9 +1146,38 @@ function AccountInfo:OnDisable()
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
 
+local function EnsureAccountInfoTracking(reason)
+	if type(AccountInfo) ~= "table" then return false end
+	if type(GMS) == "table" and type(GMS.EnableModule) == "function" and type(AccountInfo.IsEnabled) == "function" then
+		if not AccountInfo:IsEnabled() then
+			pcall(GMS.EnableModule, GMS, MODULE_NAME)
+		end
+	end
+	if type(AccountInfo.TrackLocalAccountCharacter) == "function" then
+		return pcall(AccountInfo.TrackLocalAccountCharacter, AccountInfo, reason or "ensure")
+	end
+	return false
+end
+
 -- Ensure options are available in Settings even before module enable timing kicks in.
 pcall(function()
 	if type(AccountInfo) == "table" and type(AccountInfo.InitializeOptions) == "function" then
 		AccountInfo:InitializeOptions()
 	end
+	EnsureAccountInfoTracking("bootstrap")
+	if C_Timer and type(C_Timer.After) == "function" then
+		C_Timer.After(2.0, function()
+			EnsureAccountInfoTracking("bootstrap-delay")
+		end)
+	end
 end)
+
+if not AccountInfo._bootstrapEventFrame and type(CreateFrame) == "function" then
+	AccountInfo._bootstrapEventFrame = CreateFrame("Frame")
+	AccountInfo._bootstrapEventFrame:RegisterEvent("PLAYER_LOGIN")
+	AccountInfo._bootstrapEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+	AccountInfo._bootstrapEventFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
+	AccountInfo._bootstrapEventFrame:SetScript("OnEvent", function(_, event)
+		EnsureAccountInfoTracking("bootstrap-event-" .. tostring(event or "unknown"))
+	end)
+end

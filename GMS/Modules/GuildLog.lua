@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "GUILDLOG",
 	SHORT_NAME   = "GuildLog",
 	DISPLAY_NAME = "Guild Log",
-	VERSION      = "1.1.16",
+	VERSION      = "1.1.17",
 }
 
 local LibStub = LibStub
@@ -30,8 +30,6 @@ local IsInGuild = IsInGuild
 local GetNumGuildMembers = GetNumGuildMembers
 local GetGuildRosterInfo = GetGuildRosterInfo
 local GetRealmName = GetRealmName
-local GetGuildInfo = GetGuildInfo
-local UnitFactionGroup = UnitFactionGroup
 local C_GuildInfo = C_GuildInfo
 local GuildRoster = GuildRoster
 local C_Timer = C_Timer
@@ -40,10 +38,6 @@ local wipe = wipe
 
 local AceGUI = LibStub("AceGUI-3.0", true)
 if not AceGUI then return end
-
----@diagnostic disable: undefined-global
-local _G = _G
----@diagnostic enable: undefined-global
 
 GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
 
@@ -181,43 +175,6 @@ local function GetScopedOptions()
 		end
 	end
 
-	-- Legacy migration: optional import from deprecated GMS_Guild_DB if available.
-	if (type(target.entries) ~= "table" or #target.entries == 0) and type(_G) == "table" and type(_G.GMS_Guild_DB) == "table" then
-		local old = _G.GMS_Guild_DB[guildKey]
-		if type(old) ~= "table" then
-			-- fallback: single bucket in legacy DB
-			local first, count = nil, 0
-			for k, v in pairs(_G.GMS_Guild_DB) do
-				if type(v) == "table" then
-					count = count + 1
-					if not first then first = v end
-					if count > 1 then break end
-				end
-			end
-			if count == 1 then old = first end
-		end
-		if type(old) == "table" then
-			local oldCandidates = { old[MODULE_NAME], old.GUILDACTIVITY, old.GuildActivity, old.guildactivity, old.GUILD_ACTIVITY, old.GA, old }
-			for i = 1, #oldCandidates do
-				local src = oldCandidates[i]
-				if type(src) == "table" and type(src.entries) == "table" and #src.entries > 0 then
-					target.entries = src.entries
-					if type(src.memberHistory) == "table" and next(src.memberHistory) ~= nil then
-						target.memberHistory = src.memberHistory
-					end
-					if src.chatEcho ~= nil then
-						target.chatEcho = src.chatEcho and true or false
-					end
-					if src.maxEntries ~= nil then
-						target.maxEntries = tonumber(src.maxEntries) or target.maxEntries
-					end
-					LOCAL_LOG("INFO", "Migrated GuildLog legacy entries from GMS_Guild_DB", #src.entries)
-					break
-				end
-			end
-		end
-	end
-
 	return gRoot[MODULE_NAME]
 end
 
@@ -252,9 +209,6 @@ end
 local function ResetPendingPersist()
 	GuildLog._pendingPersist = NewPendingPersistFlags()
 end
-
-local EnsureLegacyGuildBucket
-local MirrorOptionsToLegacy
 
 local function EnsurePendingPersist()
 	local p = GuildLog._pendingPersist
@@ -443,13 +397,6 @@ local function EnsureOptions()
 	else
 		opts = current or {}
 		GuildLog._optionsBound = false
-		local legacy = EnsureLegacyGuildBucket()
-		if type(legacy) == "table" and opts ~= legacy then
-			opts.chatEcho = (legacy.chatEcho == true)
-			opts.maxEntries = ClampMaxEntries(legacy.maxEntries)
-			opts.entries = type(legacy.entries) == "table" and legacy.entries or opts.entries
-			opts.memberHistory = type(legacy.memberHistory) == "table" and legacy.memberHistory or opts.memberHistory
-		end
 	end
 
 	if opts.chatEcho == nil then opts.chatEcho = false end
@@ -477,7 +424,6 @@ local function SyncOptionsToScoped()
 	if type(opts) ~= "table" then return opts end
 	local scoped = GetScopedOptions()
 	if type(scoped) ~= "table" then
-		MirrorOptionsToLegacy(opts)
 		return opts
 	end
 
@@ -494,7 +440,6 @@ local function SyncOptionsToScoped()
 
 	GuildLog._options = scoped
 	GuildLog._optionsBound = true
-	MirrorOptionsToLegacy(scoped)
 	ResetPendingPersist()
 	return scoped
 end
@@ -516,52 +461,6 @@ local function GetCurrentGuildKeySafe()
 		return tostring(GMS:GetGuildStorageKey() or "")
 	end
 	return ""
-end
-
-local function BuildFallbackGuildKey()
-	local guild = ""
-	if type(GetGuildInfo) == "function" then
-		guild = tostring(GetGuildInfo("player") or "")
-	end
-	if guild == "" then
-		return ""
-	end
-	local realm = (type(GetRealmName) == "function") and tostring(GetRealmName() or "") or ""
-	local faction = (type(UnitFactionGroup) == "function") and tostring(UnitFactionGroup("player") or "") or ""
-	if realm ~= "" and faction ~= "" then
-		return string.format("%s|%s|%s", realm, faction, guild)
-	end
-	return guild
-end
-
-local function GetStableGuildKeyForPersistence()
-	local key = GetCurrentGuildKeySafe()
-	if key ~= "" then
-		return key
-	end
-	return BuildFallbackGuildKey()
-end
-
-EnsureLegacyGuildBucket = function()
-	if type(_G) ~= "table" then return nil end
-	_G.GMS_Guild_DB = type(_G.GMS_Guild_DB) == "table" and _G.GMS_Guild_DB or {}
-	local guildKey = GetStableGuildKeyForPersistence()
-	if guildKey == "" then return nil end
-	_G.GMS_Guild_DB[guildKey] = type(_G.GMS_Guild_DB[guildKey]) == "table" and _G.GMS_Guild_DB[guildKey] or {}
-	local guildBucket = _G.GMS_Guild_DB[guildKey]
-	guildBucket[MODULE_NAME] = type(guildBucket[MODULE_NAME]) == "table" and guildBucket[MODULE_NAME] or {}
-	return guildBucket[MODULE_NAME]
-end
-
-MirrorOptionsToLegacy = function(opts)
-	if type(opts) ~= "table" then return false end
-	local legacy = EnsureLegacyGuildBucket()
-	if type(legacy) ~= "table" then return false end
-	legacy.chatEcho = opts.chatEcho and true or false
-	legacy.maxEntries = ClampMaxEntries(opts.maxEntries)
-	legacy.entries = type(opts.entries) == "table" and opts.entries or {}
-	legacy.memberHistory = type(opts.memberHistory) == "table" and opts.memberHistory or {}
-	return true
 end
 
 local function SetChatEchoPersist(value, sourceTag)

@@ -18,11 +18,13 @@ if not AceGUI then return end
 
 -- Blizzard Globals
 ---@diagnostic disable: undefined-global
-local _G = _G
 local GetTime = GetTime
 local C_Timer = C_Timer
 local CreateFrame = CreateFrame
 local GetLocale = GetLocale
+local UnitName = UnitName
+local GetRealmName = GetRealmName
+local _G = _G
 ---@diagnostic enable: undefined-global
 
 -- ###########################################################################
@@ -34,7 +36,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.10",
+	VERSION      = "1.3.13",
 }
 
 -- ###########################################################################
@@ -717,6 +719,70 @@ local function GetCurrentAddonVersion()
 	return v
 end
 
+local function NormalizeVersion(v)
+	return tostring(v or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function GetSeenFallbackStore()
+	if type(_G) ~= "table" then return nil end
+	_G.GMS_UIDB = type(_G.GMS_UIDB) == "table" and _G.GMS_UIDB or {}
+	_G.GMS_UIDB.changelog = type(_G.GMS_UIDB.changelog) == "table" and _G.GMS_UIDB.changelog or {}
+	return _G.GMS_UIDB.changelog
+end
+
+local function GetRawProfileChangelogStore()
+	if type(_G) ~= "table" then return nil end
+	local rawDB = rawget(_G, "GMS_DB")
+	if type(rawDB) ~= "table" then return nil end
+	rawDB.profiles = type(rawDB.profiles) == "table" and rawDB.profiles or {}
+	rawDB.profileKeys = type(rawDB.profileKeys) == "table" and rawDB.profileKeys or {}
+
+	local profileName = nil
+	if type(GMS) == "table" and type(GMS.db) == "table" and type(GMS.db.GetCurrentProfile) == "function" then
+		local ok, current = pcall(GMS.db.GetCurrentProfile, GMS.db)
+		if ok and type(current) == "string" and current ~= "" then
+			profileName = current
+		end
+	end
+
+	if not profileName or profileName == "" then
+		local name = type(UnitName) == "function" and tostring(UnitName("player") or "") or ""
+		local realm = type(GetRealmName) == "function" and tostring(GetRealmName() or "") or ""
+		if name ~= "" and realm ~= "" then
+			local charKey = string.format("%s - %s", name, realm)
+			local mapped = rawDB.profileKeys[charKey]
+			if type(mapped) == "string" and mapped ~= "" then
+				profileName = mapped
+			end
+		end
+	end
+
+	if not profileName or profileName == "" then
+		local onlyName = nil
+		local count = 0
+		for k in pairs(rawDB.profiles) do
+			if type(k) == "string" and k ~= "" then
+				count = count + 1
+				if not onlyName then onlyName = k end
+				if count > 1 then break end
+			end
+		end
+		if count == 1 and onlyName then
+			profileName = onlyName
+		end
+	end
+
+	if not profileName or profileName == "" then
+		return nil
+	end
+
+	rawDB.profiles[profileName] = type(rawDB.profiles[profileName]) == "table" and rawDB.profiles[profileName] or {}
+	local profile = rawDB.profiles[profileName]
+	profile.modules = type(profile.modules) == "table" and profile.modules or {}
+	profile.modules.CHANGELOG = type(profile.modules.CHANGELOG) == "table" and profile.modules.CHANGELOG or {}
+	return profile.modules.CHANGELOG
+end
+
 local function HasReleaseEntry(version)
 	local v = tostring(version or "")
 	if v == "" then return false end
@@ -734,51 +800,26 @@ local function IsAutoOpenEnabled(opts)
 	return opts.showOnNewVersion ~= false
 end
 
-local function EnsureStandaloneState()
-	if type(_G.GMS_Changelog_DB) ~= "table" then
-		---@diagnostic disable-next-line: inject-field
-		_G.GMS_Changelog_DB = {}
-	end
-	return _G.GMS_Changelog_DB
-end
-
-local function GetGlobalSeenVersion()
-	if not GMS or not GMS.db or type(GMS.db.global) ~= "table" then
-		return ""
-	end
-	local v = GMS.db.global.gmsChangelogLastSeenVersion
-	return tostring(v or "")
-end
-
-local function SetGlobalSeenVersion(version)
-	if not GMS or not GMS.db or type(GMS.db.global) ~= "table" then
-		return
-	end
-	GMS.db.global.gmsChangelogLastSeenVersion = tostring(version or "")
-	GMS.db.global.gmsChangelogLastSeenAt = now() or 0
-end
-
-local function GetStandaloneSeenVersion()
-	local state = EnsureStandaloneState()
-	return tostring(state.lastSeenVersion or "")
-end
-
-local function SetStandaloneSeenVersion(version)
-	local state = EnsureStandaloneState()
-	state.lastSeenVersion = tostring(version or "")
-	state.lastSeenAt = now() or 0
-end
-
 local function GetEffectiveSeenVersion(opts)
-	local profileSeen = (type(opts) == "table") and tostring(opts.lastSeenVersion or "") or ""
+	local profileSeen = (type(opts) == "table") and NormalizeVersion(opts.lastSeenVersion) or ""
 	if profileSeen ~= "" then
 		return profileSeen
 	end
-	local globalSeen = GetGlobalSeenVersion()
-	if globalSeen ~= "" then
-		return globalSeen
+	local rawProfile = GetRawProfileChangelogStore()
+	if type(rawProfile) == "table" then
+		local rawSeen = NormalizeVersion(rawProfile.lastSeenVersion)
+		if rawSeen ~= "" then
+			return rawSeen
+		end
 	end
-	return GetStandaloneSeenVersion()
+	local fb = GetSeenFallbackStore()
+	if type(fb) == "table" then
+		local fallbackSeen = NormalizeVersion(fb.lastSeenVersion)
+		if fallbackSeen ~= "" then
+			return fallbackSeen
+		end
+	end
+	return ""
 end
 
 local function IsReleaseNewForSeenVersion(releaseVersion, seenVersion)
@@ -826,6 +867,30 @@ local function EnsureOptions()
 	end
 	if type(opts.lastSeenAt) ~= "number" then
 		opts.lastSeenAt = 0
+	end
+	if NormalizeVersion(opts.lastSeenVersion) == "" then
+		local rawProfile = GetRawProfileChangelogStore()
+		if type(rawProfile) == "table" then
+			local rawSeen = NormalizeVersion(rawProfile.lastSeenVersion)
+			if rawSeen ~= "" then
+				opts.lastSeenVersion = rawSeen
+			end
+			local rawAt = tonumber(rawProfile.lastSeenAt or 0) or 0
+			if rawAt > 0 and tonumber(opts.lastSeenAt or 0) <= 0 then
+				opts.lastSeenAt = rawAt
+			end
+		end
+		local fb = GetSeenFallbackStore()
+		if type(fb) == "table" then
+			local fallbackSeen = NormalizeVersion(fb.lastSeenVersion)
+			if fallbackSeen ~= "" then
+				opts.lastSeenVersion = fallbackSeen
+			end
+			local fallbackAt = tonumber(fb.lastSeenAt or 0) or 0
+			if fallbackAt > 0 and tonumber(opts.lastSeenAt or 0) <= 0 then
+				opts.lastSeenAt = fallbackAt
+			end
+		end
 	end
 
 	Changelog._options = opts
@@ -882,8 +947,16 @@ local function MarkCurrentVersionSeen(reason)
 		opts.lastSeenVersion = current
 		opts.lastSeenAt = now() or 0
 	end
-	SetGlobalSeenVersion(current)
-	SetStandaloneSeenVersion(current)
+	local rawProfile = GetRawProfileChangelogStore()
+	if type(rawProfile) == "table" then
+		rawProfile.lastSeenVersion = current
+		rawProfile.lastSeenAt = now() or 0
+	end
+	local fb = GetSeenFallbackStore()
+	if type(fb) == "table" then
+		fb.lastSeenVersion = current
+		fb.lastSeenAt = now() or 0
+	end
 	LOCAL_LOG("INFO", "Marked changelog as seen", current, reason or "unknown")
 end
 

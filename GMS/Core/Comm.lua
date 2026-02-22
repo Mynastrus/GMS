@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "COMM",
 	SHORT_NAME   = "Comm",
 	DISPLAY_NAME = "Kommunikation",
-	VERSION      = "1.2.10",
+	VERSION      = "1.2.12",
 }
 
 ---@diagnostic disable: undefined-global
@@ -218,6 +218,72 @@ local function ComputeChecksumFromString(s)
 	return string.format("%08x", h % 0xFFFFFFFF)
 end
 
+local function ChecksumSortKey(v)
+	local tv = type(v)
+	if tv == "number" then
+		return "1:" .. string.format("%.17g", tonumber(v) or 0)
+	end
+	if tv == "string" then
+		return "2:" .. v
+	end
+	if tv == "boolean" then
+		return "3:" .. (v and "1" or "0")
+	end
+	if tv == "nil" then
+		return "4:nil"
+	end
+	return "9:" .. tv .. ":" .. tostring(v)
+end
+
+local function CanonicalizeForChecksum(value, seen, depth)
+	seen = seen or {}
+	depth = tonumber(depth) or 0
+	if depth > 20 then
+		return "max-depth"
+	end
+
+	local tv = type(value)
+	if tv == "nil" then return "n" end
+	if tv == "boolean" then return value and "b1" or "b0" end
+	if tv == "number" then return "d:" .. string.format("%.17g", tonumber(value) or 0) end
+	if tv == "string" then
+		local s = tostring(value)
+		return "s:" .. #s .. ":" .. s
+	end
+	if tv ~= "table" then
+		return tv .. ":" .. tostring(value)
+	end
+
+	if seen[value] then
+		return "cycle"
+	end
+	seen[value] = true
+
+	local keys = {}
+	for k in pairs(value) do
+		keys[#keys + 1] = k
+	end
+	table.sort(keys, function(a, b)
+		return ChecksumSortKey(a) < ChecksumSortKey(b)
+	end)
+
+	local out = { "{" }
+	for i = 1, #keys do
+		local k = keys[i]
+		out[#out + 1] = CanonicalizeForChecksum(k, seen, depth + 1)
+		out[#out + 1] = "="
+		out[#out + 1] = CanonicalizeForChecksum(value[k], seen, depth + 1)
+		out[#out + 1] = ";"
+	end
+	out[#out + 1] = "}"
+	seen[value] = nil
+	return table.concat(out, "")
+end
+
+local function ComputePayloadChecksum(payload)
+	return ComputeChecksumFromString(CanonicalizeForChecksum(payload, {}, 0))
+end
+
 local function SerializePayload(payload)
 	local ok, serialized = pcall(AceSerializer.Serialize, AceSerializer, payload)
 	if not ok then return nil end
@@ -255,10 +321,14 @@ local function ValidateRecord(record, opts)
 	if type(record.checksum) ~= "string" or record.checksum == "" then return false, "missing-checksum" end
 	if record.payload == nil then return false, "missing-payload" end
 
-	local serialized = SerializePayload(record.payload)
-	if not serialized then return false, "payload-serialize-failed" end
-	local checksum = ComputeChecksumFromString(serialized)
+	local checksum = ComputePayloadChecksum(record.payload)
 	if checksum ~= record.checksum then
+		if opts.allowLegacyChecksum then
+			local serialized = SerializePayload(record.payload)
+			if serialized and ComputeChecksumFromString(serialized) == record.checksum then
+				return true, "checksum-legacy-compat"
+			end
+		end
 		if opts.allowChecksumMismatch then
 			return true, "checksum-mismatch-soft"
 		end
@@ -312,13 +382,67 @@ local function ParseMeta(m)
 	return out
 end
 
+local function ResolveOnlineWhisperTarget(targetName)
+	local raw = tostring(targetName or "")
+	if raw == "" then return nil end
+	if not IsInGuild or not IsInGuild() then return nil end
+	if type(GetNumGuildMembers) ~= "function" or type(GetGuildRosterInfo) ~= "function" then
+		return nil
+	end
+
+	local targetNorm = NormalizeName(raw)
+	local targetShortNorm = NormalizeName(raw:match("^([^%-]+)") or raw)
+	if targetNorm == "" then return nil end
+
+	local bestFull = nil
+	local bestShort = nil
+	local shortHits = 0
+
+	for i = 1, GetNumGuildMembers() do
+		local name, _, _, _, _, _, _, _, online = GetGuildRosterInfo(i)
+		if type(name) == "string" and name ~= "" and online == true then
+			local fullNorm = NormalizeName(name)
+			local shortNorm = NormalizeName(name:match("^([^%-]+)") or name)
+			if fullNorm == targetNorm then
+				bestFull = name
+				break
+			end
+			if shortNorm == targetShortNorm then
+				bestShort = name
+				shortHits = shortHits + 1
+			end
+		end
+	end
+
+	if type(bestFull) == "string" and bestFull ~= "" then
+		return bestFull
+	end
+	if shortHits == 1 and type(bestShort) == "string" and bestShort ~= "" then
+		return bestShort
+	end
+	return nil
+end
+
 local function SendRaw(subPrefix, data, priority, distribution, targetName)
 	if not IsInGuild or not IsInGuild() then return false end
 	if type(distribution) ~= "string" or distribution == "" then
 		distribution = "GUILD"
 	end
-	if distribution == "WHISPER" and (type(targetName) ~= "string" or targetName == "") then
-		return false
+	if distribution == "WHISPER" then
+		local resolved = ResolveOnlineWhisperTarget(targetName)
+		if type(resolved) == "string" and resolved ~= "" then
+			targetName = resolved
+		else
+			CommThrottled(
+				"sendraw_whisper_fallback",
+				tostring(subPrefix or "?") .. ":" .. tostring(targetName or ""),
+				"Comm SendData fallback to GUILD (whisper target offline/unresolved)",
+				tostring(subPrefix or ""),
+				tostring(targetName or "")
+			)
+			distribution = "GUILD"
+			targetName = nil
+		end
 	end
 
 	local packet = {
@@ -486,8 +610,17 @@ local function SendSyncAnnounce(record, payloadSize)
 end
 
 local function SendSyncRequest(key, senderName, preferWhisper)
-	local distribution = (preferWhisper and type(senderName) == "string" and senderName ~= "") and "WHISPER" or "GUILD"
-	local targetName = (distribution == "WHISPER") and senderName or nil
+	local distribution = "GUILD"
+	local targetName = nil
+	if preferWhisper and type(senderName) == "string" and senderName ~= "" then
+		local resolved = ResolveOnlineWhisperTarget(senderName)
+		if type(resolved) == "string" and resolved ~= "" then
+			distribution = "WHISPER"
+			targetName = resolved
+		else
+			CommThrottled("sync_req_whisper_fallback", tostring(senderName), "Sync request fallback to GUILD (whisper target offline/unresolved)", tostring(senderName))
+		end
+	end
 	return SendRaw(Comm.SYNC_SUBPREFIX, {
 		op = "REQ",
 		k = tostring(key or ""),
@@ -532,9 +665,17 @@ local function SendRecordToPeer(record, senderName, requestedMode)
 	local payloadSerialized = SerializePayload(record and record.payload)
 	local payloadSize = payloadSerialized and #payloadSerialized or 0
 	local whisperPreferred = (requestedMode == "WHISPER")
-	local canWhisper = (type(senderName) == "string" and senderName ~= "")
-	local distribution = (whisperPreferred and canWhisper) and "WHISPER" or "GUILD"
-	local targetName = (distribution == "WHISPER") and senderName or nil
+	local distribution = "GUILD"
+	local targetName = nil
+	if whisperPreferred and type(senderName) == "string" and senderName ~= "" then
+		local resolved = ResolveOnlineWhisperTarget(senderName)
+		if type(resolved) == "string" and resolved ~= "" then
+			distribution = "WHISPER"
+			targetName = resolved
+		else
+			CommThrottled("sync_push_whisper_fallback", tostring(senderName), "Sync push fallback to GUILD (whisper target offline/unresolved)", tostring(senderName))
+		end
+	end
 
 	if payloadSize <= (tonumber(Comm.SYNC_CFG.SMALL_PUSH_MAX) or 900) then
 		return SendRecordPush(record, distribution, targetName)
@@ -564,7 +705,7 @@ function Comm:PublishRecord(domain, charGUID, payload, opts)
 		domain = d,
 		seq = seq,
 		updatedAt = updatedAt,
-		checksum = ComputeChecksumFromString(payloadSerialized),
+		checksum = ComputePayloadChecksum(payload),
 		payload = payload,
 	}
 
@@ -632,7 +773,7 @@ local function ProcessChunkCompleteItem(item)
 		return
 	end
 
-	local valid, reason = ValidateRecord(record, { allowChecksumMismatch = true })
+	local valid, reason = ValidateRecord(record, { allowChecksumMismatch = true, allowLegacyChecksum = true })
 	if not valid then
 		LOCAL_LOG("WARN", "Invalid chunked record", reason, record and record.key or "")
 		return
@@ -769,7 +910,7 @@ end
 
 local function HandleSyncPush(senderGUID, channel, d)
 	local record = d and d.r
-	local valid, reason = ValidateRecord(record, { allowChecksumMismatch = true })
+	local valid, reason = ValidateRecord(record, { allowChecksumMismatch = true, allowLegacyChecksum = true })
 	if not valid then
 		LOCAL_LOG("WARN", "Invalid sync push record", reason, record and record.key or "")
 		return
