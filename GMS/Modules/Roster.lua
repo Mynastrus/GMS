@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.1.13",
+	VERSION      = "1.1.15",
 }
 
 local LibStub = LibStub
@@ -765,7 +765,7 @@ function Roster:SetMemberMeta(guid, meta, seenAt, opts)
 	if mplus and mplus >= 0 then row.mplus = mplus end
 
 	local raid = tostring(meta.raid or "")
-	if raid ~= "" then row.raid = raid end
+	if raid ~= "" and raid ~= "-" then row.raid = raid end
 	local raidName = tostring(meta.raid_name or meta.best_raid_name or "")
 	if raidName ~= "" then row.raid_name = raidName end
 	local raidPriority = tonumber(meta.raid_priority or meta.best_raid_priority)
@@ -853,16 +853,24 @@ local function NormalizeLinkedRows(rows)
 	for i = 1, #rows do
 		local r = rows[i]
 		if type(r) == "table" then
-			out[#out + 1] = r
+			local nameFull = tostring(r.name_full or r.name or r.guid or "")
+			nameFull = nameFull:gsub("^%s+", ""):gsub("%s+$", "")
+			if nameFull ~= "" then
+				r.name_full = nameFull
+				out[#out + 1] = r
+			end
 		elseif type(r) == "string" and r ~= "" then
-			out[#out + 1] = {
-				guid = "",
-				name_full = r,
-				level = 0,
-				class = "-",
-				classFile = "",
-				online = false,
-			}
+			local nameFull = tostring(r):gsub("^%s+", ""):gsub("%s+$", "")
+			if nameFull ~= "" then
+				out[#out + 1] = {
+					guid = "",
+					name_full = nameFull,
+					level = 0,
+					class = "-",
+					classFile = "",
+					online = false,
+				}
+			end
 		end
 	end
 	return out
@@ -2620,19 +2628,26 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 										if #nameHex == 8 then
 											nameHex = nameHex:sub(3)
 										end
-										local levelText = tostring(tonumber(c.level or 0) or 0)
-										if levelText == "0" then levelText = "-" end
+										local levelNum = tonumber(c.level or 0) or 0
 										local onlineMarker = ""
 										if c.online == true then
 											onlineMarker = "|cff00ff00●|r "
 										end
 										local lineName = tostring(c.name_full or c.name or c.guid or "-")
+										lineName = lineName:gsub("^%s+", ""):gsub("%s+$", "")
+										if lineName == "" then
+											lineName = tostring(c.guid or "-")
+										end
+										local levelSuffix = ""
+										if levelNum > 0 then
+											levelSuffix = string.format(" |cff9d9d9d(Lv %d)|r", levelNum)
+										end
 										GameTooltip:AddLine(string.format(
-											"%s|cff%s%s|r |cff9d9d9d(Lv %s)|r",
+											"%s|cff%s%s|r%s",
 											onlineMarker,
 											nameHex,
 											lineName,
-											levelText
+											levelSuffix
 										), 1, 1, 1)
 									end
 								end

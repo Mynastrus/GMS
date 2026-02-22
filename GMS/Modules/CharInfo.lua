@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.8",
+	VERSION      = "1.1.9",
 }
 
 local LibStub = LibStub
@@ -1870,11 +1870,33 @@ local function GetRaidSummaryFromRosterMeta(guid)
 end
 
 local function BuildCharData(player, ctxGuid, ctxName)
+	local function NormalizeDisplayName(v, fallback)
+		local s = tostring(v or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if s ~= "" then return s end
+		local fb = tostring(fallback or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		return (fb ~= "" and fb) or "-"
+	end
+
+	local function NormalizeDisplayLevel(v)
+		local n = tonumber(v)
+		if n and n > 0 then
+			return tostring(math.floor(n + 0.0001))
+		end
+		return "-"
+	end
+
+	local function NormalizeDisplayText(v, fallback)
+		local s = tostring(v or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if s ~= "" and s ~= "0" then return s end
+		local fb = tostring(fallback or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		return (fb ~= "" and fb) or "-"
+	end
+
 	local playerGuid = tostring((player and player.guid) or "")
 	local targetGuid = tostring(ctxGuid or "")
 	local isContext = (targetGuid ~= "" and targetGuid ~= playerGuid)
 	local selectedGuid = isContext and targetGuid or playerGuid
-	local selectedName = isContext and tostring(ctxName or "-") or tostring(player and player.name_full or "-")
+	local selectedName = isContext and NormalizeDisplayName(ctxName, "-") or NormalizeDisplayName(player and player.name_full, "-")
 
 	local data = {
 		isContext = isContext,
@@ -1882,15 +1904,15 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		selectedName = selectedName,
 		gmsVersion = tostring((GMS and GMS.VERSION) or "-"),
 		general = {
-			name = selectedName,
+			name = NormalizeDisplayName(selectedName, selectedGuid),
 			guid = selectedGuid ~= "" and selectedGuid or "-",
-			class = tostring((player and player.class) or "-"),
+			class = NormalizeDisplayText((player and player.class), "-"),
 			classFile = tostring((player and player.classFile) or ""),
-			race = tostring((player and player.race) or "-"),
+			race = NormalizeDisplayText((player and player.race), "-"),
 			faction = LocalizeFactionName((UnitFactionGroup and UnitFactionGroup("player")) or "-"),
-			level = tostring((player and player.level) or "-"),
-			spec = tostring((player and player.spec) or "-"),
-			guild = tostring((player and player.guild) or "-"),
+			level = NormalizeDisplayLevel(player and player.level),
+			spec = NormalizeDisplayText((player and player.spec), "-"),
+			guild = NormalizeDisplayText((player and player.guild), "-"),
 		},
 		mythic = { score = nil, rows = {}, hasData = false, source = "-" },
 		raids = { summary = "-", rows = {}, hasData = false, source = "-" },
@@ -1902,15 +1924,15 @@ local function BuildCharData(player, ctxGuid, ctxName)
 	}
 
 	if not isContext then
-		data.general.name = tostring((player and player.name_full) or "-")
+		data.general.name = NormalizeDisplayName((player and player.name_full), playerGuid)
 		data.general.guid = playerGuid ~= "" and playerGuid or "-"
-		data.general.class = tostring((player and player.class) or "-")
+		data.general.class = NormalizeDisplayText((player and player.class), "-")
 		data.general.classFile = tostring((player and player.classFile) or "")
-		data.general.race = tostring((player and player.race) or "-")
+		data.general.race = NormalizeDisplayText((player and player.race), "-")
 		data.general.faction = LocalizeFactionName((UnitFactionGroup and UnitFactionGroup("player")) or "-")
-		data.general.level = tostring((player and player.level) or "-")
-		data.general.spec = tostring((player and player.spec) or "-")
-		data.general.guild = tostring((player and player.guild) or "-")
+		data.general.level = NormalizeDisplayLevel(player and player.level)
+		data.general.spec = NormalizeDisplayText((player and player.spec), "-")
+		data.general.guild = NormalizeDisplayText((player and player.guild), "-")
 
 		local mythic = GMS and GMS:GetModule("MythicPlus", true) or nil
 		if type(mythic) == "table" and type(mythic._options) == "table" then
@@ -2046,13 +2068,13 @@ local function BuildCharData(player, ctxGuid, ctxName)
 	else
 		local member = GetRosterMemberByGuid(targetGuid)
 		if type(member) == "table" then
-			data.general.name = tostring(member.name_full or member.name or selectedName)
-			data.general.class = tostring(member.class or "-")
+			data.general.name = NormalizeDisplayName(member.name_full or member.name, selectedName ~= "-" and selectedName or targetGuid)
+			data.general.class = NormalizeDisplayText((member.class), "-")
 			data.general.classFile = tostring(member.classFileName or "")
-			data.general.race = tostring(member.race or "-")
-			data.general.level = tostring(member.level or "-")
-			data.general.spec = tostring(member.spec or "-")
-			data.general.guild = tostring(member.guild or "-")
+			data.general.race = NormalizeDisplayText((member.race), "-")
+			data.general.level = NormalizeDisplayLevel(member.level)
+			data.general.spec = NormalizeDisplayText((member.spec), "-")
+			data.general.guild = NormalizeDisplayText((member.guild), "-")
 		end
 
 		-- Always render structural placeholders in context mode:
@@ -3413,7 +3435,11 @@ function CHARINFO:TryRegisterPage()
 			for i = 1, #details.accountChars.rows do
 				local rowData = details.accountChars.rows[i]
 				local rowGuid = tostring((type(rowData) == "table" and rowData.guid) or "")
-				local rowNameFull = tostring((type(rowData) == "table" and rowData.name_full) or rowData or "-")
+				local rowNameFull = tostring((type(rowData) == "table" and (rowData.name_full or rowData.name)) or rowData or "")
+				rowNameFull = rowNameFull:gsub("^%s+", ""):gsub("%s+$", "")
+				if rowNameFull == "" then
+					rowNameFull = (rowGuid ~= "" and rowGuid) or "-"
+				end
 				local rowLevel = tonumber((type(rowData) == "table" and rowData.level) or 0) or 0
 				local rowClass = tostring((type(rowData) == "table" and rowData.class) or "-")
 				local rowClassFile = tostring((type(rowData) == "table" and rowData.classFile) or "")

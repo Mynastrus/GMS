@@ -35,7 +35,7 @@ local METADATA = {
 	INTERN_NAME  = "ACCOUNTINFO",
 	SHORT_NAME   = "AccountInfo",
 	DISPLAY_NAME = "Account Information",
-	VERSION      = "1.0.8",
+	VERSION      = "1.0.9",
 }
 
 local ACCOUNT_CHARS_SYNC_DOMAIN = "ACCOUNT_CHARS_V1"
@@ -173,51 +173,30 @@ function AccountInfo:PersistProfileSettings()
 		end
 	end
 	local playerGuid = (type(UnitGUID) == "function") and tostring(UnitGUID("player") or "") or ""
-	local base = (type(links.chars) == "table") and links.chars[playerGuid] or nil
-	local guildKey = type(base) == "table" and tostring(base.guildKey or "") or ""
-	local chars = {}
-	if guildKey ~= "" and type(links.chars) == "table" then
-		for guid, entry in pairs(links.chars) do
-			if type(entry) == "table" and tostring(entry.guildKey or "") == guildKey then
-				chars[#chars + 1] = { guid = tostring(guid or "") }
-			end
-		end
-	end
+	local validChoices = self:GetMainCharacterChoiceMap()
+	if type(validChoices) ~= "table" then validChoices = {} end
+	local hasAnyChoice = (next(validChoices) ~= nil)
 	if validatedMainGuid ~= "" then
-		local exists = false
-		for i = 1, #chars do
-			if tostring(chars[i].guid or "") == validatedMainGuid then
-				exists = true
-				break
-			end
-		end
-		if not exists then
+		if validChoices[validatedMainGuid] == nil and hasAnyChoice then
 			validatedMainGuid = ""
 		end
 	end
 	-- Keep persisted main-character preference whenever possible.
 	if validatedMainGuid == "" and persistedMainGuid ~= "" then
-		local exists = false
-		for i = 1, #chars do
-			if tostring(chars[i].guid or "") == persistedMainGuid then
-				exists = true
-				break
-			end
-		end
-		if exists then
+		if validChoices[persistedMainGuid] ~= nil or not hasAnyChoice then
 			validatedMainGuid = persistedMainGuid
 		end
 	end
-	if validatedMainGuid == "" then
-		for i = 1, #chars do
-			if tostring(chars[i].guid or "") == playerGuid then
-				validatedMainGuid = playerGuid
-				break
-			end
+	if validatedMainGuid == "" and playerGuid ~= "" then
+		if validChoices[playerGuid] ~= nil or not hasAnyChoice then
+			validatedMainGuid = playerGuid
 		end
 	end
-	if validatedMainGuid == "" and #chars > 0 then
-		validatedMainGuid = tostring(chars[1].guid or "")
+	if validatedMainGuid == "" and hasAnyChoice then
+		for guid in pairs(validChoices) do
+			validatedMainGuid = tostring(guid or "")
+			if validatedMainGuid ~= "" then break end
+		end
 	end
 	opts.mainCharacterGUID = validatedMainGuid
 
@@ -470,9 +449,13 @@ local function BuildAccountCharsListForGuild(links, guildKey)
 	if type(links) ~= "table" or type(links.chars) ~= "table" then return out end
 	for guid, entry in pairs(links.chars) do
 		if type(entry) == "table" and tostring(entry.guildKey or "") == key then
+			local guidStr = tostring(guid or "")
+			local nameFull = tostring(entry.name_full or entry.name or guidStr or "-")
+			nameFull = nameFull:gsub("^%s+", ""):gsub("%s+$", "")
+			if nameFull == "" then nameFull = (guidStr ~= "" and guidStr) or "-" end
 			out[#out + 1] = {
-				guid = tostring(guid or ""),
-				name_full = tostring(entry.name_full or entry.name or guid or "-"),
+				guid = guidStr,
+				name_full = nameFull,
 				name = tostring(entry.name or ""),
 				realm = tostring(entry.realm or ""),
 				level = tonumber(entry.level or 0) or 0,
@@ -861,10 +844,20 @@ function AccountInfo:PublishLocalAccountLinks(reason, force)
 end
 
 function AccountInfo:GetMainCharacterChoiceMap()
+	local function NormalizeChoiceName(label, fallbackGuid)
+		local s = tostring(label or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if s ~= "" then return s end
+		local g = tostring(fallbackGuid or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		return (g ~= "" and g) or "-"
+	end
+
 	local links = self:GetAccountLinkStore()
 	local guid = (type(UnitGUID) == "function") and tostring(UnitGUID("player") or "") or ""
 	local base = (type(links) == "table" and type(links.chars) == "table") and links.chars[guid] or nil
 	local guildKey = type(base) == "table" and tostring(base.guildKey or "") or ""
+	if guildKey == "" then
+		guildKey = tostring(select(1, GetCurrentGuildStorageKeySafe()) or "")
+	end
 	local chars = BuildAccountCharsListForGuild(links, guildKey)
 
 	local list = {}
@@ -872,7 +865,7 @@ function AccountInfo:GetMainCharacterChoiceMap()
 		local row = chars[i]
 		local rowGuid = tostring(row.guid or "")
 		if rowGuid ~= "" then
-			list[rowGuid] = tostring(row.name_full or rowGuid)
+			list[rowGuid] = NormalizeChoiceName(row.name_full, rowGuid)
 		end
 	end
 
@@ -882,14 +875,29 @@ function AccountInfo:GetMainCharacterChoiceMap()
 			local row = fromTwinks[i]
 			local rowGuid = tostring(row.guid or "")
 			if rowGuid ~= "" and list[rowGuid] == nil then
-				list[rowGuid] = tostring(row.name_full or rowGuid)
+				list[rowGuid] = NormalizeChoiceName(row.name_full, rowGuid)
 			end
 		end
 	end
 
+	local storedMainGuid = ""
+	if type(links) == "table" and type(links.profileSettings) == "table" then
+		storedMainGuid = tostring(links.profileSettings.mainCharacterGUID or "")
+	end
+	if storedMainGuid == "" then
+		local fallback = GetAccountProfileFallbackStore()
+		if type(fallback) == "table" then
+			storedMainGuid = tostring(fallback.mainCharacterGUID or "")
+		end
+	end
+	if storedMainGuid ~= "" and list[storedMainGuid] == nil then
+		local row = (type(links) == "table" and type(links.chars) == "table") and links.chars[storedMainGuid] or nil
+		list[storedMainGuid] = NormalizeChoiceName(type(row) == "table" and row.name_full, storedMainGuid)
+	end
+
 	if next(list) == nil and guid ~= "" then
 		local nameFull = type(base) == "table" and tostring(base.name_full or guid) or guid
-		list[guid] = nameFull
+		list[guid] = NormalizeChoiceName(nameFull, guid)
 	end
 	return list
 end

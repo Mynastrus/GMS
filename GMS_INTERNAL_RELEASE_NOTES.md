@@ -43,6 +43,10 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
   Files: `GMS/Modules/CharInfo.lua`
 - [x] Roster raid status now uses active-raid priority fallback, greys non-top-priority fallback results, and stores raid name/priority metadata for tooltip context.
   Files: `GMS/Modules/Roster.lua`
+- [x] AccountInfo main-character selection now resolves options more robustly across reloads (guild-key fallback, stored-main preservation, non-empty labels).
+  Files: `GMS/Modules/AccountInfo.lua`
+- [x] CharInfo header/general normalization hardened for missing/empty values to prevent blank names and invalid zero-level header states.
+  Files: `GMS/Modules/CharInfo.lua`
 
 ### Fixed
 - [x] Repeated Release Notes auto-open on reload mitigated when option-layer seen-version is unstable.
@@ -55,6 +59,8 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
   Files: `GMS/Modules/Roster.lua`
 - [x] Roster tooltip now shows the fallback best-attempt raid line including raid instance name when progression comes from lower-priority active raids.
   Files: `GMS/Modules/Roster.lua`, `GMS/Locales/enUS.lua`, `GMS/Locales/deDE.lua`
+- [x] Removed Lua 5.1-incompatible `goto` label in roster linked-row normalization that caused module load warnings.
+  Files: `GMS/Modules/Roster.lua`
 
 ### Rules/Infra
 - [ ] (noch keine Eintraege)
