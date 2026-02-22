@@ -44,10 +44,12 @@ local GameFontNormalOutline      = GameFontNormalOutline
 local GameFontNormalLarge        = GameFontNormalLarge
 local GameFontNormalSmallOutline = GameFontNormalSmallOutline
 local C_Timer                    = C_Timer
+local C_AddOns                   = C_AddOns
 local UpdateAddOnMemoryUsage     = UpdateAddOnMemoryUsage
 local GetAddOnMemoryUsage        = GetAddOnMemoryUsage
 local UpdateAddOnCPUUsage        = UpdateAddOnCPUUsage
 local GetAddOnCPUUsage           = GetAddOnCPUUsage
+local GetScriptCPUUsage          = GetScriptCPUUsage
 local GetNumAddOns               = GetNumAddOns
 local GetAddOnInfo               = GetAddOnInfo
 ---@diagnostic enable: undefined-global
@@ -61,7 +63,7 @@ local METADATA = {
 	INTERN_NAME  = "UI",
 	SHORT_NAME   = "UI",
 	DISPLAY_NAME = "Guild Management System",
-	VERSION      = "1.0.22",
+	VERSION      = "1.0.29",
 }
 
 -- ###########################################################################
@@ -229,16 +231,27 @@ local function ResolveGMSAddonIndex()
 		return nil
 	end
 
+	local function GetNameAndTitleByIndex(i)
+		if type(C_AddOns) == "table" and type(C_AddOns.GetAddOnInfo) == "function" then
+			local ok, info = pcall(C_AddOns.GetAddOnInfo, i)
+			if ok and type(info) == "table" then
+				return tostring(info.name or ""), tostring(info.title or info.Title or "")
+			end
+		end
+		local name, title = GetAddOnInfo(i)
+		return tostring(name or ""), tostring(title or "")
+	end
+
 	local cached = tonumber(UI._gmsAddonIndex or 0) or 0
 	if cached > 0 and cached <= GetNumAddOns() then
-		local cn, ct = GetAddOnInfo(cached)
+		local cn, ct = GetNameAndTitleByIndex(cached)
 		if IsGMSAddon(cn, ct) then
 			return cached
 		end
 	end
 
 	for i = 1, GetNumAddOns() do
-		local name, title = GetAddOnInfo(i)
+		local name, title = GetNameAndTitleByIndex(i)
 		if IsGMSAddon(name, title) then
 			UI._gmsAddonIndex = i
 			return i
@@ -294,24 +307,73 @@ local function ResolveGMSCPUUsageMS()
 	if type(UpdateAddOnCPUUsage) == "function" then
 		pcall(UpdateAddOnCPUUsage)
 	end
-	if type(GetAddOnCPUUsage) ~= "function" then
+	if type(GetAddOnCPUUsage) ~= "function" and not (type(C_AddOns) == "table" and type(C_AddOns.GetAddOnCPUUsage) == "function") then
 		return nil
+	end
+
+	local function ReadCPU(nameOrIndex)
+		if type(C_AddOns) == "table" and type(C_AddOns.GetAddOnCPUUsage) == "function" then
+			local ok, val
+			if nameOrIndex == nil then
+				ok, val = pcall(C_AddOns.GetAddOnCPUUsage)
+			else
+				ok, val = pcall(C_AddOns.GetAddOnCPUUsage, nameOrIndex)
+			end
+			if ok then
+				local n = tonumber(val or 0) or 0
+				if n > 0 then return n end
+			end
+		end
+		if type(GetAddOnCPUUsage) == "function" then
+			if nameOrIndex == nil then
+				return tonumber(GetAddOnCPUUsage() or 0) or 0
+			end
+			return tonumber(GetAddOnCPUUsage(nameOrIndex) or 0) or 0
+		end
+		return 0
 	end
 
 	local idx = ResolveGMSAddonIndex()
 	if idx then
-		return tonumber(GetAddOnCPUUsage(idx) or 0) or 0
+		local name = (type(GetAddOnInfo) == "function") and GetAddOnInfo(idx) or nil
+		local byName = (name and name ~= "") and ReadCPU(name) or 0
+		if byName > 0 then
+			return byName
+		end
+		return ReadCPU(idx)
 	end
 
-	return tonumber(GetAddOnCPUUsage("GMS") or 0) or 0
+	return ReadCPU("GMS")
 end
 
 local function ResolveTotalAddOnCPUUsageMS(includeBlizzard)
-	if type(GetNumAddOns) ~= "function" or type(GetAddOnCPUUsage) ~= "function" then
+	if type(GetNumAddOns) ~= "function" or (type(GetAddOnCPUUsage) ~= "function" and not (type(C_AddOns) == "table" and type(C_AddOns.GetAddOnCPUUsage) == "function")) then
 		return nil
 	end
 	if type(UpdateAddOnCPUUsage) == "function" then
 		pcall(UpdateAddOnCPUUsage)
+	end
+
+	local function ReadCPU(nameOrIndex)
+		if type(C_AddOns) == "table" and type(C_AddOns.GetAddOnCPUUsage) == "function" then
+			local ok, val
+			if nameOrIndex == nil then
+				ok, val = pcall(C_AddOns.GetAddOnCPUUsage)
+			else
+				ok, val = pcall(C_AddOns.GetAddOnCPUUsage, nameOrIndex)
+			end
+			if ok then
+				local n = tonumber(val or 0) or 0
+				if n > 0 then return n end
+			end
+		end
+		if type(GetAddOnCPUUsage) == "function" then
+			if nameOrIndex == nil then
+				return tonumber(GetAddOnCPUUsage() or 0) or 0
+			end
+			return tonumber(GetAddOnCPUUsage(nameOrIndex) or 0) or 0
+		end
+		return 0
 	end
 
 	local withBlizzard = not not includeBlizzard
@@ -319,10 +381,30 @@ local function ResolveTotalAddOnCPUUsageMS(includeBlizzard)
 	for i = 1, GetNumAddOns() do
 		local name = (type(GetAddOnInfo) == "function") and GetAddOnInfo(i) or nil
 		if withBlizzard or not IsBlizzardAddonName(name) then
-			total = total + (tonumber(GetAddOnCPUUsage(i) or 0) or 0)
+			local part = 0
+			if name and name ~= "" then
+				part = ReadCPU(name)
+			end
+			if part <= 0 then
+				part = ReadCPU(i)
+			end
+			total = total + part
 		end
 	end
+	if total <= 0 then
+		total = ReadCPU(nil)
+	end
 	return total
+end
+
+local function ResolveScriptCPUUsageMS()
+	if type(UpdateAddOnCPUUsage) == "function" then
+		pcall(UpdateAddOnCPUUsage)
+	end
+	if type(GetScriptCPUUsage) ~= "function" then
+		return nil
+	end
+	return tonumber(GetScriptCPUUsage() or 0) or 0
 end
 
 -- UI options (migrated to RegisterModuleOptions API)
@@ -448,6 +530,7 @@ function UI:StopFooterMetricsTicker()
 	self._metricsTicker = nil
 	self._cpuPrevAddonMs = nil
 	self._cpuPrevTotalMs = nil
+	self._cpuPrevSampleAt = nil
 end
 
 function UI:UpdateFooterMetrics()
@@ -458,7 +541,10 @@ function UI:UpdateFooterMetrics()
 
 	local addonKb = ResolveGMSMemoryKB()
 	local addonCpuMs = ResolveGMSCPUUsageMS()
-	local totalCpuMs = ResolveTotalAddOnCPUUsageMS(false)
+	local totalCpuMs = ResolveScriptCPUUsageMS()
+	if not totalCpuMs or totalCpuMs <= 0 then
+		totalCpuMs = ResolveTotalAddOnCPUUsageMS(false)
+	end
 	if not totalCpuMs or totalCpuMs <= 0 then
 		totalCpuMs = ResolveTotalAddOnCPUUsageMS(true)
 	end
@@ -471,27 +557,43 @@ function UI:UpdateFooterMetrics()
 	local cValue = "|cffffffff"
 	local cReset = "|r"
 	local text
-	if addonCpuMs and totalCpuMs and totalCpuMs > 0 then
+	if addonCpuMs ~= nil then
 		local cpuPct = nil
+		local sampleAt = (type(GetTime) == "function") and (tonumber(GetTime() or 0) or 0) or 0
 		local prevAddon = tonumber(self._cpuPrevAddonMs or 0) or 0
 		local prevTotal = tonumber(self._cpuPrevTotalMs or 0) or 0
-		if prevTotal > 0 and totalCpuMs >= prevTotal and addonCpuMs >= prevAddon then
+		local prevSampleAt = tonumber(self._cpuPrevSampleAt or 0) or 0
+		if prevSampleAt > 0 and sampleAt > prevSampleAt and addonCpuMs >= prevAddon then
+			local deltaSec = sampleAt - prevSampleAt
+			local deltaAddon = addonCpuMs - prevAddon
+			if deltaSec > 0 then
+				cpuPct = (deltaAddon / (deltaSec * 1000)) * 100
+			end
+		end
+		if totalCpuMs and totalCpuMs > 0 and prevTotal > 0 and totalCpuMs >= prevTotal and addonCpuMs >= prevAddon then
 			local deltaTotal = totalCpuMs - prevTotal
 			local deltaAddon = addonCpuMs - prevAddon
 			if deltaTotal > 0 then
-				cpuPct = (deltaAddon / deltaTotal) * 100
+				local cpuPctByScript = (deltaAddon / deltaTotal) * 100
+				if cpuPct == nil or cpuPctByScript > cpuPct then
+					cpuPct = cpuPctByScript
+				end
 			end
 		end
-		if cpuPct == nil then
+		if cpuPct == nil and totalCpuMs and totalCpuMs > 0 then
 			cpuPct = (addonCpuMs / totalCpuMs) * 100
+		end
+		if cpuPct == nil then
+			cpuPct = 0
 		end
 		if cpuPct < 0 then cpuPct = 0 end
 		if cpuPct > 100 then cpuPct = 100 end
 
 		self._cpuPrevAddonMs = addonCpuMs
-		self._cpuPrevTotalMs = totalCpuMs
+		self._cpuPrevTotalMs = (totalCpuMs and totalCpuMs > 0) and totalCpuMs or nil
+		self._cpuPrevSampleAt = (sampleAt > 0) and sampleAt or nil
 		text = string.format(
-			"%s%s%s %s%.2f MB%s | %s%s%s %s%.2f%%%s",
+			"%s%s%s %s%.2f MB%s   %s%s%s %s%.3f%%%s",
 			cLabel, labelMem, cReset,
 			cValue, addonMb, cReset,
 			cLabel, labelCpu, cReset,
@@ -500,8 +602,9 @@ function UI:UpdateFooterMetrics()
 	else
 		self._cpuPrevAddonMs = nil
 		self._cpuPrevTotalMs = nil
+		self._cpuPrevSampleAt = nil
 		text = string.format(
-			"%s%s%s %s%.2f MB%s | %s%s%s %s%s%s",
+			"%s%s%s %s%.2f MB%s   %s%s%s %s%s%s",
 			cLabel, labelMem, cReset,
 			cValue, addonMb, cReset,
 			cLabel, labelCpu, cReset,
@@ -1089,7 +1192,7 @@ function UI:CreateFrame()
 
 	local metricsFS = content_footer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmallOutline")
 	metricsFS:ClearAllPoints()
-	metricsFS:SetPoint("TOPRIGHT", content_footer, "TOPRIGHT", -2, -2)
+	metricsFS:SetPoint("TOPRIGHT", content_footer, "TOPRIGHT", -2, -1)
 	metricsFS:SetJustifyH("RIGHT")
 	metricsFS:SetJustifyV("TOP")
 	metricsFS:SetText("")

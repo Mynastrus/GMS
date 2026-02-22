@@ -11,6 +11,7 @@ Diese Regeln gelten dauerhaft für **Code, Versionierung, Logging, Commits und T
 * Repository: [https://github.com/Mynastrus/GMS](https://github.com/Mynastrus/GMS)
 * Das Repository ist **öffentlich**
 * Bei allen Änderungen, Analysen oder Erweiterungen ist **dieses Repo die einzige Referenz**
+* Zusaetzlich verbindlich zu beachten: `GMS_INTERNAL_RELEASE_NOTES.md` und `GMS_PLAYER_SYNC_BASELINE.md`
 
 ---
 
@@ -372,6 +373,22 @@ local C_Timer          = C_Timer
 * Innerhalb der Logik **DARF NICHT** direkt auf `_G.XYZ` zugegriffen werden, wenn `XYZ` ein Blizzard-Global ist.
 * Stattdessen wird die lokale Variable `XYZ` verwendet.
 * Die Lokalisierung dient als zentrale Stelle zur Absicherung gegen fehlende APIs in verschiedenen WoW-Umgebungen.
+
+---
+
+## 12.7 Retail-First API-Regel (Pflicht)
+
+GMS wird **erstrangig fuer WoW Retail** entwickelt.
+
+**Verbindliche Regeln:**
+
+* Wenn eine Blizzard-API als Namespace-Funktion `C_*` existiert und in Retail funktioniert, **MUSS** sie bevorzugt verwendet werden.
+* Legacy-Globals (z. B. `GetAddOnInfo`, `GetAddOnCPUUsage`, `GetAddOnMemoryUsage`) sind nur als **Fallback** erlaubt.
+* Bei API-Zugriffen ist das Muster verpflichtend:
+  * zuerst `C_*` pruefen/verwenden
+  * erst danach auf Legacy-Global fallbacken
+* Neue Implementierungen duerfen keine Retail-faehige `C_*`-API durch Legacy-Global ersetzen.
+* Die gewaehlte API-Reihenfolge (Retail-First + Fallback) ist im Code an der Aufrufstelle kurz nachvollziehbar zu halten.
 
 ---
 

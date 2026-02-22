@@ -40,9 +40,12 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
   Dateien: `GMS/Core/UI.lua`
 - [x] CharInfo rendert wieder vollständig (kein Hängen auf nur einer Karte/Feld durch verzögerten Build-Pfad); Deferred-Rendering standardmäßig deaktiviert.  
   Dateien: `GMS/Modules/CharInfo.lua`
+- [x] UI-CPU-Metrikpfad auf Retail-kompatible API-Reihenfolge erweitert (`C_AddOns.*` bevorzugt, Legacy-Fallback) und Footer-CPU-Berechnung/Fallbacks für stabile Anzeige nachgeschärft.  
+  Dateien: `GMS/Core/UI.lua`
 
 ### Rules/Infra
-- [ ] (noch keine Eintraege)
+- [x] Projektregeln erweitert: Retail-First-API-Pflicht (`C_*` bevorzugt, Legacy nur Fallback) sowie verbindliche Beachtung von `GMS_INTERNAL_RELEASE_NOTES.md` und `GMS_PLAYER_SYNC_BASELINE.md`.  
+  Dateien: `GMS_PROJECT_RULES.md`
 
 ## Last Release Snapshot
 
