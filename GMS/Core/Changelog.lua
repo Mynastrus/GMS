@@ -109,6 +109,25 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 
 local RELEASES = {
 	{
+		version = "1.5.1",
+		date = "2026-02-22",
+		title_en = "Roster/CharInfo UX completion, account-link correctness, and major runtime performance hardening",
+		title_de = "Roster/CharInfo-UX-Abschluss, korrekte Account-Link-Zuordnung und deutlich gehaertete Laufzeit-Performance",
+		notes_en = {
+			"Completed the requested Roster UX updates with default-expanded Settings tree sections and restored Zone column rendering including alignment/clipping fixes.",
+			"CharInfo now keeps Mythic+ default dungeon rows visible even when no synced run payload exists yet, so the card structure remains informative for new/unsynced characters.",
+			"AccountInfo account-link resolution was hardened to avoid incorrect cross-character references, including strict selected-GUID validation and safer main-character persistence fallback.",
+			"GuildLog persistence was reinforced with guild-key fallback mirroring and reduced scan/refresh pressure to minimize session-loss edge cases and lag spikes.",
+			"Dashboard was upgraded to a true system-status landing page with READY/NOT READY overview for extensions/modules and localized status strings.",
+		},
+		notes_de = {
+			"Die angeforderten Roster-UX-Updates wurden abgeschlossen: standardmaessig aufgeklappte Settings-Baumabschnitte sowie wiederhergestellte Zone-Spalte inklusive Ausrichtungs-/Clipping-Fix.",
+			"CharInfo zeigt nun die Standard-Mythic+-Dungeons auch ohne synchronisierte Run-Daten, damit die Kartenstruktur fuer neue/unsynchronisierte Charaktere sichtbar bleibt.",
+			"Die AccountInfo-Account-Link-Aufloesung wurde gehaertet, um falsche Cross-Character-Referenzen zu vermeiden, inklusive strikter Selected-GUID-Validierung und robuster Main-Character-Persistenz.",
+			"Die GuildLog-Persistenz wurde mit guild-key-Fallback-Mirroring stabilisiert und die Scan-/Refresh-Last gesenkt, um Session-Loss-Randfaelle und Lag-Spitzen zu reduzieren.",
+			"Das Dashboard wurde zu einer echten Systemstatus-Startseite erweitert (READY/NOT READY fuer Extensions/Module) inklusive lokalisierter Status-Texte.",
+		},
+	},{
 		version = "1.5.0",
 		date = "2026-02-18",
 		title_en = "Baseline player sync rollout, account/twink resilience, and database reset hardening",
@@ -1133,3 +1152,4 @@ end
 
 GMS:SetReady("EXT:" .. METADATA.INTERN_NAME)
 LOCAL_LOG("INFO", "Changelog extension loaded", METADATA.VERSION)
+
