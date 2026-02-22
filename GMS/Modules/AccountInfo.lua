@@ -35,7 +35,7 @@ local METADATA = {
 	INTERN_NAME  = "ACCOUNTINFO",
 	SHORT_NAME   = "AccountInfo",
 	DISPLAY_NAME = "Account Information",
-	VERSION      = "1.0.6",
+	VERSION      = "1.0.8",
 }
 
 local ACCOUNT_CHARS_SYNC_DOMAIN = "ACCOUNT_CHARS_V1"
@@ -162,6 +162,16 @@ function AccountInfo:PersistProfileSettings()
 	if type(opts) ~= "table" then return false end
 
 	local validatedMainGuid = tostring(opts.mainCharacterGUID or "")
+	local persistedMainGuid = ""
+	if type(links.profileSettings) == "table" then
+		persistedMainGuid = tostring(links.profileSettings.mainCharacterGUID or "")
+	end
+	if persistedMainGuid == "" then
+		local fallback = GetAccountProfileFallbackStore()
+		if type(fallback) == "table" then
+			persistedMainGuid = tostring(fallback.mainCharacterGUID or "")
+		end
+	end
 	local playerGuid = (type(UnitGUID) == "function") and tostring(UnitGUID("player") or "") or ""
 	local base = (type(links.chars) == "table") and links.chars[playerGuid] or nil
 	local guildKey = type(base) == "table" and tostring(base.guildKey or "") or ""
@@ -183,6 +193,19 @@ function AccountInfo:PersistProfileSettings()
 		end
 		if not exists then
 			validatedMainGuid = ""
+		end
+	end
+	-- Keep persisted main-character preference whenever possible.
+	if validatedMainGuid == "" and persistedMainGuid ~= "" then
+		local exists = false
+		for i = 1, #chars do
+			if tostring(chars[i].guid or "") == persistedMainGuid then
+				exists = true
+				break
+			end
+		end
+		if exists then
+			validatedMainGuid = persistedMainGuid
 		end
 	end
 	if validatedMainGuid == "" then
@@ -348,6 +371,75 @@ function AccountInfo:GetAccountLinkStore()
 	local links = global.accountLinks
 	links.chars = type(links.chars) == "table" and links.chars or {}
 	links.synced = type(links.synced) == "table" and links.synced or {}
+
+	-- Merge persisted raw SavedVariables into AceDB tables so option dropdowns
+	-- (Main-Char select) always see all known GUID rows across sessions/chars.
+	local rawDB = type(_G) == "table" and rawget(_G, "GMS_DB") or nil
+	local rawGlobal = type(rawDB) == "table" and rawDB.global or nil
+	if type(rawGlobal) == "table" then
+		local rawLinks = type(rawGlobal.accountLinks) == "table" and rawGlobal.accountLinks or nil
+		local rawChars = rawLinks and rawLinks.chars
+		if type(rawChars) == "table" then
+			for guid, row in pairs(rawChars) do
+				local g = tostring(guid or "")
+				if g ~= "" and type(row) == "table" then
+					links.chars[g] = links.chars[g] or {}
+					local dst = links.chars[g]
+					dst.guid = g
+					dst.name = tostring(row.name or dst.name or "")
+					dst.realm = tostring(row.realm or dst.realm or "")
+					dst.name_full = tostring(row.name_full or dst.name_full or dst.name or g)
+					dst.class = tostring(row.class or dst.class or "-")
+					dst.classFile = tostring(row.classFile or dst.classFile or "")
+					dst.level = tonumber(row.level or dst.level or 0) or 0
+					dst.guild = tostring(row.guild or dst.guild or "")
+					dst.guildKey = tostring(row.guildKey or dst.guildKey or "")
+					dst.lastSeenAt = tonumber(row.lastSeenAt or dst.lastSeenAt or 0) or 0
+				end
+			end
+		end
+
+		local rawTwinks = type(rawGlobal.twinks) == "table" and rawGlobal.twinks or nil
+		if type(rawTwinks) == "table" then
+			for i = 1, #rawTwinks do
+				local guid = tostring(rawTwinks[i] or "")
+				if guid ~= "" then
+					local exists = false
+					for j = 1, #global.twinks do
+						if tostring(global.twinks[j] or "") == guid then
+							exists = true
+							break
+						end
+					end
+					if not exists then
+						global.twinks[#global.twinks + 1] = guid
+					end
+				end
+			end
+		end
+
+		local rawMeta = type(rawGlobal.twinkMeta) == "table" and rawGlobal.twinkMeta or nil
+		if type(rawMeta) == "table" then
+			for guid, row in pairs(rawMeta) do
+				local g = tostring(guid or "")
+				if g ~= "" and type(row) == "table" then
+					global.twinkMeta[g] = global.twinkMeta[g] or {}
+					local dst = global.twinkMeta[g]
+					dst.guid = g
+					dst.name = tostring(row.name or dst.name or "")
+					dst.realm = tostring(row.realm or dst.realm or "")
+					dst.name_full = tostring(row.name_full or dst.name_full or dst.name or g)
+					dst.class = tostring(row.class or dst.class or "-")
+					dst.classFile = tostring(row.classFile or dst.classFile or "")
+					dst.level = tonumber(row.level or dst.level or 0) or 0
+					dst.guild = tostring(row.guild or dst.guild or "")
+					dst.guildKey = tostring(row.guildKey or dst.guildKey or "")
+					dst.lastSeenAt = tonumber(row.lastSeenAt or dst.lastSeenAt or 0) or 0
+				end
+			end
+		end
+	end
+
 	return links
 end
 
@@ -574,6 +666,56 @@ local function BuildStoredLinkedRows(selectedGuid, chars, fallbackGuildKey, sour
 	return rows, true, tostring(sourceLabel or "Account links (stored)")
 end
 
+local function BuildLooseStoredLinkedRows(selectedGuid, chars, fallbackGuildKey, sourceLabel)
+	local guid = tostring(selectedGuid or "")
+	local selectedGuildKey = tostring(fallbackGuildKey or "")
+	if type(chars) ~= "table" or #chars <= 0 then
+		return {}, false, "No same-account characters stored yet."
+	end
+	for i = 1, #chars do
+		local row = chars[i]
+		if type(row) == "table" and tostring(row.guid or "") == guid then
+			local rowGuildKey = tostring(row.guildKey or "")
+			if rowGuildKey ~= "" then
+				selectedGuildKey = rowGuildKey
+			end
+			break
+		end
+	end
+	if selectedGuildKey == "" then
+		selectedGuildKey = tostring(select(1, GetCurrentGuildStorageKeySafe()) or "")
+	end
+	if selectedGuildKey == "" then
+		return {}, false, "No guild context available."
+	end
+
+	local rows = {}
+	for i = 1, #chars do
+		local entry = chars[i]
+		if type(entry) == "table" then
+			local otherGuid = tostring(entry.guid or "")
+			local otherGuildKey = tostring(entry.guildKey or selectedGuildKey)
+			if otherGuid ~= "" and otherGuid ~= guid and otherGuildKey == selectedGuildKey then
+				rows[#rows + 1] = {
+					guid = otherGuid,
+					name_full = tostring(entry.name_full or entry.name or otherGuid),
+					level = tonumber(entry.level or 0) or 0,
+					class = tostring(entry.class or "-"),
+					classFile = tostring(entry.classFile or ""),
+					online = false,
+				}
+			end
+		end
+	end
+	table.sort(rows, function(a, b)
+		return tostring(a.name_full or "") < tostring(b.name_full or "")
+	end)
+	if #rows <= 0 then
+		return rows, false, "No same-account guild characters in stored links."
+	end
+	return rows, true, tostring(sourceLabel or "Account links (stored-loose)")
+end
+
 local function BuildAccountCharsDigest(guildKey, chars)
 	local parts = { tostring(guildKey or "") }
 	for i = 1, #chars do
@@ -654,6 +796,31 @@ function AccountInfo:PublishLocalAccountLinks(reason, force)
 		end
 		if not exists then
 			mainGuid = ""
+		end
+	end
+	if mainGuid == "" and type(links.profileSettings) == "table" then
+		local storedMain = tostring(links.profileSettings.mainCharacterGUID or "")
+		if storedMain ~= "" then
+			for i = 1, #chars do
+				if tostring(chars[i].guid or "") == storedMain then
+					mainGuid = storedMain
+					break
+				end
+			end
+		end
+	end
+	if mainGuid == "" then
+		local fallback = GetAccountProfileFallbackStore()
+		if type(fallback) == "table" then
+			local storedMain = tostring(fallback.mainCharacterGUID or "")
+			if storedMain ~= "" then
+				for i = 1, #chars do
+					if tostring(chars[i].guid or "") == storedMain then
+						mainGuid = storedMain
+						break
+					end
+				end
+			end
 		end
 	end
 	if mainGuid == "" then
@@ -1069,6 +1236,13 @@ function AccountInfo:GetLinkedAccountGuildCharactersForGuid(guid)
 				"Local account guild links (stored)"
 			)
 			if fallbackHasData then return fallbackRows, true, fallbackSource end
+			local looseRows, looseHasData, looseSource = BuildLooseStoredLinkedRows(
+				g,
+				localChars,
+				guildKey,
+				"Local account guild links (stored-loose)"
+			)
+			if looseHasData then return looseRows, true, looseSource end
 
 			local syncedRows, syncedHasData, syncedSource = self:GetSyncedAccountGuildCharactersForGuid(g)
 			if syncedHasData then return syncedRows, true, syncedSource end

@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.1.8",
+	VERSION      = "1.1.13",
 }
 
 local LibStub = LibStub
@@ -320,6 +320,8 @@ local function GetAllGuildMembers(sortSpec, skipRequest)
 			m.mplusScore = (meta and tonumber(meta.mplus)) or nil
 			m.raidStatus = (meta and tostring(meta.raid or "")) or "-"
 			if m.raidStatus == "" then m.raidStatus = "-" end
+			m.raidName = (meta and tostring(meta.raid_name or "")) or ""
+			m.raidPriority = (meta and tonumber(meta.raid_priority)) or nil
 			m.gmsVersion = (meta and tostring(meta.version or "")) or "-"
 			if m.gmsVersion == "" then m.gmsVersion = "-" end
 			if m.guid and UnitGUID and m.guid == UnitGUID("player") and (m.gmsVersion == "-") then
@@ -764,6 +766,10 @@ function Roster:SetMemberMeta(guid, meta, seenAt, opts)
 
 	local raid = tostring(meta.raid or "")
 	if raid ~= "" then row.raid = raid end
+	local raidName = tostring(meta.raid_name or meta.best_raid_name or "")
+	if raidName ~= "" then row.raid_name = raidName end
+	local raidPriority = tonumber(meta.raid_priority or meta.best_raid_priority)
+	if raidPriority and raidPriority > 0 then row.raid_priority = raidPriority end
 
 	local name = tostring(meta.name or meta.playerName or "")
 	if name ~= "" then row.name = name end
@@ -839,6 +845,29 @@ local function GetAccountInfoModule()
 	return GMS and (GMS:GetModule("ACCOUNTINFO", true) or GMS:GetModule("AccountInfo", true)) or nil
 end
 
+local function NormalizeLinkedRows(rows)
+	if type(rows) ~= "table" then
+		return {}
+	end
+	local out = {}
+	for i = 1, #rows do
+		local r = rows[i]
+		if type(r) == "table" then
+			out[#out + 1] = r
+		elseif type(r) == "string" and r ~= "" then
+			out[#out + 1] = {
+				guid = "",
+				name_full = r,
+				level = 0,
+				class = "-",
+				classFile = "",
+				online = false,
+			}
+		end
+	end
+	return out
+end
+
 function Roster:GetAccountLinkStore()
 	local ai = GetAccountInfoModule()
 	if type(ai) == "table" and type(ai.GetAccountLinkStore) == "function" then
@@ -874,7 +903,15 @@ end
 function Roster:GetLinkedAccountGuildCharactersForGuid(guid)
 	local ai = GetAccountInfoModule()
 	if type(ai) == "table" and type(ai.GetLinkedAccountGuildCharactersForGuid) == "function" then
-		return ai:GetLinkedAccountGuildCharactersForGuid(guid)
+		local rows, hasData, source = ai:GetLinkedAccountGuildCharactersForGuid(guid)
+		rows = NormalizeLinkedRows(rows)
+		if hasData == nil then
+			hasData = (#rows > 0)
+		end
+		if type(source) ~= "string" or source == "" then
+			source = "AccountInfo links"
+		end
+		return rows, hasData == true, source
 	end
 	return {}, false, "accountinfo-unavailable"
 end
@@ -888,6 +925,103 @@ function Roster:SetMemberGmsVersion(guid, version, seenAt)
 end
 
 local BuildRaidStatusFromRaidsStore
+local GetBestRaidProgressFromEntry
+local ACTIVE_RAID_PRIORITY = { 2810, 2769, 2657 } -- newest -> older
+local ACTIVE_RAID_PRIORITY_INDEX = {}
+for i = 1, #ACTIVE_RAID_PRIORITY do
+	ACTIVE_RAID_PRIORITY_INDEX[ACTIVE_RAID_PRIORITY[i]] = i
+end
+local ACTIVE_RAID_INFO_BY_INSTANCE = {
+	[2810] = { name = "Manaschmiede Omega" },
+	[2769] = { name = "Befreiung von Lorenhall" },
+	[2657] = { name = "Palast der Nerub'ar" },
+}
+
+local function NormalizeRaidPriorityName(name)
+	local s = string.lower(tostring(name or ""))
+	return (s:gsub("[%s%p]+", ""))
+end
+
+local ACTIVE_RAID_PRIORITY_BY_NAME = {
+	[NormalizeRaidPriorityName("Manaschmiede Omega")] = 1,
+	[NormalizeRaidPriorityName("Manaforge Omega")] = 1,
+	[NormalizeRaidPriorityName("Befreiung von Lorenhall")] = 2,
+	[NormalizeRaidPriorityName("Liberation of Lorenhall")] = 2,
+	[NormalizeRaidPriorityName("Palast der Nerub'ar")] = 3,
+	[NormalizeRaidPriorityName("Palace of Nerub'ar")] = 3,
+	[NormalizeRaidPriorityName("Nerub'ar Palace")] = 3,
+}
+
+local function GetRaidPriorityForEntry(key, raidEntry)
+	local instanceID = tonumber(type(raidEntry) == "table" and raidEntry.instanceID or nil) or tonumber(key)
+	if instanceID and ACTIVE_RAID_PRIORITY_INDEX[instanceID] then
+		return ACTIVE_RAID_PRIORITY_INDEX[instanceID]
+	end
+
+	local rawName = ""
+	if type(raidEntry) == "table" then
+		rawName = tostring(raidEntry.name or "")
+	elseif type(key) == "string" then
+		rawName = key
+	end
+	if rawName ~= "" then
+		return ACTIVE_RAID_PRIORITY_BY_NAME[NormalizeRaidPriorityName(rawName)]
+	end
+	return nil
+end
+
+local function GetRaidNameForEntry(key, raidEntry)
+	if type(raidEntry) == "table" then
+		local n = tostring(raidEntry.name or "")
+		if n ~= "" and n ~= "-" then
+			return n
+		end
+	end
+	local instanceID = tonumber(type(raidEntry) == "table" and raidEntry.instanceID or nil) or tonumber(key)
+	if instanceID and type(ACTIVE_RAID_INFO_BY_INSTANCE[instanceID]) == "table" then
+		return tostring(ACTIVE_RAID_INFO_BY_INSTANCE[instanceID].name or "")
+	end
+	return ""
+end
+
+local function BuildRaidStatusDetailsFromRaidsStore(all)
+	if type(all) ~= "table" then
+		return "-", nil, nil
+	end
+
+	local byPriority = {}
+	for key, raidEntry in pairs(all) do
+		local priority = GetRaidPriorityForEntry(key, raidEntry)
+		if priority then
+			local b = GetBestRaidProgressFromEntry(raidEntry)
+			if b and (tonumber(b.killed) or 0) > 0 then
+				local cur = byPriority[priority]
+				if not cur
+					or (tonumber(b.diff) or -1) > (tonumber(cur.diff) or -1)
+					or ((tonumber(b.diff) or -1) == (tonumber(cur.diff) or -1) and (tonumber(b.killed) or -1) > (tonumber(cur.killed) or -1))
+				then
+					byPriority[priority] = {
+						diff = tonumber(b.diff) or 0,
+						killed = tonumber(b.killed) or 0,
+						short = tostring(b.short or "-"),
+						raidName = GetRaidNameForEntry(key, raidEntry),
+					}
+				end
+			end
+		end
+	end
+
+	for i = 1, #ACTIVE_RAID_PRIORITY do
+		local b = byPriority[i]
+		if b and b.short ~= "" and b.short ~= "-" then
+			local raidName = tostring(b.raidName or "")
+			if raidName == "" then raidName = nil end
+			return b.short, raidName, i
+		end
+	end
+
+	return "-", nil, nil
+end
 
 local function BuildRaidStatusFromRaidsModule()
 	local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true))
@@ -897,10 +1031,11 @@ local function BuildRaidStatusFromRaidsModule()
 
 	local all = raids:GetAllRaids()
 	if type(all) ~= "table" then return "-" end
-	return BuildRaidStatusFromRaidsStore(all)
+	local short = BuildRaidStatusDetailsFromRaidsStore(all)
+	return short
 end
 
-local function GetBestRaidProgressFromEntry(raidEntry)
+GetBestRaidProgressFromEntry = function(raidEntry)
 	if type(raidEntry) ~= "table" then return nil end
 
 	local best = nil
@@ -926,20 +1061,8 @@ local function GetBestRaidProgressFromEntry(raidEntry)
 end
 
 BuildRaidStatusFromRaidsStore = function(all)
-	if type(all) ~= "table" then return "-" end
-
-	local bestDiff = -1
-	local bestKilled = -1
-	local bestShort = "-"
-	for _, raidEntry in pairs(all) do
-		local b = GetBestRaidProgressFromEntry(raidEntry)
-		if b and (b.diff > bestDiff or (b.diff == bestDiff and b.killed > bestKilled)) then
-			bestDiff = b.diff
-			bestKilled = b.killed
-			bestShort = b.short
-		end
-	end
-	return bestShort
+	local short = BuildRaidStatusDetailsFromRaidsStore(all)
+	return short
 end
 
 local function BuildItemLevelFromEquipmentSnapshot(snapshot)
@@ -966,6 +1089,8 @@ local function CollectLocalMetaPayload()
 	local version = tostring((GMS and GMS.VERSION) or "")
 	local ilvl, mplus = nil, nil
 	local raid = "-"
+	local raidName = nil
+	local raidPriority = nil
 	local base = BuildSelfBaseMeta()
 	local nowServerTs = (type(GetServerTime) == "function" and tonumber(GetServerTime()) or nil)
 	if not nowServerTs then
@@ -994,7 +1119,7 @@ local function CollectLocalMetaPayload()
 
 	local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true))
 	if raids and type(raids._options) == "table" and type(raids._options.raids) == "table" then
-		raid = BuildRaidStatusFromRaidsStore(raids._options.raids)
+		raid, raidName, raidPriority = BuildRaidStatusDetailsFromRaidsStore(raids._options.raids)
 	else
 		raid = BuildRaidStatusFromRaidsModule()
 	end
@@ -1015,6 +1140,10 @@ local function CollectLocalMetaPayload()
 		mythicplus = mplus,
 		raid = raid,
 		best_in_raid = raid,
+		raid_name = raidName,
+		best_raid_name = raidName,
+		raid_priority = raidPriority,
+		best_raid_priority = raidPriority,
 		ts_server = nowServerTs,
 	}
 end
@@ -1484,6 +1613,8 @@ function Roster:InitCommMetaSync()
 				mplus = payload.mythicplus or payload.mplus,
 				mythicplus = payload.mythicplus or payload.mplus,
 				raid = payload.raid or payload.best_in_raid,
+				raid_name = payload.raid_name or payload.best_raid_name,
+				raid_priority = payload.raid_priority or payload.best_raid_priority,
 			}, record.updatedAt or ((GetTime and GetTime()) or 0), {
 				domain = "roster_meta",
 				sourceGUID = record.originGUID,
@@ -1533,9 +1664,11 @@ function Roster:InitCommMetaSync()
 			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
 			local payload = record.payload
 			if type(payload) ~= "table" or type(payload.raids) ~= "table" then return end
-			local raid = BuildRaidStatusFromRaidsStore(payload.raids)
+			local raid, raidName, raidPriority = BuildRaidStatusDetailsFromRaidsStore(payload.raids)
 			if raid ~= "" and raid ~= "-" and Roster:SetMemberMeta(record.originGUID, {
 				raid = raid,
+				raid_name = raidName,
+				raid_priority = raidPriority,
 			}, record.updatedAt or ((GetTime and GetTime()) or 0), {
 				domain = "raid",
 				sourceGUID = record.originGUID,
@@ -1583,6 +1716,8 @@ function Roster:InitCommMetaSync()
 				mplus = payload.mythicplus or payload.mplus,
 				mythicplus = payload.mythicplus or payload.mplus,
 				raid = payload.raid or payload.best_in_raid,
+				raid_name = payload.raid_name or payload.best_raid_name,
+				raid_priority = payload.raid_priority or payload.best_raid_priority,
 			}, record.updatedAt or ((GetTime and GetTime()) or 0), {
 				domain = "roster_meta",
 				sourceGUID = record.originGUID,
@@ -1619,9 +1754,9 @@ function Roster:InitCommMetaSync()
 		hydrateHandlers[#hydrateHandlers + 1] = { domain = "RAIDS_V1", fn = function(record)
 			local payload = record.payload
 			if type(payload) ~= "table" or type(payload.raids) ~= "table" then return end
-			local raid = BuildRaidStatusFromRaidsStore(payload.raids)
+			local raid, raidName, raidPriority = BuildRaidStatusDetailsFromRaidsStore(payload.raids)
 			if raid ~= "" and raid ~= "-" then
-				Roster:SetMemberMeta(record.originGUID, { raid = raid }, record.updatedAt or ((GetTime and GetTime()) or 0), {
+				Roster:SetMemberMeta(record.originGUID, { raid = raid, raid_name = raidName, raid_priority = raidPriority }, record.updatedAt or ((GetTime and GetTime()) or 0), {
 					domain = "raid",
 					sourceGUID = record.originGUID,
 					isSelfReport = (tostring(record.originGUID or "") == tostring(record.charGUID or "")),
@@ -2033,8 +2168,13 @@ end
 
 local function BuildCell_RaidStatus(row, member, ctx)
 	local txt = tostring((member and member.raidStatus) or "-")
+	local priority = tonumber(member and member.raidPriority or 0) or 0
 	local lbl = AceGUI:Create("Label")
-	lbl:SetText(txt)
+	if txt ~= "-" and priority > 1 then
+		lbl:SetText("|cff8a8a8a" .. txt .. "|r")
+	else
+		lbl:SetText(txt)
+	end
 	lbl.label:SetFontObject(GameFontNormalSmallOutline)
 	lbl.label:SetJustifyH("RIGHT")
 	lbl:SetWidth(70)
@@ -2390,6 +2530,8 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 					local rowILvl = m.ilvl and string.format("%.1f", m.ilvl) or "-"
 					local rowMPlus = m.mplusScore and tostring(math.floor((m.mplusScore or 0) + 0.5)) or "-"
 					local rowRaid = m.raidStatus or "-"
+					local rowRaidName = tostring(m.raidName or "")
+					local rowRaidPriority = tonumber(m.raidPriority or 0) or 0
 					local rowGms = m.gmsVersion or "-"
 					local rowPublicNote = tostring(m.note or "")
 					local rowOfficerNote = tostring(m.officernote or "")
@@ -2447,20 +2589,32 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 							TT_Row("Status", statusText)
 							TT_Row("Level/Class", string.format("%s %s", tostring(rowLevel), tostring(rowClass)))
 							TT_Row("Realm", displayRealm)
+							local raidCellText = rowRaid
+							if rowRaid ~= "-" and rowRaidPriority > 1 then
+								raidCellText = "|cff8a8a8a" .. tostring(rowRaid) .. "|r"
+							end
+							TT_Row((type(GMS.T) == "function" and GMS:T("ROSTER_COL_RAID")) or "Raid", raidCellText)
+							if rowRaid ~= "-" and rowRaidPriority > 1 then
+								local raidAttemptLabel = (type(GMS.T) == "function" and GMS:T("ROSTER_TOOLTIP_BEST_ATTEMPT", "Best attempt")) or "Best attempt"
+								local raidName = (rowRaidName ~= "" and rowRaidName) or ((type(GMS.T) == "function" and GMS:T("ROSTER_TOOLTIP_UNKNOWN_RAID", "Unknown raid")) or "Unknown raid")
+								TT_Row(raidAttemptLabel, string.format("%s (%s)", tostring(rowRaid), tostring(raidName)))
+							end
 							TT_Row("Öffentliche Notiz", (rowPublicNote ~= "" and rowPublicNote) or "-")
 							if rowOfficerNote ~= "" then
 								TT_Row("Offiziersnotiz", rowOfficerNote)
 							end
-							local linkedChars, hasLinkedChars = Roster:GetLinkedAccountGuildCharactersForGuid(rowGuid)
+							local linkedChars = Roster:GetLinkedAccountGuildCharactersForGuid(rowGuid)
 							GameTooltip:AddLine(" ")
 							GameTooltip:AddLine(
 								(type(GMS.T) == "function" and GMS:T("ROSTER_TOOLTIP_LINKED_CHARS", "Linked guild characters")) or "Linked guild characters",
 								1.0, 0.82, 0.0
 							)
-							if hasLinkedChars and type(linkedChars) == "table" and #linkedChars > 0 then
+							if type(linkedChars) == "table" and #linkedChars > 0 then
 								for i = 1, #linkedChars do
 									local c = linkedChars[i]
-									if type(c) == "table" then
+									if type(c) == "string" and c ~= "" then
+										GameTooltip:AddLine(tostring(c), 1, 1, 1)
+									elseif type(c) == "table" then
 										local _, _, _, linkedHex = GetClassColor(c.classFile)
 										local nameHex = tostring(linkedHex or "FFFFFFFF")
 										if #nameHex == 8 then
@@ -2472,11 +2626,12 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 										if c.online == true then
 											onlineMarker = "|cff00ff00●|r "
 										end
+										local lineName = tostring(c.name_full or c.name or c.guid or "-")
 										GameTooltip:AddLine(string.format(
 											"%s|cff%s%s|r |cff9d9d9d(Lv %s)|r",
 											onlineMarker,
 											nameHex,
-											tostring(c.name_full or "-"),
+											lineName,
 											levelText
 										), 1, 1, 1)
 									end
@@ -3256,7 +3411,39 @@ function Roster:GetMemberByGUID(guid)
 
 	if not IsInGuild() then return nil end
 
-	local num = GetNumGuildMembers()
+	-- Prefer current rendered/cache data first (includes offline rows shown by the module).
+	local cachedRow = self._guidToRow and self._guidToRow[guid]
+	if type(cachedRow) == "table" then
+		return {
+			guid = tostring(cachedRow.guid or guid),
+			name = tostring(cachedRow.name_roster or cachedRow.name_full or cachedRow.name or ""),
+			rankIndex = tonumber(cachedRow.rankIndex or 0) or 0,
+			rankName = tostring(cachedRow.rank or ""),
+			level = tonumber(cachedRow.level or 0) or 0,
+			classFileName = tostring(cachedRow.classFileName or ""),
+			online = (cachedRow.online == true),
+		}
+	end
+
+	-- Refresh from roster build path (same parser as list rendering).
+	local members = GetAllGuildMembers(nil, true)
+	for i = 1, #members do
+		local m = members[i]
+		if type(m) == "table" and tostring(m.guid or "") == guid then
+			return {
+				guid = tostring(m.guid or guid),
+				name = tostring(m.name_roster or m.name_full or m.name or ""),
+				rankIndex = tonumber(m.rankIndex or 0) or 0,
+				rankName = tostring(m.rank or ""),
+				level = tonumber(m.level or 0) or 0,
+				classFileName = tostring(m.classFileName or ""),
+				online = (m.online == true),
+			}
+		end
+	end
+
+	-- Legacy fallback as last resort.
+	local num = (type(GetNumGuildMembers) == "function" and (tonumber(GetNumGuildMembers(true) or 0) or 0)) or 0
 	for i = 1, num do
 		local name, rank, rankIndex, level, class, zone, note, officernote,
 		online, status, classFileName, achievementPoints,

@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.6",
+	VERSION      = "1.1.8",
 }
 
 local LibStub = LibStub
@@ -1162,17 +1162,25 @@ local function BuildRaidRows(all, catalog)
 			description = LT("CHARINFO_RAID_DESC_MANAFORGE_OMEGA", "Eine Titanen-Manaschmiede mit arkanen Sicherheitsmechanismen."),
 		},
 	}
+	local ACTIVE_RAID_ORDER = { 2810, 2769, 2657 } -- newest -> oldest (current retail season set)
+	local ACTIVE_RAID_SET = {}
+	for i = 1, #ACTIVE_RAID_ORDER do
+		ACTIVE_RAID_SET[ACTIVE_RAID_ORDER[i]] = i
+	end
 	local KNOWN_RAID_INSTANCE_IDS = {}
 	local raidIdsLib = _G and _G.GMS_RAIDIDS or nil
 	if type(raidIdsLib) == "table" and type(raidIdsLib.MAP_TO_BOSS_STATS) == "table" then
 		for mapID in pairs(raidIdsLib.MAP_TO_BOSS_STATS) do
-			KNOWN_RAID_INSTANCE_IDS[#KNOWN_RAID_INSTANCE_IDS + 1] = tonumber(mapID) or mapID
+			local iid = tonumber(mapID)
+			if iid and ACTIVE_RAID_SET[iid] then
+				KNOWN_RAID_INSTANCE_IDS[#KNOWN_RAID_INSTANCE_IDS + 1] = iid
+			end
 		end
 		table.sort(KNOWN_RAID_INSTANCE_IDS, function(a, b)
-			return tonumber(a) < tonumber(b)
+			return (ACTIVE_RAID_SET[tonumber(a)] or 999) < (ACTIVE_RAID_SET[tonumber(b)] or 999)
 		end)
 	else
-		KNOWN_RAID_INSTANCE_IDS = { 2657, 2769, 2810 }
+		KNOWN_RAID_INSTANCE_IDS = { 2810, 2769, 2657 }
 	end
 
 	local function IsNumericOnlyText(v)
@@ -1239,9 +1247,12 @@ local function BuildRaidRows(all, catalog)
 	if type(catalog) == "table" and type(catalog.byInstanceID) == "table" then
 		for instanceID, meta in pairs(catalog.byInstanceID) do
 			if type(meta) == "table" then
-				local row = ensureRow(instanceID, meta.name, meta.total, meta.encounters, meta.description, meta.icon)
-				row.description = tostring(meta.description or row.description or "")
-				row.icon = tonumber(meta.icon or row.icon or 0) or 0
+				local iid = tonumber(instanceID)
+				if iid and ACTIVE_RAID_SET[iid] then
+					local row = ensureRow(iid, meta.name, meta.total, meta.encounters, meta.description, meta.icon)
+					row.description = tostring(meta.description or row.description or "")
+					row.icon = tonumber(meta.icon or row.icon or 0) or 0
+				end
 			end
 		end
 	end
@@ -1263,51 +1274,53 @@ local function BuildRaidRows(all, catalog)
 	for key, entry in pairs(all) do
 		if type(entry) == "table" then
 			local instanceID = tonumber(entry.instanceID) or tonumber(key) or nil
-			local raidName = tostring(entry.name or "")
-			local total = tonumber(entry.total) or 0
+			if instanceID and ACTIVE_RAID_SET[instanceID] then
+				local raidName = tostring(entry.name or "")
+				local total = tonumber(entry.total) or 0
 
-			local catEntry = nil
-			if type(catalog) == "table" and type(catalog.byInstanceID) == "table" and instanceID then
-				catEntry = catalog.byInstanceID[instanceID]
-			end
-			local row = ensureRow(
-				instanceID,
-				ResolveRaidDisplayName(instanceID, raidName, catEntry, key),
-				(total > 0 and total) or (catEntry and catEntry.total) or 0,
-				(catEntry and catEntry.encounters) or nil,
-				(catEntry and catEntry.description) or nil,
-				(catEntry and catEntry.icon) or nil
-			)
-			if type(catEntry) == "table" then
-				if tostring(catEntry.description or "") ~= "" then
-					row.description = tostring(catEntry.description or "")
+				local catEntry = nil
+				if type(catalog) == "table" and type(catalog.byInstanceID) == "table" and instanceID then
+					catEntry = catalog.byInstanceID[instanceID]
 				end
-				local catIcon = tonumber(catEntry.icon or 0) or 0
-				if catIcon > 0 then
-					row.icon = catIcon
-				end
-			end
-
-			if type(entry.current) == "table" then
-				for i = 1, #RAID_DIFF_ORDER do
-					local diffID = RAID_DIFF_ORDER[i]
-					local cur = entry.current[diffID]
-					if type(cur) == "table" then
-						local cKilled = tonumber(cur.killed) or 0
-						local cTotal = tonumber(cur.total) or tonumber(row.total) or 0
-						row.current[diffID] = {
-							text = FormatRaidProgress(cKilled, cTotal),
-							killed = cKilled,
-							total = cTotal,
-							bosses = type(cur.bosses) == "table" and cur.bosses or {},
-						}
+				local row = ensureRow(
+					instanceID,
+					ResolveRaidDisplayName(instanceID, raidName, catEntry, key),
+					(total > 0 and total) or (catEntry and catEntry.total) or 0,
+					(catEntry and catEntry.encounters) or nil,
+					(catEntry and catEntry.description) or nil,
+					(catEntry and catEntry.icon) or nil
+				)
+				if type(catEntry) == "table" then
+					if tostring(catEntry.description or "") ~= "" then
+						row.description = tostring(catEntry.description or "")
+					end
+					local catIcon = tonumber(catEntry.icon or 0) or 0
+					if catIcon > 0 then
+						row.icon = catIcon
 					end
 				end
-			end
 
-			row.best = FormatBestShort(entry.best)
-			if type(entry.best) == "table" then
-				row.bestDiffID = tonumber(entry.best.diffID) or row.bestDiffID
+				if type(entry.current) == "table" then
+					for i = 1, #RAID_DIFF_ORDER do
+						local diffID = RAID_DIFF_ORDER[i]
+						local cur = entry.current[diffID]
+						if type(cur) == "table" then
+							local cKilled = tonumber(cur.killed) or 0
+							local cTotal = tonumber(cur.total) or tonumber(row.total) or 0
+							row.current[diffID] = {
+								text = FormatRaidProgress(cKilled, cTotal),
+								killed = cKilled,
+								total = cTotal,
+								bosses = type(cur.bosses) == "table" and cur.bosses or {},
+							}
+						end
+					end
+				end
+
+				row.best = FormatBestShort(entry.best)
+				if type(entry.best) == "table" then
+					row.bestDiffID = tonumber(entry.best.diffID) or row.bestDiffID
+				end
 			end
 		end
 	end
@@ -1424,7 +1437,14 @@ local function BuildRaidRows(all, catalog)
 	rows = deduped
 
 	table.sort(rows, function(a, b)
-		return tostring(a.name or "") < tostring(b.name or "")
+		local ai = tonumber(a and a.instanceID) or 0
+		local bi = tonumber(b and b.instanceID) or 0
+		local ar = ACTIVE_RAID_SET[ai]
+		local br = ACTIVE_RAID_SET[bi]
+		if ar and br then return ar < br end
+		if ar then return true end
+		if br then return false end
+		return tostring(a and a.name or "") < tostring(b and b.name or "")
 	end)
 	return rows
 end
@@ -3380,19 +3400,10 @@ function CHARINFO:TryRegisterPage()
 
 		local function BuildCard_Account(parent)
 			local card = NewCardContainer(parent, LT("CHARINFO_CARD_ACCOUNT", "Guild Characters on Same Account"))
-			AddValueLine(card, LT("CHARINFO_LABEL_SOURCE", "Source"), details.accountChars.source or "-")
 			if #details.accountChars.rows <= 0 then
 				AddNoDataHint(card, LT("CHARINFO_NO_ACCOUNT_CHARS", "No linked account characters currently verified in guild roster."))
 				return
 			end
-
-			local hint = AceGUI:Create("Label")
-			hint:SetFullWidth(true)
-			hint:SetText("|cff7f7f7f" .. LT("CHARINFO_ACCOUNT_CLICK_HINT", "Click a character to open CharInfo.") .. "|r")
-			if hint.label then
-				hint.label:SetFontObject(GameFontNormalSmallOutline)
-			end
-			card:AddChild(hint)
 
 			local accountClassWidth = 120
 			local accountStateWidth = 80

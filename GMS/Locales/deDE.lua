@@ -410,4 +410,6 @@ GMS:RegisterLocale("deDE", {
 	ROSTER_GUID_LABEL = "GUID",
 	ROSTER_TOOLTIP_LINKED_CHARS = "Verknüpfte Gildencharaktere",
 	ROSTER_TOOLTIP_LINKED_CHARS_NONE = "Keine verknüpften Gildencharaktere",
+	ROSTER_TOOLTIP_BEST_ATTEMPT = "Bester Versuch",
+	ROSTER_TOOLTIP_UNKNOWN_RAID = "Unbekannter Raid",
 })

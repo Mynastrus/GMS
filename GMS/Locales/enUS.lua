@@ -411,4 +411,6 @@ GMS:RegisterLocale("enUS", {
 	ROSTER_GUID_LABEL = "GUID",
 	ROSTER_TOOLTIP_LINKED_CHARS = "Linked guild characters",
 	ROSTER_TOOLTIP_LINKED_CHARS_NONE = "No linked guild characters",
+	ROSTER_TOOLTIP_BEST_ATTEMPT = "Best attempt",
+	ROSTER_TOOLTIP_UNKNOWN_RAID = "Unknown raid",
 })
