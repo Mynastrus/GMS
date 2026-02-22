@@ -64,6 +64,11 @@ GMS:RegisterLocale("enUS", {
 	UI_DOCK_SETTINGS_TOOLTIP = "Settings",
 	UI_FOOTER_MEM_FMT = "GMS: %.1f MB (%.1f%%)",
 	UI_FOOTER_MEM_UNAVAILABLE = "Memory: n/a",
+	UI_FOOTER_METRICS_FMT = "GMS: %.1f MB | CPU: %.1f%%",
+	UI_FOOTER_METRICS_CPU_NA_FMT = "GMS: %.1f MB | CPU: n/a",
+	UI_FOOTER_LABEL_MEMORY = "Memory:",
+	UI_FOOTER_LABEL_CPU = "CPU:",
+	UI_FOOTER_VALUE_NA = "n/a",
 
 	LOGS_HEADER_TITLE = "Logging Console",
 	LOGS_FILTER = "Filter:",

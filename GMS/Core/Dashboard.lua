@@ -33,7 +33,7 @@ local METADATA = {
 	INTERN_NAME  = "DASHBOARD",
 	SHORT_NAME   = "Dashboard",
 	DISPLAY_NAME = "Dashboard",
-	VERSION      = "1.0.0",
+	VERSION      = "1.0.1",
 }
 
 -- ###########################################################################
@@ -105,7 +105,7 @@ local function RenderDashboard(root, id, isCached)
 
 	-- Header (Always Rebuild)
 	GMS.UI:Header_BuildDefault()
-	GMS.UI:SetStatusText(DT("DASHBOARD_STATUS_LOADED", "DASHBOARD: system status loaded"))
+	GMS.UI:SetStatusText("")
 
 	-- If cached, only update Header/Footer (done above) and return
 	if isCached then return end

@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.4",
+	VERSION      = "1.1.5",
 }
 
 local LibStub = LibStub
@@ -170,8 +170,9 @@ local OPTIONS_DEFAULTS = {
 	cardOrder = { "MYTHIC", "EQUIPMENT", "RAIDS", "OVERVIEW", "ACCOUNT", "TALENTS", "PVP" },
 }
 
-local CHARINFO_UI_RENDER_DELAY = 0.02
-local CHARINFO_UI_RENDER_BATCH = 1
+local CHARINFO_UI_RENDER_DELAY = 0
+local CHARINFO_UI_RENDER_BATCH = 999
+local CHARINFO_UI_RENDER_DEFERRED = false
 
 -- Icon: nimm einen, der bei dir existiert (du kannst ihn per /run testen)
 local ICON = "Interface\\Icons\\Achievement_character_human_male"
@@ -2483,7 +2484,7 @@ local function StartUIBuildQueue(tasks, scroller, outer)
 		FlushLayout()
 
 		if idx <= total then
-			if C_Timer and type(C_Timer.After) == "function" then
+			if CHARINFO_UI_RENDER_DEFERRED and C_Timer and type(C_Timer.After) == "function" then
 				C_Timer.After(tonumber(CHARINFO_UI_RENDER_DELAY) or 0.02, Step)
 			else
 				while idx <= total and token == CHARINFO._uiBuildToken do

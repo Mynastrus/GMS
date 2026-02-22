@@ -26,6 +26,8 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
   Dateien: `GMS/Core/UI.lua`, `GMS/Locales/enUS.lua`, `GMS/Locales/deDE.lua`
 - [x] Comm/Roster-Dispatch entkoppelt (asynchrone Listener-/Chunk-Verarbeitung, batchweise Hydrierung) und Missing-Domain-Fetches weiter gestaffelt.  
   Dateien: `GMS/Core/Comm.lua`, `GMS/Modules/Roster.lua`
+- [x] Dashboard-Statusanzeige bereinigt und Footer-Metrik-Textlayout/Typografie auf einheitliche Darstellung mit lokalisierbaren Label-Keys umgestellt.  
+  Dateien: `GMS/Core/Dashboard.lua`, `GMS/Core/UI.lua`, `GMS/Locales/enUS.lua`, `GMS/Locales/deDE.lua`
 
 ### Fixed
 - [x] CharInfo-Context-Sync reduziert auf einmaligen Bootstrap-Request pro Ziel/Öffnung, um Request-Bursts und Whisper-Spam zu vermeiden.  
@@ -36,6 +38,8 @@ Einträge aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
   Dateien: `GMS/Modules/Equipment.lua`
 - [x] UI-Footer-Metrik robust gemacht (kein Nil-Call mehr auf Gesamt-AddOn-Memory-Berechnung im Laufzeitpfad).  
   Dateien: `GMS/Core/UI.lua`
+- [x] CharInfo rendert wieder vollständig (kein Hängen auf nur einer Karte/Feld durch verzögerten Build-Pfad); Deferred-Rendering standardmäßig deaktiviert.  
+  Dateien: `GMS/Modules/CharInfo.lua`
 
 ### Rules/Infra
 - [ ] (noch keine Eintraege)
