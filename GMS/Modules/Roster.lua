@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.1.25",
+	VERSION      = "1.1.26",
 }
 
 local LibStub = LibStub
@@ -261,12 +261,27 @@ local function ResolveSnapshotSlotItemLevel(slot)
 	return nil
 end
 
+local function ResolveEquipmentSlotsTable(snapshotOrSlots)
+	if type(snapshotOrSlots) ~= "table" then return nil end
+	if type(snapshotOrSlots.slots) == "table" then
+		return snapshotOrSlots.slots
+	end
+	-- Canonical compact format: table is already keyed by slot IDs.
+	for k in pairs(snapshotOrSlots) do
+		if type(k) == "number" and k >= 1 and k <= 19 then
+			return snapshotOrSlots
+		end
+	end
+	return nil
+end
+
 local function BuildItemLevelFromStoredSnapshot(snapshot)
-	if type(snapshot) ~= "table" or type(snapshot.slots) ~= "table" then return nil end
+	local slots = ResolveEquipmentSlotsTable(snapshot)
+	if type(slots) ~= "table" then return nil end
 	local relevantSlots = { 1, 2, 3, 15, 5, 9, 10, 6, 7, 8, 11, 12, 13, 14, 16, 17 }
 	local total, count = 0, 0
 	for i = 1, #relevantSlots do
-		local slot = snapshot.slots[relevantSlots[i]]
+		local slot = slots[relevantSlots[i]]
 		local ilvl = ResolveSnapshotSlotItemLevel(slot)
 		if ilvl and ilvl > 0 then
 			total = total + ilvl
@@ -347,8 +362,8 @@ local function GetStoredCharacterFallbackMeta(guid)
 	local eq = type(char.EQUIPMENT) == "table" and char.EQUIPMENT or nil
 	local eqData = (eq and type(eq.data) == "table") and eq.data or nil
 	local eqSnap = nil
-	if type(eqData) == "table" and type(eqData.slots) == "table" then
-		eqSnap = eqData
+	if type(eqData) == "table" then
+		eqSnap = ResolveEquipmentSlotsTable(eqData)
 	elseif eq and type(eq.equipment) == "table" and type(eq.equipment.snapshot) == "table" then
 		-- Legacy fallback.
 		eqSnap = eq.equipment.snapshot
@@ -1365,13 +1380,14 @@ BuildRaidStatusFromRaidsStore = function(all)
 end
 
 local function BuildItemLevelFromEquipmentSnapshot(snapshot)
-	if type(snapshot) ~= "table" or type(snapshot.slots) ~= "table" then return nil end
+	local slots = ResolveEquipmentSlotsTable(snapshot)
+	if type(slots) ~= "table" then return nil end
 	local relevantSlots = { 1, 2, 3, 15, 5, 9, 10, 6, 7, 8, 11, 12, 13, 14, 16, 17 }
 	local total = 0
 	local count = 0
 	for i = 1, #relevantSlots do
 		local slotId = relevantSlots[i]
-		local item = snapshot.slots[slotId]
+		local item = slots[slotId]
 		local ilvl = ResolveSnapshotSlotItemLevel(item)
 		if ilvl and ilvl > 0 then
 			total = total + ilvl
@@ -1925,8 +1941,10 @@ function Roster:InitCommMetaSync()
 		comm:RegisterRecordListener("EQUIPMENT_V2", function(record)
 			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
 			local payload = record.payload
-			if type(payload) ~= "table" or type(payload.snapshot) ~= "table" then return end
-			local ilvl = BuildItemLevelFromEquipmentSnapshot(payload.snapshot)
+			local slots = ResolveEquipmentSlotsTable(payload)
+				or (type(payload) == "table" and type(payload.snapshot) == "table" and ResolveEquipmentSlotsTable(payload.snapshot))
+			if type(slots) ~= "table" then return end
+			local ilvl = BuildItemLevelFromEquipmentSnapshot(slots)
 			if ilvl and Roster:SetMemberMeta(record.originGUID, {
 				ilvl = ilvl,
 			}, record.updatedAt or ((GetTime and GetTime()) or 0), {
@@ -2024,8 +2042,10 @@ function Roster:InitCommMetaSync()
 
 		hydrateHandlers[#hydrateHandlers + 1] = { domain = "EQUIPMENT_V2", fn = function(record)
 			local payload = record.payload
-			if type(payload) ~= "table" or type(payload.snapshot) ~= "table" then return end
-			local ilvl = BuildItemLevelFromEquipmentSnapshot(payload.snapshot)
+			local slots = ResolveEquipmentSlotsTable(payload)
+				or (type(payload) == "table" and type(payload.snapshot) == "table" and ResolveEquipmentSlotsTable(payload.snapshot))
+			if type(slots) ~= "table" then return end
+			local ilvl = BuildItemLevelFromEquipmentSnapshot(slots)
 			if ilvl then
 				Roster:SetMemberMeta(record.originGUID, { ilvl = ilvl }, record.updatedAt or ((GetTime and GetTime()) or 0), {
 					domain = "equipment",

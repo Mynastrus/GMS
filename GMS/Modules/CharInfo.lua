@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.20",
+	VERSION      = "1.1.21",
 }
 
 local LibStub = LibStub
@@ -493,6 +493,19 @@ local function _extractItemStringFromRawLink(rawLink)
 	return txt
 end
 
+local function ResolveEquipmentSlotsTable(snapshotOrSlots)
+	if type(snapshotOrSlots) ~= "table" then return nil end
+	if type(snapshotOrSlots.slots) == "table" then
+		return snapshotOrSlots.slots
+	end
+	for k in pairs(snapshotOrSlots) do
+		if type(k) == "number" and k >= 1 and k <= 19 then
+			return snapshotOrSlots
+		end
+	end
+	return nil
+end
+
 local function ResolveEquipmentSnapshotSlotData(slot, slotId)
 	local rawLink = ""
 	local itemString = ""
@@ -574,13 +587,14 @@ local function ResolveEquipmentSnapshotSlotData(slot, slotId)
 end
 
 local function BuildItemLevelFromEquipmentSnapshot(snapshot)
-	if type(snapshot) ~= "table" or type(snapshot.slots) ~= "table" then return nil end
+	local slots = ResolveEquipmentSlotsTable(snapshot)
+	if type(slots) ~= "table" then return nil end
 	local relevantSlots = { 1, 2, 3, 15, 5, 9, 10, 6, 7, 8, 11, 12, 13, 14, 16, 17 }
 	local total = 0
 	local count = 0
 	for i = 1, #relevantSlots do
 		local slotId = relevantSlots[i]
-		local slotData = ResolveEquipmentSnapshotSlotData(snapshot.slots[slotId], slotId)
+		local slotData = ResolveEquipmentSnapshotSlotData(slots[slotId], slotId)
 		local ilvl = tonumber(slotData.itemLevel)
 		if ilvl and ilvl > 0 then
 			total = total + ilvl
@@ -763,11 +777,12 @@ local EQUIP_TIER_SLOT_IDS = {
 local EQUIP_DEFAULT_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 
 local function BuildEquipmentRowsFromSnapshot(snapshot)
-	local hasSnapshot = type(snapshot) == "table" and type(snapshot.slots) == "table"
+	local slotsTable = ResolveEquipmentSlotsTable(snapshot)
+	local hasSnapshot = type(slotsTable) == "table"
 	local rows = {}
 	for i = 1, #EQUIP_SLOT_ORDER do
 		local slotId = EQUIP_SLOT_ORDER[i]
-		local slot = hasSnapshot and snapshot.slots[slotId] or nil
+		local slot = hasSnapshot and slotsTable[slotId] or nil
 		local resolved = ResolveEquipmentSnapshotSlotData(slot, slotId)
 		rows[#rows + 1] = {
 			slotId = slotId,
@@ -2265,11 +2280,10 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		if type(eqSnapshot) ~= "table" then
 			local eqBucket = GetCharScopedModuleBucket(playerGuid, "EQUIPMENT")
 			if type(eqBucket) == "table" then
-				if type(eqBucket.slots) == "table" then
-					eqSnapshot = eqBucket
-					data.equipment.source = "Saved character DB"
-				elseif type(eqBucket.equipment) == "table" and type(eqBucket.equipment.snapshot) == "table" then
-					eqSnapshot = eqBucket.equipment.snapshot
+				local slotPayload = ResolveEquipmentSlotsTable(eqBucket)
+					or (type(eqBucket.equipment) == "table" and type(eqBucket.equipment.snapshot) == "table" and ResolveEquipmentSlotsTable(eqBucket.equipment.snapshot))
+				if type(slotPayload) == "table" then
+					eqSnapshot = slotPayload
 					data.equipment.source = "Saved character DB"
 				end
 			end
@@ -2281,9 +2295,13 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		end
 		if type(eqSnapshot) ~= "table" then
 			local payloadLocalE, payloadLocalESource = GetLatestOrCachedDomainPayload("EQUIPMENT_V2", playerGuid)
-			if type(payloadLocalE) == "table" and type(payloadLocalE.snapshot) == "table" then
-				eqSnapshot = payloadLocalE.snapshot
-				data.equipment.source = (payloadLocalESource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V2"
+			if type(payloadLocalE) == "table" then
+				local slots = ResolveEquipmentSlotsTable(payloadLocalE)
+					or (type(payloadLocalE.snapshot) == "table" and ResolveEquipmentSlotsTable(payloadLocalE.snapshot))
+				if type(slots) == "table" then
+					eqSnapshot = slots
+					data.equipment.source = (payloadLocalESource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V2"
+				end
 			end
 		end
 		local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(eqSnapshot)
@@ -2454,23 +2472,27 @@ local function BuildCharData(player, ctxGuid, ctxName)
 
 		local payloadEquip, payloadEquipSource = GetLatestOrCachedDomainPayload("EQUIPMENT_V2", targetGuid)
 		if type(payloadEquip) == "table" then
-			local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(payloadEquip.snapshot)
-			if ilvl and ilvl > 0 then
-				data.equipment.ilvl = ilvl
+			local slotPayload = ResolveEquipmentSlotsTable(payloadEquip)
+				or (type(payloadEquip.snapshot) == "table" and ResolveEquipmentSlotsTable(payloadEquip.snapshot))
+			if type(slotPayload) == "table" then
+				local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(slotPayload)
+				if ilvl and ilvl > 0 then
+					data.equipment.ilvl = ilvl
+				end
+				data.equipment.rows = rows
+				data.equipment.slots = slots
+				data.equipment.hasData = (#rows > 0) or (data.equipment.ilvl and data.equipment.ilvl > 0) or data.equipment.hasData
+				data.equipment.source = (payloadEquipSource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V2"
 			end
-			data.equipment.rows = rows
-			data.equipment.slots = slots
-			data.equipment.hasData = (#rows > 0) or (data.equipment.ilvl and data.equipment.ilvl > 0) or data.equipment.hasData
-			data.equipment.source = (payloadEquipSource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V2"
 		end
 		if not data.equipment.hasData then
 			local eqBucket = GetCharScopedModuleBucket(targetGuid, "EQUIPMENT")
 			local eqSnapshot = nil
 			if type(eqBucket) == "table" then
-				if type(eqBucket.slots) == "table" then
-					eqSnapshot = eqBucket
-				elseif type(eqBucket.equipment) == "table" and type(eqBucket.equipment.snapshot) == "table" then
-					eqSnapshot = eqBucket.equipment.snapshot
+				local slotPayload = ResolveEquipmentSlotsTable(eqBucket)
+					or (type(eqBucket.equipment) == "table" and type(eqBucket.equipment.snapshot) == "table" and ResolveEquipmentSlotsTable(eqBucket.equipment.snapshot))
+				if type(slotPayload) == "table" then
+					eqSnapshot = slotPayload
 				end
 			end
 			if type(eqSnapshot) == "table" then
@@ -4109,4 +4131,5 @@ function CHARINFO:OnDisable()
 	self._ticker = nil
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
+
 

@@ -52,7 +52,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.18",
+	VERSION      = "1.3.19",
 }
 
 -- ###########################################################################
@@ -374,12 +374,8 @@ function EQUIP:_PublishSnapshotToGuild(snapshot, reason)
 	if type(comm) ~= "table" or type(comm.PublishCharacterRecord) ~= "function" then
 		return false, "comm-unavailable"
 	end
-	local payload = {
-		module = METADATA.SHORT_NAME,
-		version = METADATA.VERSION,
-		reason = tostring(reason or "unknown"),
-		snapshot = snapshot,
-	}
+	-- Canonical V2 payload for equipment is the slot-map only.
+	local payload = type(snapshot) == "table" and type(snapshot.slots) == "table" and snapshot.slots or {}
 	return comm:PublishCharacterRecord(EQUIP_SYNC_DOMAIN, payload)
 end
 
@@ -547,9 +543,7 @@ function EQUIP:SaveSnapshot(snapshot, reason)
 
 	-- Canonical character domain persistence (global.characters[guid].EQUIPMENT = {data,meta}).
 	if GMS and type(GMS.SetCharacterDomainData) == "function" then
-		GMS:SetCharacterDomainData(snapshot.guid, "EQUIPMENT", {
-			slots = snapshot.slots,
-		}, {
+		GMS:SetCharacterDomainData(snapshot.guid, "EQUIPMENT", snapshot.slots, {
 			sourceGuid = snapshot.guid,
 			sourceName = _getPlayerNameFull(),
 			updatedAtTs = tonumber(snapshot.ts or 0) or 0,

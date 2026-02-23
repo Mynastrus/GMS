@@ -9,7 +9,7 @@ local METADATA = {
 	INTERN_NAME  = "DB",
 	SHORT_NAME   = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION      = "1.1.16",
+	VERSION      = "1.1.19",
 }
 
 -- Blizzard Globals
@@ -170,15 +170,28 @@ function GMS:InitializeStandardDatabases(force)
 
 		-- Hard cleanup on raw SavedVariables root to avoid proxy/metatable leftovers.
 		local rawDB = rawget(_G, "GMS_DB")
-		if type(rawDB) == "table" and type(rawDB.global) == "table" then
-			rawDB.global.chars = type(rawDB.global.chars) == "table" and rawDB.global.chars or {}
-			rawDB.global.characters = type(rawDB.global.characters) == "table" and rawDB.global.characters or {}
-			rawDB.global.guilds = type(rawDB.global.guilds) == "table" and rawDB.global.guilds or {}
-			rawDB.global.accountLinks = nil
-			rawDB.global.twinks = nil
-			rawDB.global.twinkMeta = nil
-			rawDB.global.gmsChangelogLastSeenVersion = nil
-			rawDB.global.gmsChangelogLastSeenAt = nil
+		if type(rawDB) ~= "table" then
+			rawDB = {}
+			_G.GMS_DB = rawDB
+		end
+		rawDB.global = type(rawDB.global) == "table" and rawDB.global or {}
+		rawDB.global.chars = type(rawDB.global.chars) == "table" and rawDB.global.chars or {}
+		rawDB.global.characters = type(rawDB.global.characters) == "table" and rawDB.global.characters or {}
+		rawDB.global.guilds = type(rawDB.global.guilds) == "table" and rawDB.global.guilds or {}
+		rawDB.global.accountLinks = nil
+		rawDB.global.twinks = nil
+		rawDB.global.twinkMeta = nil
+		rawDB.global.gmsChangelogLastSeenVersion = nil
+		rawDB.global.gmsChangelogLastSeenAt = nil
+
+		rawDB.char = type(rawDB.char) == "table" and rawDB.char or {}
+		rawDB.profileKeys = type(rawDB.profileKeys) == "table" and rawDB.profileKeys or {}
+		rawDB.profiles = type(rawDB.profiles) == "table" and rawDB.profiles or {}
+
+		if type(self.db) == "table" and type(self.db.global) == "table" then
+			self.db.global.chars = rawDB.global.chars
+			self.db.global.characters = rawDB.global.characters
+			self.db.global.guilds = rawDB.global.guilds
 		end
 
 		local charRoot = self.db and self.db.char
@@ -453,6 +466,10 @@ function GMS:SetCharacterDomainData(guid, domain, payload, meta)
 	if type(root) ~= "table" then return false end
 	local m = type(meta) == "table" and meta or {}
 	local ts = tonumber(m.updatedAtTs or m.ts or 0) or 0
+	-- Normalize non-unix timestamps (e.g. GetTime session seconds from sync metadata).
+	if ts > 0 and ts < 1000000000 then
+		ts = 0
+	end
 	if ts <= 0 then
 		ts = self:GetServerTimestamp()
 	end
@@ -905,9 +922,21 @@ local function SerializeTable(value, indent, visited, out, limits)
 		out[#out + 1] = line
 	end
 
+	local function NormalizeInspectorString(raw)
+		local s = tostring(raw or "")
+		-- Show raw item-string in inspector instead of UI-resolved hyperlinks.
+		local itemString = s:match("|H(item:[^|]+)|h")
+		if type(itemString) == "string" and itemString ~= "" then
+			return itemString
+		end
+		return s
+	end
+
 	local function FormatScalar(v)
 		local tv = type(v)
-		if tv == "string" then return EscapeString(v) end
+		if tv == "string" then
+			return EscapeString(NormalizeInspectorString(v))
+		end
 		if tv == "number" or tv == "boolean" or tv == "nil" then return tostring(v) end
 		return string.format("%q", "<" .. tv .. ">")
 	end

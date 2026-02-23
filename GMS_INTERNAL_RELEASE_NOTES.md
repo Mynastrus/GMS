@@ -29,10 +29,13 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - Equipment persistence compacted in `GMS/Modules/Equipment.lua`: snapshot slots now store raw item links only (including full hyperlink when available), while DB character domain write remains canonical `data/meta`.
 - CharInfo equipment rendering in `GMS/Modules/CharInfo.lua` now resolves names, icons, ilvl, VZ (enchants/sockets), and TSET from compact raw links with API fallback.
 - Roster fallback readers/writers in `GMS/Modules/Roster.lua` aligned to canonical character domain nodes (`CHARINFO`, `EQUIPMENT`) with legacy-read fallback only.
+- Equipment V2 wire payload in `GMS/Modules/Equipment.lua` switched to compact slot-map only (`EQUIPMENT_V2.data` now directly contains slot entries, no wrapper fields like `module/reason/snapshot/version`).
+- Equipment domain fallback readers in `GMS/Modules/Roster.lua` and `GMS/Modules/CharInfo.lua` now accept both canonical compact slot-map and legacy wrapped snapshot payloads.
 
 ### Fixed
 - DB wipe/reset in `GMS/Core/Database.lua` now performs a hard reset of `GMS_DB`, `GMS_Logging_DB`, and `GMS_UIDB` roots and clears runtime DB handles to avoid stale AceDB proxy data after reset.
 - CHARINFO local bootstrap in `GMS/Modules/CharInfo.lua` now persists local version metadata through canonical `global.characters[guid].CHARINFO = { data, meta }`.
+- DB Inspector serialization in `GMS/Core/Database.lua` now shows raw item strings (e.g. `item:...`) instead of UI-resolved item hyperlinks.
 
 ### Rules/Infra
 - DB schema policy hardened in `GMS_DB_SCHEMA.md`: hard cutover only, no migration layer, and mandatory sync block for older GMS versions.
