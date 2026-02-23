@@ -15,7 +15,8 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 ## Unreleased
 
 ### Added
-- [ ] (noch keine Eintraege)
+- Canonical DB schema document added in `GMS_DB_SCHEMA.md` (3-tree model: `global.chars`, `global.guilds`, `global.characters`, plus local `char.*.chars`).
+- Mandatory per-domain metadata documented (`data` + `meta` with `sourceGuid`, `sourceName`, `updatedAt`).
 
 ### Changed
 - [ ] (noch keine Eintraege)
