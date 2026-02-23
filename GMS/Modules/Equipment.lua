@@ -52,7 +52,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.14",
+	VERSION      = "1.3.15",
 }
 
 -- ###########################################################################
@@ -628,6 +628,32 @@ function EQUIP:SaveSnapshot(snapshot, reason)
 	local opts = _getOptionsStore()
 	if opts then
 		opts.lastScanTs = snapshot.ts or 0
+	end
+
+	-- Mirror into raw SavedVariables for DB inspector consistency and
+	-- to guarantee persistence visibility even when AceDB proxies lag.
+	if type(_G) == "table" then
+		_G.GMS_DB = type(_G.GMS_DB) == "table" and _G.GMS_DB or {}
+		_G.GMS_DB.global = type(_G.GMS_DB.global) == "table" and _G.GMS_DB.global or {}
+		_G.GMS_DB.global.characters = type(_G.GMS_DB.global.characters) == "table" and _G.GMS_DB.global.characters or {}
+		local rawKey = tostring(snapshot.guid or "")
+		if rawKey ~= "" then
+			local rawChar = _G.GMS_DB.global.characters[rawKey]
+			if type(rawChar) ~= "table" then
+				rawChar = {}
+				_G.GMS_DB.global.characters[rawKey] = rawChar
+			end
+			local rawEq = rawChar.EQUIPMENT
+			if type(rawEq) ~= "table" then
+				rawEq = {}
+				rawChar.EQUIPMENT = rawEq
+			end
+			rawEq.autoScan = (opts and opts.autoScan == true) and true or (rawEq.autoScan == true)
+			rawEq.lastScanTs = tonumber(snapshot.ts or 0) or 0
+			rawEq.equipment = type(rawEq.equipment) == "table" and rawEq.equipment or {}
+			rawEq.equipment.snapshot = snapshot
+			rawEq.equipment.lastDigest = digest
+		end
 	end
 
 	if digest ~= "" and digest ~= previousDigest then

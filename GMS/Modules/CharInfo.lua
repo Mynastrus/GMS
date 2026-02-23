@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.10",
+	VERSION      = "1.1.15",
 }
 
 local LibStub = LibStub
@@ -1519,14 +1519,80 @@ local function GetRosterMemberByGuid(guid)
 	return nil
 end
 
+local function IsUsablePlayerGuid(guid)
+	local g = tostring(guid or "")
+	if g == "" then return false end
+	return g:find("^Player%-") ~= nil
+end
+
+local function NormalizeNameGuidKey(nameFull)
+	local n = tostring(nameFull or "")
+	if n == "" then return "" end
+	n = n:lower()
+	n = n:gsub("%s+", "")
+	return n
+end
+
+local function ResolveContextGuid(ctxGuid, ctxName)
+	local direct = tostring(ctxGuid or "")
+	if IsUsablePlayerGuid(direct) then
+		return direct
+	end
+
+	local key = NormalizeNameGuidKey(ctxName)
+	if key == "" then
+		return ""
+	end
+
+	local roster = GMS and (GMS:GetModule("ROSTER", true) or GMS:GetModule("Roster", true)) or nil
+	if type(roster) == "table" then
+		local guidToRow = type(roster._guidToRow) == "table" and roster._guidToRow or nil
+		if type(guidToRow) == "table" then
+			for g, row in pairs(guidToRow) do
+				local rowName = type(row) == "table" and tostring(row._nameFull or "") or ""
+				if rowName ~= "" and NormalizeNameGuidKey(rowName) == key and IsUsablePlayerGuid(g) then
+					return tostring(g)
+				end
+			end
+		end
+
+		if type(roster.GetMemberMetaStore) == "function" then
+			local store = roster:GetMemberMetaStore()
+			if type(store) == "table" then
+				for g, row in pairs(store) do
+					local rowName = type(row) == "table" and tostring(row.name_full or "") or ""
+					if rowName ~= "" and NormalizeNameGuidKey(rowName) == key and IsUsablePlayerGuid(g) then
+						return tostring(g)
+					end
+				end
+			end
+		end
+	end
+
+	local function scanLinks(global)
+		local links = type(global) == "table" and type(global.accountLinks) == "table" and global.accountLinks or nil
+		local chars = links and type(links.chars) == "table" and links.chars or nil
+		if type(chars) ~= "table" then return "" end
+		for g, row in pairs(chars) do
+			if type(row) == "table" then
+				local n = NormalizeNameGuidKey(row.name_full or row.name or "")
+				if n ~= "" and n == key and IsUsablePlayerGuid(g) then
+					return tostring(g)
+				end
+			end
+		end
+		return ""
+	end
+
+	local aceGlobal = (GMS and GMS.db and type(GMS.db.global) == "table") and GMS.db.global or nil
+	local rawDB = (type(_G) == "table") and rawget(_G, "GMS_DB") or nil
+	local rawGlobal = (type(rawDB) == "table" and type(rawDB.global) == "table") and rawDB.global or nil
+	local fromAce = scanLinks(aceGlobal)
+	if fromAce ~= "" then return fromAce end
+	return scanLinks(rawGlobal)
+end
+
 local function GetCharScopedModuleBucket(guid, moduleKey)
-	if not GMS or not GMS.db or type(GMS.db.global) ~= "table" then
-		return nil
-	end
-	local chars = GMS.db.global.characters
-	if type(chars) ~= "table" then
-		return nil
-	end
 	local g = tostring(guid or "")
 	if g == "" and type(GMS.GetCharacterGUID) == "function" then
 		g = tostring(GMS:GetCharacterGUID() or "")
@@ -1534,15 +1600,81 @@ local function GetCharScopedModuleBucket(guid, moduleKey)
 	if g == "" then
 		return nil
 	end
-	local c = chars[g]
-	if type(c) ~= "table" then
-		return nil
+	local function pick(global)
+		if type(global) ~= "table" then
+			return nil
+		end
+		local chars = global.characters
+		if type(chars) ~= "table" then
+			return nil
+		end
+		local c = chars[g]
+		if type(c) ~= "table" then
+			return nil
+		end
+		local mod = c[tostring(moduleKey or "")]
+		if type(mod) ~= "table" then
+			return nil
+		end
+		return mod
 	end
-	local mod = c[tostring(moduleKey or "")]
-	if type(mod) ~= "table" then
-		return nil
+
+	local aceGlobal = (GMS and GMS.db and type(GMS.db.global) == "table") and GMS.db.global or nil
+	local rawDB = (type(_G) == "table") and rawget(_G, "GMS_DB") or nil
+	local rawGlobal = (type(rawDB) == "table" and type(rawDB.global) == "table") and rawDB.global or nil
+	local fromAce = pick(aceGlobal)
+	if type(fromAce) == "table" then
+		return fromAce
 	end
-	return mod
+	return pick(rawGlobal)
+end
+
+local function GetStoredAccountIdentityByGuid(guid)
+	local g = tostring(guid or "")
+	if g == "" then return nil end
+	local function lookup(global)
+		if type(global) ~= "table" then return nil end
+		local links = type(global.accountLinks) == "table" and global.accountLinks or nil
+		local linkChars = links and type(links.chars) == "table" and links.chars or nil
+		local row = linkChars and type(linkChars[g]) == "table" and linkChars[g] or nil
+		if type(row) ~= "table" then
+			local twinkMeta = type(global.twinkMeta) == "table" and global.twinkMeta or nil
+			row = twinkMeta and type(twinkMeta[g]) == "table" and twinkMeta[g] or nil
+		end
+		return row
+	end
+	local aceGlobal = (GMS and GMS.db and type(GMS.db.global) == "table") and GMS.db.global or nil
+	local rawDB = (type(_G) == "table") and rawget(_G, "GMS_DB") or nil
+	local rawGlobal = (type(rawDB) == "table" and type(rawDB.global) == "table") and rawDB.global or nil
+	local row = lookup(aceGlobal) or lookup(rawGlobal)
+	if type(row) ~= "table" then return nil end
+	return {
+		name_full = tostring(row.name_full or row.name or g),
+		class = tostring(row.class or "-"),
+		classFile = tostring(row.classFile or ""),
+		level = tonumber(row.level or 0) or 0,
+		race = tostring(row.race or ""),
+		guild = tostring(row.guild or ""),
+	}
+end
+
+local function GetStoredCharacterVersionByGuid(guid)
+	local g = tostring(guid or "")
+	if g == "" then return "" end
+	local function read(global)
+		if type(global) ~= "table" then return "" end
+		local chars = type(global.characters) == "table" and global.characters or nil
+		local c = chars and type(chars[g]) == "table" and chars[g] or nil
+		local ci = c and type(c.CHARINFO) == "table" and c.CHARINFO or nil
+		local v = ci and tostring(ci.gmsVersion or "") or ""
+		return v
+	end
+	local aceGlobal = (GMS and GMS.db and type(GMS.db.global) == "table") and GMS.db.global or nil
+	local rawDB = (type(_G) == "table") and rawget(_G, "GMS_DB") or nil
+	local rawGlobal = (type(rawDB) == "table" and type(rawDB.global) == "table") and rawDB.global or nil
+	local v = read(aceGlobal)
+	if v ~= "" then return v end
+	return read(rawGlobal)
 end
 
 local function EnsureCharStoreByGuid(guid)
@@ -1781,11 +1913,16 @@ local function RequestContextBootstrapOnce(guid, reason)
 	if CHARINFO._contextSyncBootstrapSent[g] then
 		return false
 	end
-	local ok = QueueDomainSyncForGuid(g, "roster_meta", reason or "charinfo-context-bootstrap")
-	if ok then
+	local okAny = false
+	okAny = QueueDomainSyncForGuid(g, "roster_meta", reason or "charinfo-context-bootstrap") or okAny
+	okAny = QueueDomainSyncForGuid(g, "MYTHICPLUS_V1", reason or "charinfo-context-bootstrap") or okAny
+	okAny = QueueDomainSyncForGuid(g, "RAIDS_V1", reason or "charinfo-context-bootstrap") or okAny
+	okAny = QueueDomainSyncForGuid(g, "EQUIPMENT_V1", reason or "charinfo-context-bootstrap") or okAny
+	okAny = QueueDomainSyncForGuid(g, "ACCOUNT_CHARS_V1", reason or "charinfo-context-bootstrap") or okAny
+	if okAny then
 		CHARINFO._contextSyncBootstrapSent[g] = true
 	end
-	return ok
+	return okAny
 end
 
 local function NormalizeAccountCharacterRows(rows, selectedGuid)
@@ -1922,7 +2059,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 	end
 
 	local playerGuid = tostring((player and player.guid) or "")
-	local targetGuid = tostring(ctxGuid or "")
+	local targetGuid = ResolveContextGuid(ctxGuid, ctxName)
 	local isContext = (targetGuid ~= "" and targetGuid ~= playerGuid)
 	local selectedGuid = isContext and targetGuid or playerGuid
 	local selectedName = isContext and NormalizeDisplayName(ctxName, "-") or NormalizeDisplayName(player and player.name_full, "-")
@@ -2105,6 +2242,32 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			data.general.spec = NormalizeDisplayText((member.spec), "-")
 			data.general.guild = NormalizeDisplayText((member.guild), "-")
 		end
+		local storedIdentity = GetStoredAccountIdentityByGuid(targetGuid)
+		if type(storedIdentity) == "table" then
+			local curName = tostring(data.general.name or "")
+			if curName == "" or curName == "-" or curName == targetGuid then
+				data.general.name = NormalizeDisplayName(storedIdentity.name_full, targetGuid)
+			end
+			if tostring(data.general.class or "-") == "-" then
+				data.general.class = NormalizeDisplayText(storedIdentity.class, "-")
+			end
+			if tostring(data.general.classFile or "") == "" then
+				data.general.classFile = tostring(storedIdentity.classFile or "")
+			end
+			if tostring(data.general.level or "-") == "-" then
+				data.general.level = NormalizeDisplayLevel(storedIdentity.level)
+			end
+			if tostring(data.general.race or "-") == "-" then
+				data.general.race = NormalizeDisplayText(storedIdentity.race, "-")
+			end
+			if tostring(data.general.guild or "-") == "-" then
+				data.general.guild = NormalizeDisplayText(storedIdentity.guild, "-")
+			end
+		end
+		local storedVersion = GetStoredCharacterVersionByGuid(targetGuid)
+		if storedVersion ~= "" and tostring(data.gmsVersion or "-") == "-" then
+			data.gmsVersion = storedVersion
+		end
 
 		-- Always render structural placeholders in context mode:
 		-- raids list (known instances) and equipment slots should be visible
@@ -2163,6 +2326,19 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			data.mythic.hasData = HasMythicProgressData(score, rows) or data.mythic.hasData
 			data.mythic.source = (payloadMSource == "cache") and "Saved character DB" or "Synced MYTHICPLUS_V1"
 		end
+		if not data.mythic.hasData then
+			local mpBucket = GetCharScopedModuleBucket(targetGuid, "MYTHICPLUS") or GetCharScopedModuleBucket(targetGuid, "MythicPlus")
+			if type(mpBucket) == "table" then
+				local rows = BuildMythicRows(mpBucket.dungeons, true)
+				local score = tonumber(mpBucket.score)
+				data.mythic.rows = rows
+				data.mythic.score = score or data.mythic.score
+				data.mythic.hasData = HasMythicProgressData(score, rows) or data.mythic.hasData
+				if data.mythic.hasData then
+					data.mythic.source = "Saved character DB"
+				end
+			end
+		end
 
 		local payloadR, payloadRSource = GetLatestOrCachedDomainPayload("RAIDS_V1", targetGuid)
 		if type(payloadR) == "table" then
@@ -2176,6 +2352,24 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			data.raids.hasData = (#rows > 0) or (data.raids.summary ~= "-") or data.raids.hasData
 			data.raids.source = (payloadRSource == "cache") and "Saved character DB" or "Synced RAIDS_V1"
 		end
+		if not data.raids.hasData then
+			local raidsBucket = GetCharScopedModuleBucket(targetGuid, "RAIDS")
+			local bucketRaids = type(raidsBucket) == "table" and raidsBucket.raids or nil
+			if type(bucketRaids) == "table" then
+				local rows = BuildRaidRows(bucketRaids, baseRaidCatalog)
+				local summary = BuildRaidStatusFromRaidsStore(bucketRaids)
+				if summary ~= "" and summary ~= "-" then
+					data.raids.summary = summary
+				end
+				if #rows > 0 then
+					data.raids.rows = rows
+				end
+				data.raids.hasData = (#data.raids.rows > 0) or (data.raids.summary ~= "-") or data.raids.hasData
+				if data.raids.hasData then
+					data.raids.source = "Saved character DB"
+				end
+			end
+		end
 
 		local payloadEquip, payloadEquipSource = GetLatestOrCachedDomainPayload("EQUIPMENT_V1", targetGuid)
 		if type(payloadEquip) == "table" then
@@ -2187,6 +2381,22 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			data.equipment.slots = slots
 			data.equipment.hasData = (#rows > 0) or (data.equipment.ilvl and data.equipment.ilvl > 0) or data.equipment.hasData
 			data.equipment.source = (payloadEquipSource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V1"
+		end
+		if not data.equipment.hasData then
+			local eqBucket = GetCharScopedModuleBucket(targetGuid, "EQUIPMENT")
+			local eqSnapshot = type(eqBucket) == "table" and type(eqBucket.equipment) == "table" and eqBucket.equipment.snapshot or nil
+			if type(eqSnapshot) == "table" then
+				local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(eqSnapshot)
+				if ilvl and ilvl > 0 then
+					data.equipment.ilvl = ilvl
+				end
+				data.equipment.rows = rows
+				data.equipment.slots = slots
+				data.equipment.hasData = (#rows > 0) or (data.equipment.ilvl and data.equipment.ilvl > 0) or data.equipment.hasData
+				if data.equipment.hasData then
+					data.equipment.source = "Saved character DB"
+				end
+			end
 		end
 
 		-- CharInfo bootstrap: exactly one request per target/context-open.
@@ -3110,101 +3320,99 @@ function CHARINFO:TryRegisterPage()
 
 			for i = 1, #details.equipment.rows do
 				local e = details.equipment.rows[i]
-				local row = AceGUI:Create("SimpleGroup")
-				row:SetFullWidth(true)
-				row:SetLayout("Flow")
-				row:SetHeight(10)
-				card:AddChild(row)
+				if type(e) == "table" then
+					local row = AceGUI:Create("SimpleGroup")
+					row:SetFullWidth(true)
+					row:SetLayout("Flow")
+					row:SetHeight(10)
+					card:AddChild(row)
 
-				local icon = AceGUI:Create("Icon")
-				icon:SetWidth(equipIconWidth)
-				icon:SetHeight(10)
-				if e.icon then
-					icon:SetImage(e.icon)
-				else
-					icon:SetImage(nil)
-				end
-				icon:SetImageSize(10, 10)
-				if tostring(e.link or "") ~= "" then
-					icon:SetCallback("OnEnter", function(widget)
-						if GameTooltip and widget and widget.frame then
-							GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
-							GameTooltip:SetHyperlink(tostring(e.link))
-							GameTooltip:Show()
-						end
-					end)
-					icon:SetCallback("OnLeave", function()
-						if GameTooltip then GameTooltip:Hide() end
-					end)
-				end
-				row:AddChild(icon)
+					local icon = AceGUI:Create("Icon")
+					icon:SetWidth(equipIconWidth)
+					icon:SetHeight(10)
+					icon:SetImage(e.icon or EQUIP_DEFAULT_ICON)
+					icon:SetImageSize(10, 10)
+					if tostring(e.link or "") ~= "" then
+						icon:SetCallback("OnEnter", function(widget)
+							if GameTooltip and widget and widget.frame then
+								GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
+								GameTooltip:SetHyperlink(tostring(e.link))
+								GameTooltip:Show()
+							end
+						end)
+						icon:SetCallback("OnLeave", function()
+							if GameTooltip then GameTooltip:Hide() end
+						end)
+					end
+					row:AddChild(icon)
 
-				local slot = AceGUI:Create("Label")
-				slot:SetWidth(equipSlotWidth)
-				slot:SetText("|cff9d9d9d" .. tostring(e.slotName or "-") .. "|r")
-				if slot.label then
-					slot.label:SetFontObject(GameFontNormalSmallOutline)
-					slot.label:SetWordWrap(false)
-				end
-				row:AddChild(slot)
+					local slot = AceGUI:Create("Label")
+					slot:SetWidth(equipSlotWidth)
+					slot:SetText("|cff9d9d9d" .. tostring(e.slotName or "-") .. "|r")
+					if slot.label then
+						slot.label:SetFontObject(GameFontNormalSmallOutline)
+						slot.label:SetWordWrap(false)
+					end
+					row:AddChild(slot)
 
-				local item = AceGUI:Create("InteractiveLabel")
-				item:SetWidth(equipItemWidth)
-				item:SetText(tostring(e.text or ""))
-				if item.label then
-					item.label:SetFontObject(GameFontNormalSmallOutline)
-					item.label:SetJustifyH("LEFT")
-					item.label:SetWordWrap(false)
-				end
-				if tostring(e.link or "") ~= "" then
-					item:SetCallback("OnEnter", function(widget)
-						if GameTooltip and widget and widget.frame then
-							GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
-							GameTooltip:SetHyperlink(tostring(e.link))
-							GameTooltip:Show()
-						end
-					end)
-					item:SetCallback("OnLeave", function()
-						if GameTooltip then GameTooltip:Hide() end
-					end)
-					item:SetCallback("OnClick", function()
-						if type(HandleModifiedItemClick) == "function" then
-							HandleModifiedItemClick(tostring(e.link))
-						end
-					end)
-				end
-				row:AddChild(item)
+					local item = AceGUI:Create("InteractiveLabel")
+					item:SetWidth(equipItemWidth)
+					item:SetText(tostring(e.text or ""))
+					if item.label then
+						item.label:SetFontObject(GameFontNormalSmallOutline)
+						item.label:SetJustifyH("LEFT")
+						item.label:SetWordWrap(false)
+					end
+					if tostring(e.link or "") ~= "" then
+						item:SetCallback("OnEnter", function(widget)
+							if GameTooltip and widget and widget.frame then
+								GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
+								GameTooltip:SetHyperlink(tostring(e.link))
+								GameTooltip:Show()
+							end
+						end)
+						item:SetCallback("OnLeave", function()
+							if GameTooltip then GameTooltip:Hide() end
+						end)
+						item:SetCallback("OnClick", function()
+							if type(HandleModifiedItemClick) == "function" then
+								HandleModifiedItemClick(tostring(e.link))
+							end
+						end)
+					end
+					row:AddChild(item)
 
-				local tset = AceGUI:Create("Label")
-				tset:SetWidth(equipTSetWidth)
-				tset:SetText((e.isTierSet == true) and "|cffffc107T|r" or "")
-				if tset.label then
-					tset.label:SetFontObject(GameFontNormalSmallOutline)
-					tset.label:SetJustifyH("CENTER")
-					tset.label:SetWordWrap(false)
-				end
-				row:AddChild(tset)
+					local tset = AceGUI:Create("Label")
+					tset:SetWidth(equipTSetWidth)
+					tset:SetText((e.isTierSet == true) and "|cffffc107T|r" or "")
+					if tset.label then
+						tset.label:SetFontObject(GameFontNormalSmallOutline)
+						tset.label:SetJustifyH("CENTER")
+						tset.label:SetWordWrap(false)
+					end
+					row:AddChild(tset)
 
-				local vz = AceGUI:Create("Label")
-				vz:SetWidth(equipVZWidth)
-				vz:SetText((e.hasEnchant == true) and "|cff4caf50VZ|r" or "")
-				if vz.label then
-					vz.label:SetFontObject(GameFontNormalSmallOutline)
-					vz.label:SetJustifyH("CENTER")
-					vz.label:SetWordWrap(false)
-				end
-				row:AddChild(vz)
+					local vz = AceGUI:Create("Label")
+					vz:SetWidth(equipVZWidth)
+					vz:SetText((e.hasEnchant == true) and "|cff4caf50VZ|r" or "")
+					if vz.label then
+						vz.label:SetFontObject(GameFontNormalSmallOutline)
+						vz.label:SetJustifyH("CENTER")
+						vz.label:SetWordWrap(false)
+					end
+					row:AddChild(vz)
 
-				local lvl = AceGUI:Create("Label")
-				lvl:SetWidth(equipLvlWidth)
-				local l = tonumber(e.itemLevel)
-				lvl:SetText((l and l > 0) and ("|cff03A9F4" .. tostring(l) .. "|r") or "|cff7f7f7f-|r")
-				if lvl.label then
-					lvl.label:SetFontObject(GameFontNormalSmallOutline)
-					lvl.label:SetJustifyH("RIGHT")
-					lvl.label:SetWordWrap(false)
+					local lvl = AceGUI:Create("Label")
+					lvl:SetWidth(equipLvlWidth)
+					local l = tonumber(e.itemLevel)
+					lvl:SetText((l and l > 0) and ("|cff03A9F4" .. tostring(l) .. "|r") or "|cff7f7f7f-|r")
+					if lvl.label then
+						lvl.label:SetFontObject(GameFontNormalSmallOutline)
+						lvl.label:SetJustifyH("RIGHT")
+						lvl.label:SetWordWrap(false)
+					end
+					row:AddChild(lvl)
 				end
-				row:AddChild(lvl)
 			end
 		end
 
@@ -3559,7 +3767,10 @@ function CHARINFO:TryRegisterPage()
 		local renderQueue = {}
 		local function EnqueueCard(parent, cardId)
 			renderQueue[#renderQueue + 1] = function()
-				RenderCardInto(parent, cardId)
+				local ok, err = pcall(RenderCardInto, parent, cardId)
+				if not ok then
+					LOCAL_LOG("WARN", "Card render failed", tostring(cardId), tostring(err or "unknown"))
+				end
 			end
 		end
 
@@ -3622,7 +3833,10 @@ function CHARINFO:TryRegisterPage()
 					freeCol:SetFullWidth(true)
 					freeRow:AddChild(freeCol)
 
-					RenderCardInto(freeCol, id)
+					local ok, err = pcall(RenderCardInto, freeCol, id)
+					if not ok then
+						LOCAL_LOG("WARN", "Card render failed", tostring(id), tostring(err or "unknown"))
+					end
 				end
 			end
 		end

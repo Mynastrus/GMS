@@ -35,7 +35,7 @@ local METADATA = {
 	INTERN_NAME  = "ACCOUNTINFO",
 	SHORT_NAME   = "AccountInfo",
 	DISPLAY_NAME = "Account Information",
-	VERSION      = "1.0.10",
+	VERSION      = "1.0.12",
 }
 
 local ACCOUNT_CHARS_SYNC_DOMAIN = "ACCOUNT_CHARS_V1"
@@ -332,6 +332,51 @@ local function GetCurrentGuildStorageKeySafe()
 	return guildKey, guildName
 end
 
+local function NormalizeGuildToken(value)
+	return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""):lower()
+end
+
+local function ParseGuildKey(key)
+	local raw = tostring(key or "")
+	if raw == "" then
+		return "", "", ""
+	end
+	local realm, faction, guild = raw:match("^([^|]*)|([^|]*)|(.+)$")
+	return NormalizeGuildToken(realm), NormalizeGuildToken(faction), NormalizeGuildToken(guild)
+end
+
+local function ExtractGuildNameFromGuildKey(key)
+	local _, _, guild = ParseGuildKey(key)
+	return guild
+end
+
+local function AreGuildContextsCompatible(aKey, bKey, aGuildName, bGuildName)
+	local aRaw = tostring(aKey or "")
+	local bRaw = tostring(bKey or "")
+	if aRaw ~= "" and bRaw ~= "" and aRaw == bRaw then
+		return true
+	end
+
+	local _, aFaction, aGuild = ParseGuildKey(aRaw)
+	local _, bFaction, bGuild = ParseGuildKey(bRaw)
+	if aGuild ~= "" and bGuild ~= "" and aGuild == bGuild then
+		if aFaction == "" or bFaction == "" then
+			return true
+		end
+		return aFaction == bFaction
+	end
+
+	local guildA = (aGuild ~= "" and aGuild) or NormalizeGuildToken(aGuildName)
+	local guildB = (bGuild ~= "" and bGuild) or NormalizeGuildToken(bGuildName)
+	if guildA == "" or guildB == "" or guildA ~= guildB then
+		return false
+	end
+	if aFaction == "" or bFaction == "" then
+		return true
+	end
+	return aFaction == bFaction
+end
+
 function AccountInfo:GetAccountLinkStore()
 	if GMS and type(GMS.InitializeStandardDatabases) == "function" then
 		GMS:InitializeStandardDatabases(false)
@@ -441,14 +486,29 @@ end
 local function BuildAccountCharsListForGuild(links, guildKey)
 	local out = {}
 	local key = tostring(guildKey or "")
-	if key == "" then return out end
 	if type(links) ~= "table" or type(links.chars) ~= "table" then return out end
+	local keyGuild = ExtractGuildNameFromGuildKey(key)
 	for guid, entry in pairs(links.chars) do
-		if type(entry) == "table" and tostring(entry.guildKey or "") == key then
+		local include = false
+		if type(entry) == "table" then
+			if key ~= "" then
+				include = AreGuildContextsCompatible(tostring(entry.guildKey or ""), key, entry.guild, nil)
+			else
+				include = true
+				if keyGuild ~= "" then
+					include = NormalizeGuildToken(entry.guild) == keyGuild
+				end
+			end
+		end
+		if include then
 			local guidStr = tostring(guid or "")
 			local nameFull = tostring(entry.name_full or entry.name or guidStr or "-")
 			nameFull = nameFull:gsub("^%s+", ""):gsub("%s+$", "")
 			if nameFull == "" then nameFull = (guidStr ~= "" and guidStr) or "-" end
+			local entryGuildKey = tostring(entry.guildKey or "")
+			if entryGuildKey == "" then
+				entryGuildKey = key
+			end
 			out[#out + 1] = {
 				guid = guidStr,
 				name_full = nameFull,
@@ -458,7 +518,7 @@ local function BuildAccountCharsListForGuild(links, guildKey)
 				class = tostring(entry.class or "-"),
 				classFile = tostring(entry.classFile or ""),
 				guild = tostring(entry.guild or ""),
-				guildKey = key,
+				guildKey = entryGuildKey,
 				lastSeenAt = tonumber(entry.lastSeenAt or 0) or 0,
 			}
 		end
@@ -488,7 +548,7 @@ local function BuildRowsFromGlobalTwinks(global, selectedGuid)
 		if guid ~= "" then
 			local meta = type(metaByGuid[guid]) == "table" and metaByGuid[guid] or {}
 			local rowGuildKey = tostring(meta.guildKey or selectedGuildKey)
-			if rowGuildKey ~= "" and rowGuildKey == selectedGuildKey then
+			if rowGuildKey ~= "" and AreGuildContextsCompatible(rowGuildKey, selectedGuildKey, meta.guild, nil) then
 				out[#out + 1] = {
 					guid = guid,
 					name_full = tostring(meta.name_full or meta.name or guid),
@@ -534,20 +594,15 @@ local function BuildGuildVerifiedLinkedRows(selectedGuid, chars, fallbackGuildKe
 	end
 
 	local selectedGuildKey = tostring(fallbackGuildKey or "")
+	local selectedGuildName = ""
 	for i = 1, #chars do
 		local row = chars[i]
 		if type(row) == "table" and tostring(row.guid or "") == guid then
 			local rowGuildKey = tostring(row.guildKey or "")
 			if rowGuildKey ~= "" then selectedGuildKey = rowGuildKey end
+			selectedGuildName = NormalizeGuildToken(row.guild)
 			break
 		end
-	end
-	if selectedGuildKey == "" then
-		return {}, false, "Selected character has no guild link."
-	end
-	local currentGuildKey = select(1, GetCurrentGuildStorageKeySafe())
-	if tostring(currentGuildKey or "") == "" or tostring(currentGuildKey or "") ~= selectedGuildKey then
-		return {}, false, "Selected character is outside the current guild context."
 	end
 	local currentMember = roster:GetMemberByGUID(guid)
 	if type(currentMember) ~= "table" then
@@ -560,7 +615,15 @@ local function BuildGuildVerifiedLinkedRows(selectedGuid, chars, fallbackGuildKe
 		if type(entry) == "table" then
 			local otherGuid = tostring(entry.guid or "")
 			local otherGuildKey = tostring(entry.guildKey or selectedGuildKey)
-			if otherGuid ~= "" and otherGuid ~= guid and otherGuildKey == selectedGuildKey then
+			local sameContext = true
+			if selectedGuildKey ~= "" then
+				sameContext = AreGuildContextsCompatible(otherGuildKey, selectedGuildKey, entry.guild, selectedGuildName)
+			elseif selectedGuildName ~= "" then
+				sameContext = NormalizeGuildToken(entry.guild) == selectedGuildName
+			end
+			if otherGuid ~= "" and otherGuid ~= guid
+				and sameContext
+			then
 				local member = roster:GetMemberByGUID(otherGuid)
 				if type(member) == "table" then
 					rows[#rows + 1] = {
@@ -603,19 +666,15 @@ local function BuildStoredLinkedRows(selectedGuid, chars, fallbackGuildKey, sour
 	end
 
 	local selectedGuildKey = tostring(fallbackGuildKey or "")
+	local selectedGuildName = ""
 	for i = 1, #chars do
 		local row = chars[i]
 		if type(row) == "table" and tostring(row.guid or "") == guid then
 			local rowGuildKey = tostring(row.guildKey or "")
 			if rowGuildKey ~= "" then selectedGuildKey = rowGuildKey end
+			selectedGuildName = NormalizeGuildToken(row.guild)
 			break
 		end
-	end
-	if selectedGuildKey == "" then
-		selectedGuildKey = tostring(select(1, GetCurrentGuildStorageKeySafe()) or "")
-	end
-	if selectedGuildKey == "" then
-		return {}, false, "No guild context available."
 	end
 
 	local rows = {}
@@ -624,7 +683,15 @@ local function BuildStoredLinkedRows(selectedGuid, chars, fallbackGuildKey, sour
 		if type(entry) == "table" then
 			local otherGuid = tostring(entry.guid or "")
 			local otherGuildKey = tostring(entry.guildKey or selectedGuildKey)
-			if otherGuid ~= "" and otherGuid ~= guid and otherGuildKey == selectedGuildKey then
+			local sameContext = true
+			if selectedGuildKey ~= "" then
+				sameContext = AreGuildContextsCompatible(otherGuildKey, selectedGuildKey, entry.guild, selectedGuildName)
+			elseif selectedGuildName ~= "" then
+				sameContext = NormalizeGuildToken(entry.guild) == selectedGuildName
+			end
+			if otherGuid ~= "" and otherGuid ~= guid
+				and sameContext
+			then
 				rows[#rows + 1] = {
 					guid = otherGuid,
 					name_full = tostring(entry.name_full or entry.name or otherGuid),
@@ -648,6 +715,7 @@ end
 local function BuildLooseStoredLinkedRows(selectedGuid, chars, fallbackGuildKey, sourceLabel)
 	local guid = tostring(selectedGuid or "")
 	local selectedGuildKey = tostring(fallbackGuildKey or "")
+	local selectedGuildName = ""
 	if type(chars) ~= "table" or #chars <= 0 then
 		return {}, false, "No same-account characters stored yet."
 	end
@@ -658,14 +726,9 @@ local function BuildLooseStoredLinkedRows(selectedGuid, chars, fallbackGuildKey,
 			if rowGuildKey ~= "" then
 				selectedGuildKey = rowGuildKey
 			end
+			selectedGuildName = NormalizeGuildToken(row.guild)
 			break
 		end
-	end
-	if selectedGuildKey == "" then
-		selectedGuildKey = tostring(select(1, GetCurrentGuildStorageKeySafe()) or "")
-	end
-	if selectedGuildKey == "" then
-		return {}, false, "No guild context available."
 	end
 
 	local rows = {}
@@ -674,7 +737,15 @@ local function BuildLooseStoredLinkedRows(selectedGuid, chars, fallbackGuildKey,
 		if type(entry) == "table" then
 			local otherGuid = tostring(entry.guid or "")
 			local otherGuildKey = tostring(entry.guildKey or selectedGuildKey)
-			if otherGuid ~= "" and otherGuid ~= guid and otherGuildKey == selectedGuildKey then
+			local sameContext = true
+			if selectedGuildKey ~= "" then
+				sameContext = AreGuildContextsCompatible(otherGuildKey, selectedGuildKey, entry.guild, selectedGuildName)
+			elseif selectedGuildName ~= "" then
+				sameContext = NormalizeGuildToken(entry.guild) == selectedGuildName
+			end
+			if otherGuid ~= "" and otherGuid ~= guid
+				and sameContext
+			then
 				rows[#rows + 1] = {
 					guid = otherGuid,
 					name_full = tostring(entry.name_full or entry.name or otherGuid),

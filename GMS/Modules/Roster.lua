@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.1.17",
+	VERSION      = "1.1.23",
 }
 
 local LibStub = LibStub
@@ -131,6 +131,7 @@ Roster._lastListParent = Roster._lastListParent or nil
 Roster._tablePool = Roster._tablePool or {}
 Roster._guidToRow = Roster._guidToRow or {}
 Roster._nameCache = Roster._nameCache or {}
+Roster._nameToGuidCache = Roster._nameToGuidCache or {}
 Roster._lastRosterRequest = Roster._lastRosterRequest or 0
 Roster._lastUpdateEvent = Roster._lastUpdateEvent or 0
 Roster._lastGuidOrderSig = Roster._lastGuidOrderSig or ""
@@ -207,11 +208,183 @@ local function NormalizeCharacterNameWithRealm(rawName)
 	return name_full, name, realm
 end
 
+local function NormalizeNameGuidKey(nameFull)
+	local n = tostring(nameFull or "")
+	if n == "" then return "" end
+	n = n:lower()
+	n = n:gsub("%s+", "")
+	return n
+end
+
+local function IsUsablePlayerGuid(guid)
+	local g = tostring(guid or "")
+	if g == "" then return false end
+	return g:find("^Player%-") ~= nil
+end
+
+local function RememberGuidForNameFull(nameFull, guid)
+	if not IsUsablePlayerGuid(guid) then return end
+	local key = NormalizeNameGuidKey(nameFull)
+	if key == "" then return end
+	Roster._nameToGuidCache[key] = tostring(guid)
+end
+
 -- ###########################################################################
 -- #	GUILD DATA + MULTI SORT
 -- ###########################################################################
 
 local GetLastOnlineByRosterIndex
+local BuildRaidStatusFromRaidsStore
+
+local function BuildItemLevelFromStoredSnapshot(snapshot)
+	if type(snapshot) ~= "table" or type(snapshot.slots) ~= "table" then return nil end
+	local relevantSlots = { 1, 2, 3, 15, 5, 9, 10, 6, 7, 8, 11, 12, 13, 14, 16, 17 }
+	local total, count = 0, 0
+	for i = 1, #relevantSlots do
+		local slot = snapshot.slots[relevantSlots[i]]
+		if type(slot) == "table" then
+			local ilvl = tonumber(slot.itemLevel)
+			if ilvl and ilvl > 0 then
+				total = total + ilvl
+				count = count + 1
+			end
+		end
+	end
+	if count <= 0 then return nil end
+	return total / count
+end
+
+local function GetGlobalStores()
+	local aceGlobal = (GMS and type(GMS.db) == "table" and type(GMS.db.global) == "table") and GMS.db.global or nil
+	local rawDB = (type(_G) == "table") and rawget(_G, "GMS_DB") or nil
+	local rawGlobal = (type(rawDB) == "table" and type(rawDB.global) == "table") and rawDB.global or nil
+	return aceGlobal, rawGlobal
+end
+
+local function ResolveGuidByNameFull(nameFull)
+	local key = NormalizeNameGuidKey(nameFull)
+	if key == "" then return nil end
+
+	local cached = tostring((Roster._nameToGuidCache and Roster._nameToGuidCache[key]) or "")
+	if IsUsablePlayerGuid(cached) then
+		return cached
+	end
+
+	for guid, row in pairs(Roster._guidToRow or {}) do
+		local rowName = type(row) == "table" and tostring(row._nameFull or "") or ""
+		if rowName ~= "" and NormalizeNameGuidKey(rowName) == key and IsUsablePlayerGuid(guid) then
+			RememberGuidForNameFull(nameFull, guid)
+			return guid
+		end
+	end
+
+	local metaStore = type(Roster.GetMemberMetaStore) == "function" and Roster:GetMemberMetaStore() or nil
+	if type(metaStore) == "table" then
+		for guid, row in pairs(metaStore) do
+			local rowName = type(row) == "table" and tostring(row.name_full or "") or ""
+			if rowName ~= "" and NormalizeNameGuidKey(rowName) == key and IsUsablePlayerGuid(guid) then
+				RememberGuidForNameFull(nameFull, guid)
+				return guid
+			end
+		end
+	end
+
+	local aceGlobal, rawGlobal = GetGlobalStores()
+	local function scan(global)
+		local links = type(global) == "table" and type(global.accountLinks) == "table" and global.accountLinks or nil
+		local chars = links and type(links.chars) == "table" and links.chars or nil
+		if type(chars) ~= "table" then return nil end
+		for guid, row in pairs(chars) do
+			if type(row) == "table" then
+				local n = NormalizeNameGuidKey(row.name_full or row.name or "")
+				if n ~= "" and n == key then
+					local g = tostring(guid or "")
+					if IsUsablePlayerGuid(g) then
+						RememberGuidForNameFull(nameFull, g)
+						return g
+					end
+				end
+			end
+		end
+		return nil
+	end
+	return scan(aceGlobal) or scan(rawGlobal)
+end
+
+local function GetStoredCharacterFallbackMeta(guid)
+	local g = tostring(guid or "")
+	if g == "" then return nil end
+	local aceGlobal, rawGlobal = GetGlobalStores()
+	local function getChar(global)
+		local chars = global and type(global.characters) == "table" and global.characters or nil
+		return chars and type(chars[g]) == "table" and chars[g] or nil
+	end
+	local char = getChar(aceGlobal) or getChar(rawGlobal)
+	if type(char) ~= "table" then return nil end
+
+	local out = {}
+	local eq = type(char.EQUIPMENT) == "table" and char.EQUIPMENT or nil
+	local eqSnap = eq and type(eq.equipment) == "table" and eq.equipment.snapshot or nil
+	local ilvl = BuildItemLevelFromStoredSnapshot(eqSnap)
+	if ilvl and ilvl > 0 then out.ilvl = ilvl end
+
+	local mp = type(char.MYTHICPLUS) == "table" and char.MYTHICPLUS or nil
+	local mplus = mp and tonumber(mp.score or 0) or nil
+	if mplus and mplus >= 0 then out.mplus = mplus end
+
+	local raids = type(char.RAIDS) == "table" and char.RAIDS or nil
+	local raidRows = raids and type(raids.raids) == "table" and raids.raids or nil
+	if type(raidRows) == "table" and type(BuildRaidStatusFromRaidsStore) == "function" then
+		local raid = tostring(BuildRaidStatusFromRaidsStore(raidRows) or "-")
+		if raid ~= "" and raid ~= "-" then
+			out.raid = raid
+		end
+	end
+
+	local charInfo = type(char.CHARINFO) == "table" and char.CHARINFO or nil
+	local gmsVersion = charInfo and tostring(charInfo.gmsVersion or "") or ""
+	if gmsVersion ~= "" then
+		out.gmsVersion = gmsVersion
+	end
+
+	return next(out) and out or nil
+end
+
+local function SaveStoredCharacterVersion(guid, version, seenAt, sourceGuid)
+	local g = tostring(guid or "")
+	local v = tostring(version or "")
+	if g == "" or v == "" then return false end
+	local ts = tonumber(seenAt or 0) or 0
+	local src = tostring(sourceGuid or "")
+
+	local function writeGlobal(global)
+		if type(global) ~= "table" then return false end
+		global.characters = type(global.characters) == "table" and global.characters or {}
+		local c = type(global.characters[g]) == "table" and global.characters[g] or {}
+		global.characters[g] = c
+		c.CHARINFO = type(c.CHARINFO) == "table" and c.CHARINFO or {}
+		local ci = c.CHARINFO
+		ci.gmsVersion = v
+		if ts > 0 then
+			ci.lastVersionUpdate = ts
+		end
+		if src ~= "" then
+			ci.versionSourceGuid = src
+		end
+		return true
+	end
+
+	local ok = false
+	if GMS and type(GMS.db) == "table" and type(GMS.db.global) == "table" then
+		ok = writeGlobal(GMS.db.global) or ok
+	end
+	local rawDB = (type(_G) == "table") and rawget(_G, "GMS_DB") or nil
+	if type(rawDB) == "table" then
+		rawDB.global = type(rawDB.global) == "table" and rawDB.global or {}
+		ok = writeGlobal(rawDB.global) or ok
+	end
+	return ok
+end
 
 -- ---------------------------------------------------------------------------
 --	Liest alle Gildenmitglieder und sortiert sie mehrstufig
@@ -310,27 +483,38 @@ local function GetAllGuildMembers(sortSpec, skipRequest)
 			m.guid = GUID
 			m.note = note or ""
 			m.officernote = officernote or ""
+			if not IsUsablePlayerGuid(m.guid) and type(m.name_full) == "string" and m.name_full ~= "" then
+				m.guid = ResolveGuidByNameFull(m.name_full) or m.guid
+			end
+			if IsUsablePlayerGuid(m.guid) then
+				RememberGuidForNameFull(m.name_full, m.guid)
+			end
+			local effectiveGuid = IsUsablePlayerGuid(m.guid) and m.guid or nil
 
 			local lastOnlineTs, lastOnlineText, lastOnlineHours = GetLastOnlineByRosterIndex(i, m.online)
 			m.lastOnlineAt = lastOnlineTs
 			m.lastOnlineText = lastOnlineText
 			m.lastOnlineHours = lastOnlineHours or 0
-			local meta = (GUID and Roster:GetMemberMeta(GUID)) or nil
-			m.ilvl = (meta and tonumber(meta.ilvl)) or nil
-			m.mplusScore = (meta and tonumber(meta.mplus)) or nil
+			local meta = (effectiveGuid and Roster:GetMemberMeta(effectiveGuid)) or nil
+			local fallbackMeta = (effectiveGuid and GetStoredCharacterFallbackMeta(effectiveGuid)) or nil
+			m.ilvl = (meta and tonumber(meta.ilvl)) or (fallbackMeta and tonumber(fallbackMeta.ilvl)) or nil
+			m.mplusScore = (meta and tonumber(meta.mplus)) or (fallbackMeta and tonumber(fallbackMeta.mplus)) or nil
 			m.raidStatus = (meta and tostring(meta.raid or "")) or "-"
+			if m.raidStatus == "" or m.raidStatus == "-" then
+				m.raidStatus = (fallbackMeta and tostring(fallbackMeta.raid or "")) or "-"
+			end
 			if m.raidStatus == "" then m.raidStatus = "-" end
 			m.raidName = (meta and tostring(meta.raid_name or "")) or ""
 			m.raidPriority = (meta and tonumber(meta.raid_priority)) or nil
-			m.gmsVersion = (meta and tostring(meta.version or "")) or "-"
+			m.gmsVersion = (meta and tostring(meta.version or "")) or (fallbackMeta and tostring(fallbackMeta.gmsVersion or "")) or "-"
 			if m.gmsVersion == "" then m.gmsVersion = "-" end
-			if m.guid and UnitGUID and m.guid == UnitGUID("player") and (m.gmsVersion == "-") then
+			if effectiveGuid and UnitGUID and effectiveGuid == UnitGUID("player") and (m.gmsVersion == "-") then
 				m.gmsVersion = tostring((GMS and GMS.VERSION) or "-")
 			end
 
 			-- Generate a Data Fingerprint for incremental updates
 			m.fingerprint = string.format("%s:%d:%s:%s:%s:%s:%s:%s:%s:%s:%s",
-				GUID or "no-guid", level or 0, rankIndex or 0,
+				effectiveGuid or "no-guid", level or 0, rankIndex or 0,
 				m.online and "1" or "0", tostring(status or ""), note or "",
 				tostring(m.lastOnlineHours or 0), tostring(m.ilvl or "-"),
 				tostring(m.mplusScore or "-"), tostring(m.raidStatus or "-"), tostring(m.gmsVersion or "-"))
@@ -807,7 +991,10 @@ function Roster:SetMemberMeta(guid, meta, seenAt, opts)
 	end
 
 	local v = tostring(meta.version or "")
-	if v ~= "" then row.version = v end
+	if v ~= "" then
+		row.version = v
+		SaveStoredCharacterVersion(guid, v, t, sourceGuid)
+	end
 
 	local ilvl = tonumber(meta.ilvl)
 	if ilvl and ilvl > 0 then row.ilvl = ilvl end
@@ -1006,7 +1193,6 @@ function Roster:SetMemberGmsVersion(guid, version, seenAt)
 	return self:SetMemberMeta(guid, { version = v }, seenAt)
 end
 
-local BuildRaidStatusFromRaidsStore
 local GetBestRaidProgressFromEntry
 local ACTIVE_RAID_PRIORITY = { 2810, 2769, 2657 } -- newest -> older
 local ACTIVE_RAID_PRIORITY_INDEX = {}
@@ -2764,10 +2950,14 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 						if not ui or type(ui.Open) ~= "function" then
 							return
 						end
+						local navGuid = rowGuid
+						if not IsUsablePlayerGuid(navGuid) then
+							navGuid = ResolveGuidByNameFull(rowNameFull) or navGuid
+						end
 						if type(ui.SetNavigationContext) == "function" then
 							ui:SetNavigationContext({
 								source = "ROSTER",
-								guid = rowGuid,
+								guid = navGuid,
 								name_full = rowNameFull,
 							})
 						end
@@ -2776,8 +2966,9 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 				end
 
 				-- Map GUID to row container and store fingerprint
-				if m.guid then
+				if IsUsablePlayerGuid(m.guid) then
 					Roster._guidToRow[m.guid] = row
+					row._nameFull = rowNameFull
 					row._dataFingerprint = m.fingerprint
 				end
 

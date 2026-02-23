@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "COMM",
 	SHORT_NAME   = "Comm",
 	DISPLAY_NAME = "Kommunikation",
-	VERSION      = "1.2.12",
+	VERSION      = "1.2.13",
 }
 
 ---@diagnostic disable: undefined-global
@@ -570,20 +570,75 @@ end
 
 function Comm:GetRecord(originGUID, charGUID, domain)
 	local key = BuildRecordKey(originGUID, charGUID, domain)
+	local best = nil
+	local function consider(rec)
+		if type(rec) ~= "table" then return end
+		if rec.key ~= key then return end
+		if not best or CompareRecordFreshness(rec, best) > 0 then
+			best = rec
+		end
+	end
+
 	local store = GetSyncStore()
-	if type(store) ~= "table" then return nil end
-	return store.records[key]
+	if type(store) == "table" and type(store.records) == "table" then
+		consider(store.records[key])
+	end
+
+	local rawDB = (type(_G) == "table") and rawget(_G, "GMS_DB") or nil
+	local global = (type(rawDB) == "table" and type(rawDB.global) == "table") and rawDB.global or nil
+	local guilds = (type(global) == "table" and type(global.guilds) == "table") and global.guilds or nil
+	if type(guilds) == "table" then
+		for _, gRoot in pairs(guilds) do
+			local sync = (type(gRoot) == "table" and type(gRoot.COMM_SYNC) == "table") and gRoot.COMM_SYNC or nil
+			local records = (type(sync) == "table" and type(sync.records) == "table") and sync.records or nil
+			if type(records) == "table" then
+				consider(records[key])
+			end
+		end
+	end
+
+	return best
 end
 
 function Comm:GetRecordsByDomain(domain)
 	local d = tostring(domain or "")
-	local out = {}
-	local store = GetSyncStore()
-	if type(store) ~= "table" then return out end
-	for _, rec in pairs(store.records) do
-		if rec and rec.domain == d then
-			out[#out + 1] = rec
+	local byKey = {}
+	local function consider(rec)
+		if type(rec) ~= "table" then return end
+		if tostring(rec.domain or "") ~= d then return end
+		local k = tostring(rec.key or "")
+		if k == "" then return end
+		local cur = byKey[k]
+		if type(cur) ~= "table" or CompareRecordFreshness(rec, cur) > 0 then
+			byKey[k] = rec
 		end
+	end
+
+	local store = GetSyncStore()
+	if type(store) == "table" and type(store.records) == "table" then
+		for _, rec in pairs(store.records) do
+			consider(rec)
+		end
+	end
+
+	local rawDB = (type(_G) == "table") and rawget(_G, "GMS_DB") or nil
+	local global = (type(rawDB) == "table" and type(rawDB.global) == "table") and rawDB.global or nil
+	local guilds = (type(global) == "table" and type(global.guilds) == "table") and global.guilds or nil
+	if type(guilds) == "table" then
+		for _, gRoot in pairs(guilds) do
+			local sync = (type(gRoot) == "table" and type(gRoot.COMM_SYNC) == "table") and gRoot.COMM_SYNC or nil
+			local records = (type(sync) == "table" and type(sync.records) == "table") and sync.records or nil
+			if type(records) == "table" then
+				for _, rec in pairs(records) do
+					consider(rec)
+				end
+			end
+		end
+	end
+
+	local out = {}
+	for _, rec in pairs(byKey) do
+		out[#out + 1] = rec
 	end
 	return out
 end
