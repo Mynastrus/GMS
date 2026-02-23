@@ -1,7 +1,7 @@
-ï»¿-- ============================================================================
+-- ============================================================================
 --	GMS/Modules/CharInfo.lua
 --	CharInfo MODULE (Ace)
---	- Zugriff auf GMS ÃƒÂ¼ber AceAddon Registry
+--	- Zugriff auf GMS Ã¼ber AceAddon Registry
 --	- UI-Page + RightDock Icon
 --	- Zeigt Player-Snapshot + ctx (optional) + Auswahl-Buttons
 -- ============================================================================
@@ -444,7 +444,7 @@ local function GetTargetSnapshot()
 	local level = UnitLevel("target")
 	local guid = (UnitGUID and UnitGUID("target")) or nil
 
-	-- Spec / ilvl fÃƒÂ¼r target sind ohne Inspect nicht zuverlÃƒÂ¤ssig -> bewusst "-"
+	-- Spec / ilvl fÃ¼r target sind ohne Inspect nicht zuverlÃ¤ssig -> bewusst "-"
 	return {
 		name         = name,
 		realm        = realm,
@@ -800,7 +800,7 @@ end
 
 local function NormalizeSearchText(raw)
 	local s = tostring(raw or ""):lower()
-	s = s:gsub("[Ã¤Ã¡Ã Ã¢]", "a"):gsub("[Ã¶Ã³Ã²Ã´]", "o"):gsub("[Ã¼ÃºÃ¹Ã»]", "u"):gsub("ÃŸ", "ss")
+	s = s:gsub("[äáàâ]", "a"):gsub("[öóòô]", "o"):gsub("[üúùû]", "u"):gsub("ß", "ss")
 	s = s:gsub("[^%w%s]", " "):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
 	return s
 end
@@ -1469,11 +1469,11 @@ local function BuildSelfRaidWaitingText(details)
 		return LT("CHARINFO_RAID_WAIT_SCAN_REASON", "Warte auf Raidscan (%s)...", reason)
 	end
 	if raids._statsDeferredScheduled == true then
-		return LT("CHARINFO_RAID_WAIT_DEFERRED_SCAN", "Warte auf verzÃ¶gerten Raid-Statistikscan...")
+		return LT("CHARINFO_RAID_WAIT_DEFERRED_SCAN", "Warte auf verzögerten Raid-Statistikscan...")
 	end
 	local cursor = tonumber(raids._statsCategoryCursor or 1) or 1
 	if cursor > 1 then
-		return LT("CHARINFO_RAID_WAIT_STATS_RUNNING", "Raid-Statistikscan lÃ¤uft...")
+		return LT("CHARINFO_RAID_WAIT_STATS_RUNNING", "Raid-Statistikscan läuft...")
 	end
 	if raids._ejUnsupported == true then
 		return LT("CHARINFO_RAID_WAIT_SAVEDINSTANCES", "Warte auf SavedInstances-Raiddaten...")
@@ -1569,10 +1569,10 @@ local function ResolveContextGuid(ctxGuid, ctxName)
 		end
 	end
 
-	local function scanLinks(global)
-		local links = type(global) == "table" and type(global.accountLinks) == "table" and global.accountLinks or nil
-		local chars = links and type(links.chars) == "table" and links.chars or nil
-		if type(chars) ~= "table" then return "" end
+	local accountInfo = GMS and (GMS:GetModule("ACCOUNTINFO", true) or GMS:GetModule("AccountInfo", true)) or nil
+	local links = (type(accountInfo) == "table" and type(accountInfo.GetAccountLinkStore) == "function") and accountInfo:GetAccountLinkStore() or nil
+	local chars = links and type(links.chars) == "table" and links.chars or nil
+	if type(chars) == "table" then
 		for g, row in pairs(chars) do
 			if type(row) == "table" then
 				local n = NormalizeNameGuidKey(row.name_full or row.name or "")
@@ -1581,15 +1581,8 @@ local function ResolveContextGuid(ctxGuid, ctxName)
 				end
 			end
 		end
-		return ""
 	end
-
-	local aceGlobal = (GMS and GMS.db and type(GMS.db.global) == "table") and GMS.db.global or nil
-	local rawDB = (type(_G) == "table") and rawget(_G, "GMS_DB") or nil
-	local rawGlobal = (type(rawDB) == "table" and type(rawDB.global) == "table") and rawDB.global or nil
-	local fromAce = scanLinks(aceGlobal)
-	if fromAce ~= "" then return fromAce end
-	return scanLinks(rawGlobal)
+	return ""
 end
 
 local function GetCharScopedModuleBucket(guid, moduleKey)
@@ -1632,21 +1625,16 @@ end
 local function GetStoredAccountIdentityByGuid(guid)
 	local g = tostring(guid or "")
 	if g == "" then return nil end
-	local function lookup(global)
-		if type(global) ~= "table" then return nil end
-		local links = type(global.accountLinks) == "table" and global.accountLinks or nil
-		local linkChars = links and type(links.chars) == "table" and links.chars or nil
-		local row = linkChars and type(linkChars[g]) == "table" and linkChars[g] or nil
-		if type(row) ~= "table" then
-			local twinkMeta = type(global.twinkMeta) == "table" and global.twinkMeta or nil
-			row = twinkMeta and type(twinkMeta[g]) == "table" and twinkMeta[g] or nil
-		end
-		return row
+	local accountInfo = GMS and (GMS:GetModule("ACCOUNTINFO", true) or GMS:GetModule("AccountInfo", true)) or nil
+	if type(accountInfo) ~= "table" or type(accountInfo.GetAccountLinkStore) ~= "function" then
+		return nil
 	end
-	local aceGlobal = (GMS and GMS.db and type(GMS.db.global) == "table") and GMS.db.global or nil
-	local rawDB = (type(_G) == "table") and rawget(_G, "GMS_DB") or nil
-	local rawGlobal = (type(rawDB) == "table" and type(rawDB.global) == "table") and rawDB.global or nil
-	local row = lookup(aceGlobal) or lookup(rawGlobal)
+	local links = accountInfo:GetAccountLinkStore()
+	if type(links) ~= "table" then return nil end
+	local row = (type(links.chars) == "table" and type(links.chars[g]) == "table") and links.chars[g] or nil
+	if type(row) ~= "table" then
+		row = (type(links.twinkMeta) == "table" and type(links.twinkMeta[g]) == "table") and links.twinkMeta[g] or nil
+	end
 	if type(row) ~= "table" then return nil end
 	return {
 		name_full = tostring(row.name_full or row.name or g),
@@ -1729,54 +1717,45 @@ local function CloneSyncPayload(value, depth)
 	return out
 end
 
-local function PersistSyncedDomainPayload(guid, domain, payload, updatedAt, seq)
+local function PersistSyncedDomainPayload(guid, domain, payload, meta)
 	local g = tostring(guid or "")
 	local d = tostring(domain or "")
 	if g == "" or d == "" or type(payload) ~= "table" then
 		return false
 	end
-
-	local charStore = EnsureCharStoreByGuid(g)
-	if type(charStore) ~= "table" then
-		return false
+	local m = type(meta) == "table" and meta or {}
+	if GMS and type(GMS.SetCharacterDomainData) == "function" then
+		return GMS:SetCharacterDomainData(g, d, CloneSyncPayload(payload, 0) or payload, {
+			sourceGuid = tostring(m.sourceGuid or ""),
+			sourceName = tostring(m.sourceName or ""),
+			updatedAtTs = tonumber(m.updatedAtTs or m.updatedAt or 0) or 0,
+		}) == true
 	end
-
-	local cacheRoot = charStore.CHARINFO_SYNC
-	if type(cacheRoot) ~= "table" then
-		cacheRoot = {}
-		charStore.CHARINFO_SYNC = cacheRoot
-	end
-	cacheRoot.domains = type(cacheRoot.domains) == "table" and cacheRoot.domains or {}
-
-	cacheRoot.domains[d] = {
-		payload = CloneSyncPayload(payload, 0),
-		updatedAt = tonumber(updatedAt) or 0,
-		seq = tonumber(seq) or 0,
-	}
-	return true
+	return false
 end
 
 local function GetPersistedDomainPayload(guid, domain)
 	local g = tostring(guid or "")
 	local d = tostring(domain or "")
 	if g == "" or d == "" then return nil end
-	local charStore = EnsureCharStoreByGuid(g)
-	if type(charStore) ~= "table" then return nil end
-	local cacheRoot = charStore.CHARINFO_SYNC
-	if type(cacheRoot) ~= "table" or type(cacheRoot.domains) ~= "table" then
+	if not GMS or type(GMS.GetCharacterDomainData) ~= "function" then
 		return nil
 	end
-	local node = cacheRoot.domains[d]
-	if type(node) ~= "table" or type(node.payload) ~= "table" then
+	local node = GMS:GetCharacterDomainData(g, d)
+	if type(node) ~= "table" or type(node.data) ~= "table" or type(node.meta) ~= "table" then
 		return nil
 	end
-	return node.payload, tonumber(node.updatedAt) or 0, tonumber(node.seq) or 0
+	return node.data, tonumber(node.meta.updatedAtTs or 0) or 0, 0
 end
 
 local function GetLatestOrCachedDomainPayload(domain, guid)
 	local rec = GetLatestDomainRecordForGuid(domain, guid)
 	if rec and type(rec.payload) == "table" then
-		PersistSyncedDomainPayload(guid, domain, rec.payload, rec.updatedAt, rec.seq)
+		PersistSyncedDomainPayload(guid, domain, rec.payload, {
+			sourceGuid = tostring(rec.originGUID or rec.lastSender or ""),
+			sourceName = "",
+			updatedAtTs = tonumber(rec.updatedAt or 0) or 0,
+		})
 		return rec.payload, "sync", rec
 	end
 	local cached = GetPersistedDomainPayload(guid, domain)
@@ -1795,14 +1774,18 @@ local function RegisterSyncCacheListeners()
 		return false
 	end
 
-	local domains = { "roster_meta", "MYTHICPLUS_V1", "RAIDS_V1", "EQUIPMENT_V1" }
+	local domains = { "ROSTER_META_V2", "MYTHICPLUS_V2", "RAIDS_V2", "EQUIPMENT_V2" }
 	for i = 1, #domains do
 		local domainKey = domains[i]
 		comm:RegisterRecordListener(domainKey, function(record)
 			if type(record) ~= "table" or type(record.payload) ~= "table" then return end
 			local targetGuid = tostring(record.charGUID or record.originGUID or "")
 			if targetGuid == "" then return end
-			PersistSyncedDomainPayload(targetGuid, domainKey, record.payload, record.updatedAt, record.seq)
+			PersistSyncedDomainPayload(targetGuid, domainKey, record.payload, {
+				sourceGuid = tostring(record.originGUID or record.lastSender or ""),
+				sourceName = "",
+				updatedAtTs = tonumber(record.updatedAt or 0) or 0,
+			})
 		end)
 	end
 
@@ -1810,10 +1793,24 @@ local function RegisterSyncCacheListeners()
 	return true
 end
 
+local function HasLocalRosterBasics(guid)
+	local g = tostring(guid or "")
+	if g == "" then return false end
+	local row = GetRosterMemberByGuid(g)
+	if type(row) ~= "table" then return false end
+	local nameOk = tostring(row.name_full or row.name or "") ~= ""
+	local classOk = tostring(row.class or "") ~= ""
+	local levelOk = (tonumber(row.level or 0) or 0) > 0
+	return nameOk or classOk or levelOk
+end
 local function RequestDomainSyncForGuid(guid, domain, reason)
 	local g = tostring(guid or "")
 	local d = tostring(domain or "")
 	if g == "" or d == "" then return false end
+
+	if d == "ROSTER_META_V2" and HasLocalRosterBasics(g) then
+		return false
+	end
 
 	local key = g .. "|" .. d
 	local nowTs = GetTime and GetTime() or 0
@@ -1884,6 +1881,10 @@ local function QueueDomainSyncForGuid(guid, domain, reason)
 		return RequestDomainSyncForGuid(g, d, reason)
 	end
 
+	if d == "ROSTER_META_V2" and HasLocalRosterBasics(g) then
+		return false
+	end
+
 	local key = g .. "|" .. d
 	if pending[key] then
 		return false
@@ -1914,11 +1915,11 @@ local function RequestContextBootstrapOnce(guid, reason)
 		return false
 	end
 	local okAny = false
-	okAny = QueueDomainSyncForGuid(g, "roster_meta", reason or "charinfo-context-bootstrap") or okAny
-	okAny = QueueDomainSyncForGuid(g, "MYTHICPLUS_V1", reason or "charinfo-context-bootstrap") or okAny
-	okAny = QueueDomainSyncForGuid(g, "RAIDS_V1", reason or "charinfo-context-bootstrap") or okAny
-	okAny = QueueDomainSyncForGuid(g, "EQUIPMENT_V1", reason or "charinfo-context-bootstrap") or okAny
-	okAny = QueueDomainSyncForGuid(g, "ACCOUNT_CHARS_V1", reason or "charinfo-context-bootstrap") or okAny
+	okAny = QueueDomainSyncForGuid(g, "ROSTER_META_V2", reason or "charinfo-context-bootstrap") or okAny
+	okAny = QueueDomainSyncForGuid(g, "MYTHICPLUS_V2", reason or "charinfo-context-bootstrap") or okAny
+	okAny = QueueDomainSyncForGuid(g, "RAIDS_V2", reason or "charinfo-context-bootstrap") or okAny
+	okAny = QueueDomainSyncForGuid(g, "EQUIPMENT_V2", reason or "charinfo-context-bootstrap") or okAny
+	okAny = QueueDomainSyncForGuid(g, "ACCOUNT_CHARS_V2", reason or "charinfo-context-bootstrap") or okAny
 	if okAny then
 		CHARINFO._contextSyncBootstrapSent[g] = true
 	end
@@ -2012,7 +2013,7 @@ local function GetRaidSummaryFromRosterMeta(guid)
 		return "", "-"
 	end
 
-	local recMeta = GetLatestDomainRecordForGuid("roster_meta", g)
+	local recMeta = GetLatestDomainRecordForGuid("ROSTER_META_V2", g)
 	if recMeta and type(recMeta.payload) == "table" then
 		local p = recMeta.payload
 		local raid = tostring(p.raid or p.best_in_raid or "")
@@ -2123,7 +2124,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			end
 		end
 		if not data.mythic.hasData and playerGuid ~= "" then
-			local payloadLocalM, payloadLocalMSource = GetLatestOrCachedDomainPayload("MYTHICPLUS_V1", playerGuid)
+			local payloadLocalM, payloadLocalMSource = GetLatestOrCachedDomainPayload("MYTHICPLUS_V2", playerGuid)
 			if type(payloadLocalM) == "table" then
 				local rows = BuildMythicRows(payloadLocalM.dungeons, true)
 				local score = tonumber(payloadLocalM.score)
@@ -2131,7 +2132,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 				data.mythic.score = score or data.mythic.score
 				data.mythic.hasData = HasMythicProgressData(score, rows)
 				if data.mythic.hasData then
-					data.mythic.source = (payloadLocalMSource == "cache") and "Saved character DB" or "Synced MYTHICPLUS_V1"
+					data.mythic.source = (payloadLocalMSource == "cache") and "Saved character DB" or "Synced MYTHICPLUS_V2"
 				end
 			end
 		end
@@ -2159,7 +2160,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			end
 		end
 		if not data.raids.hasData and playerGuid ~= "" then
-			local payloadLocalR, payloadLocalRSource = GetLatestOrCachedDomainPayload("RAIDS_V1", playerGuid)
+			local payloadLocalR, payloadLocalRSource = GetLatestOrCachedDomainPayload("RAIDS_V2", playerGuid)
 			if type(payloadLocalR) == "table" and type(payloadLocalR.raids) == "table" then
 				local rowsLocal = BuildRaidRows(payloadLocalR.raids, raidCatalog)
 				local summaryLocal = BuildRaidStatusFromRaidsStore(payloadLocalR.raids)
@@ -2171,7 +2172,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 				end
 				data.raids.hasData = (#data.raids.rows > 0) or (data.raids.summary ~= "-" and data.raids.summary ~= "")
 				if data.raids.hasData then
-					data.raids.source = (payloadLocalRSource == "cache") and "Saved character DB" or "Synced RAIDS_V1"
+					data.raids.source = (payloadLocalRSource == "cache") and "Saved character DB" or "Synced RAIDS_V2"
 				end
 			end
 		end
@@ -2199,10 +2200,10 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			data.equipment.source = "Local memory buffer"
 		end
 		if type(eqSnapshot) ~= "table" then
-			local payloadLocalE, payloadLocalESource = GetLatestOrCachedDomainPayload("EQUIPMENT_V1", playerGuid)
+			local payloadLocalE, payloadLocalESource = GetLatestOrCachedDomainPayload("EQUIPMENT_V2", playerGuid)
 			if type(payloadLocalE) == "table" and type(payloadLocalE.snapshot) == "table" then
 				eqSnapshot = payloadLocalE.snapshot
-				data.equipment.source = (payloadLocalESource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V1"
+				data.equipment.source = (payloadLocalESource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V2"
 			end
 		end
 		local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(eqSnapshot)
@@ -2280,7 +2281,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		data.equipment.ilvl = baseEquipIlvl
 		data.equipment.slots = baseEquipSlots
 
-		local payloadMeta, payloadMetaSource = GetLatestOrCachedDomainPayload("roster_meta", targetGuid)
+		local payloadMeta, payloadMetaSource = GetLatestOrCachedDomainPayload("ROSTER_META_V2", targetGuid)
 		if type(payloadMeta) == "table" then
 			local p = payloadMeta
 			local v = tostring(p.version or "")
@@ -2317,14 +2318,14 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			end
 		end
 
-		local payloadM, payloadMSource = GetLatestOrCachedDomainPayload("MYTHICPLUS_V1", targetGuid)
+		local payloadM, payloadMSource = GetLatestOrCachedDomainPayload("MYTHICPLUS_V2", targetGuid)
 		if type(payloadM) == "table" then
 			local rows = BuildMythicRows(payloadM.dungeons, true)
 			local score = tonumber(payloadM.score)
 			data.mythic.rows = rows
 			data.mythic.score = score or data.mythic.score
 			data.mythic.hasData = HasMythicProgressData(score, rows) or data.mythic.hasData
-			data.mythic.source = (payloadMSource == "cache") and "Saved character DB" or "Synced MYTHICPLUS_V1"
+			data.mythic.source = (payloadMSource == "cache") and "Saved character DB" or "Synced MYTHICPLUS_V2"
 		end
 		if not data.mythic.hasData then
 			local mpBucket = GetCharScopedModuleBucket(targetGuid, "MYTHICPLUS") or GetCharScopedModuleBucket(targetGuid, "MythicPlus")
@@ -2340,7 +2341,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			end
 		end
 
-		local payloadR, payloadRSource = GetLatestOrCachedDomainPayload("RAIDS_V1", targetGuid)
+		local payloadR, payloadRSource = GetLatestOrCachedDomainPayload("RAIDS_V2", targetGuid)
 		if type(payloadR) == "table" then
 			local raidCatalog = baseRaidCatalog
 			local rows = BuildRaidRows(payloadR.raids, raidCatalog)
@@ -2350,7 +2351,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			end
 			data.raids.rows = rows
 			data.raids.hasData = (#rows > 0) or (data.raids.summary ~= "-") or data.raids.hasData
-			data.raids.source = (payloadRSource == "cache") and "Saved character DB" or "Synced RAIDS_V1"
+			data.raids.source = (payloadRSource == "cache") and "Saved character DB" or "Synced RAIDS_V2"
 		end
 		if not data.raids.hasData then
 			local raidsBucket = GetCharScopedModuleBucket(targetGuid, "RAIDS")
@@ -2371,7 +2372,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			end
 		end
 
-		local payloadEquip, payloadEquipSource = GetLatestOrCachedDomainPayload("EQUIPMENT_V1", targetGuid)
+		local payloadEquip, payloadEquipSource = GetLatestOrCachedDomainPayload("EQUIPMENT_V2", targetGuid)
 		if type(payloadEquip) == "table" then
 			local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(payloadEquip.snapshot)
 			if ilvl and ilvl > 0 then
@@ -2380,7 +2381,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			data.equipment.rows = rows
 			data.equipment.slots = slots
 			data.equipment.hasData = (#rows > 0) or (data.equipment.ilvl and data.equipment.ilvl > 0) or data.equipment.hasData
-			data.equipment.source = (payloadEquipSource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V1"
+			data.equipment.source = (payloadEquipSource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V2"
 		end
 		if not data.equipment.hasData then
 			local eqBucket = GetCharScopedModuleBucket(targetGuid, "EQUIPMENT")
@@ -3176,10 +3177,10 @@ function CHARINFO:TryRegisterPage()
 						GameTooltip:AddLine("|cff03A9F4Klick: Instanzportal zaubern|r", 1, 1, 1)
 					elseif portalSpellID then
 						GameTooltip:SetText("|cffffcc00Kein passender Portalzauber gefunden|r", 1, 1, 1)
-						GameTooltip:AddLine("|cff9d9d9dPortalzauber-ID erkannt, aber nicht im Spellbook/als gelernt verfÃ¼gbar.|r", 1, 1, 1)
+						GameTooltip:AddLine("|cff9d9d9dPortalzauber-ID erkannt, aber nicht im Spellbook/als gelernt verfügbar.|r", 1, 1, 1)
 					else
-						GameTooltip:SetText("|cff9d9d9dPortal nicht verfÃ¼gbar|r", 1, 1, 1)
-						GameTooltip:AddLine("|cff9d9d9dKein passender Portalzauber fÃ¼r diesen Dungeon gefunden.|r", 1, 1, 1)
+						GameTooltip:SetText("|cff9d9d9dPortal nicht verfügbar|r", 1, 1, 1)
+						GameTooltip:AddLine("|cff9d9d9dKein passender Portalzauber für diesen Dungeon gefunden.|r", 1, 1, 1)
 					end
 					GameTooltip:Show()
 				end)
@@ -3205,7 +3206,7 @@ function CHARINFO:TryRegisterPage()
 					if not GameTooltip or not widget or not widget.frame then return end
 					GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
 					GameTooltip:SetText(tostring(row.name or "-"), 1, 1, 1)
-					GameTooltip:AddLine("|cff03A9F4Klick: AbenteuerfÃ¼hrer Ã¶ffnen|r", 1, 1, 1)
+					GameTooltip:AddLine("|cff03A9F4Klick: Abenteuerführer öffnen|r", 1, 1, 1)
 					GameTooltip:Show()
 				end)
 				nameLabel:SetCallback("OnLeave", function()
@@ -3511,11 +3512,11 @@ function CHARINFO:TryRegisterPage()
 							end
 							local statusText = bossKilled
 								and ("|c" .. killedColor .. LT("CHARINFO_RAID_TOOLTIP_BOSS_KILLED", "Besiegt") .. "|r")
-								or ("|c" .. availableColor .. LT("CHARINFO_RAID_TOOLTIP_BOSS_AVAILABLE", "VerfÃ¼gbar") .. "|r")
+								or ("|c" .. availableColor .. LT("CHARINFO_RAID_TOOLTIP_BOSS_AVAILABLE", "Verfügbar") .. "|r")
 							GameTooltip:AddDoubleLine(ename, statusText, 1, 1, 1, 1, 1, 1)
 						end
 					else
-						GameTooltip:AddLine(LT("CHARINFO_RAID_TOOLTIP_BOSSLIST_MISSING", "Bossliste nicht verfÃ¼gbar."), 0.75, 0.75, 0.75)
+						GameTooltip:AddLine(LT("CHARINFO_RAID_TOOLTIP_BOSSLIST_MISSING", "Bossliste nicht verfügbar."), 0.75, 0.75, 0.75)
 					end
 
 					GameTooltip:Show()
@@ -3591,7 +3592,7 @@ function CHARINFO:TryRegisterPage()
 					if desc ~= "" then
 						GameTooltip:AddLine(desc, 0.9, 0.9, 0.9, true)
 					else
-						GameTooltip:AddLine(LT("CHARINFO_RAID_DESC_MISSING", "Keine Raidbeschreibung verfÃ¼gbar."), 0.75, 0.75, 0.75)
+						GameTooltip:AddLine(LT("CHARINFO_RAID_DESC_MISSING", "Keine Raidbeschreibung verfügbar."), 0.75, 0.75, 0.75)
 					end
 					GameTooltip:Show()
 				end)
@@ -4001,3 +4002,4 @@ function CHARINFO:OnDisable()
 	self._ticker = nil
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
+

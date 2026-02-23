@@ -121,7 +121,7 @@ local SLOT_SCAN_DELAY_SEC   = 0.02
 
 local STORE_POLL_MAX_TRIES = 25
 local STORE_POLL_INTERVAL  = 1.0
-local EQUIP_SYNC_DOMAIN    = "EQUIPMENT_V1"
+local EQUIP_SYNC_DOMAIN    = "EQUIPMENT_V2"
 
 -- ###########################################################################
 -- #	INTERNAL STATE

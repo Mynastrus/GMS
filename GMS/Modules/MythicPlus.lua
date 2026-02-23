@@ -72,7 +72,7 @@ end
 -- ###########################################################################
 
 local MODULE_NAME = "MythicPlus"
-local MYTHIC_SYNC_DOMAIN = "MYTHICPLUS_V1"
+local MYTHIC_SYNC_DOMAIN = "MYTHICPLUS_V2"
 
 local MYTHIC = GMS:GetModule(MODULE_NAME, true)
 if not MYTHIC then

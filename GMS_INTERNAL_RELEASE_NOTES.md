@@ -17,10 +17,15 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 ### Added
 - Canonical DB schema document added in `GMS_DB_SCHEMA.md` (3-tree model: `global.chars`, `global.guilds`, `global.characters`, plus local `char.*.chars`).
 - Mandatory per-domain metadata documented (`data` + `meta` with `sourceGuid`, `sourceName`, `updatedAt`).
+- Core DB helpers added in `GMS/Core/Database.lua` for canonical writes: server-time stamps, guild ID resolution via `C_Club.GetGuildClubId()`, GUID registry (`global.chars`), and character domain storage (`global.characters[guid][domain]` with `data/meta`).
 
 ### Changed
 - Sync protocol rules moved/refined in `GMS_PLAYER_SYNC_BASELINE.md` (strict version gate, `*_V2` domain namespace, minimal `ANN/REQ/PUSH` flow, ANN header contract).
 - `GMS_DB_SCHEMA.md` adjusted to reference sync protocol ownership in `GMS_PLAYER_SYNC_BASELINE.md`.
+- Sync transport hardened in `GMS/Core/Comm.lua`: switched to `__SYNC_V2`, strict addon-version gate, V2 domain allowlist, ANN header contract alignment, and canonical character-domain persistence on receive.
+- Modules switched to V2 sync domains: `GMS/Modules/Equipment.lua`, `GMS/Modules/Raids.lua`, `GMS/Modules/MythicPlus.lua`, `GMS/Modules/AccountInfo.lua`, `GMS/Modules/Roster.lua`, `GMS/Modules/CharInfo.lua`.
+- Account link storage moved to local char tree in `GMS/Modules/AccountInfo.lua` (`char.*.chars.links`) as source of truth.
+- Roster/CharInfo adjusted to roster-first hydration and V2 domain handling in `GMS/Modules/Roster.lua` and `GMS/Modules/CharInfo.lua`.
 
 ### Fixed
 - [ ] (noch keine Eintraege)

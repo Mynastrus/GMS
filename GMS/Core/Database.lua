@@ -16,6 +16,7 @@ local METADATA = {
 ---@diagnostic disable: undefined-global
 local _G           = _G
 local GetTime      = GetTime
+local time         = time
 local IsInGuild    = IsInGuild
 local GetGuildInfo = GetGuildInfo
 local GetRealmName = GetRealmName
@@ -26,7 +27,10 @@ local UnitLevel = UnitLevel
 local UnitClass = UnitClass
 local UnitFullName = UnitFullName
 local C_GuildInfo = C_GuildInfo
+local C_Club = C_Club
 local C_Timer = C_Timer
+local GetServerTime = GetServerTime
+local date = date
 local ReloadUI     = ReloadUI
 local UIParent     = UIParent
 local CreateFrame  = CreateFrame
@@ -153,19 +157,36 @@ function GMS:InitializeStandardDatabases(force)
 			self.db.global = {}
 			global = self.db.global
 		end
-		global.version = tonumber(global.version) or 2
+		global.version = tonumber(global.version) or 3
+		global.chars = type(global.chars) == "table" and global.chars or {}
 		global.characters = type(global.characters) == "table" and global.characters or {}
 		global.guilds = type(global.guilds) == "table" and global.guilds or {}
-		-- Cleanup deprecated changelog fallback fields (legacy)
+		-- Hard cutover cleanup for deprecated roots.
+		global.accountLinks = nil
+		global.twinks = nil
+		global.twinkMeta = nil
 		global.gmsChangelogLastSeenVersion = nil
 		global.gmsChangelogLastSeenAt = nil
 
 		-- Hard cleanup on raw SavedVariables root to avoid proxy/metatable leftovers.
 		local rawDB = rawget(_G, "GMS_DB")
 		if type(rawDB) == "table" and type(rawDB.global) == "table" then
+			rawDB.global.chars = type(rawDB.global.chars) == "table" and rawDB.global.chars or {}
+			rawDB.global.characters = type(rawDB.global.characters) == "table" and rawDB.global.characters or {}
+			rawDB.global.guilds = type(rawDB.global.guilds) == "table" and rawDB.global.guilds or {}
+			rawDB.global.accountLinks = nil
+			rawDB.global.twinks = nil
+			rawDB.global.twinkMeta = nil
 			rawDB.global.gmsChangelogLastSeenVersion = nil
 			rawDB.global.gmsChangelogLastSeenAt = nil
 		end
+
+		local charRoot = self.db and self.db.char
+		if type(charRoot) ~= "table" then
+			self.db.char = {}
+			charRoot = self.db.char
+		end
+		charRoot.chars = type(charRoot.chars) == "table" and charRoot.chars or {}
 	end
 
 	if self.db and self.logging_db and not force then
@@ -179,7 +200,7 @@ function GMS:InitializeStandardDatabases(force)
 
 	NormalizeGlobalSchema()
 
-	LOCAL_LOG("INFO", "Standard databases initialized", "schema=2")
+	LOCAL_LOG("INFO", "Standard databases initialized", "schema=3")
 	return true
 end
 
@@ -327,6 +348,163 @@ function GMS:GetGuildStorageKey()
 	return nil
 end
 
+local function NormalizeGuid(guid)
+	local g = tostring(guid or "")
+	if g == "" then return "" end
+	if g:match("^Player%-%d+%-%x+$") then
+		return g
+	end
+	return ""
+end
+
+function GMS:GetServerTimestamp()
+	if type(GetServerTime) == "function" then
+		local ts = tonumber(GetServerTime())
+		if ts and ts > 0 then
+			return math.floor(ts)
+		end
+	end
+	local fallback = tonumber(time and time() or 0) or 0
+	return math.floor(fallback)
+end
+
+function GMS:FormatServerTimestamp(ts)
+	local n = tonumber(ts or 0) or 0
+	if n <= 0 then
+		n = self:GetServerTimestamp()
+	end
+	if type(date) == "function" then
+		return tostring(date("%Y-%m-%d %H:%M:%S", n))
+	end
+	return "1970-01-01 00:00:00"
+end
+
+function GMS:GetServerStamp(ts)
+	local n = tonumber(ts or 0) or 0
+	if n <= 0 then
+		n = self:GetServerTimestamp()
+	end
+	return self:FormatServerTimestamp(n), n
+end
+
+function GMS:GetCurrentGuildId()
+	local id = nil
+	if type(C_Club) == "table" and type(C_Club.GetGuildClubId) == "function" then
+		local ok, clubId = pcall(C_Club.GetGuildClubId)
+		if ok and clubId ~= nil then
+			id = tostring(clubId)
+		end
+	end
+	if type(id) == "string" and id ~= "" then
+		return id
+	end
+	return self:GetGuildStorageKey()
+end
+
+function GMS:GetCurrentCharRoot()
+	if type(self.InitializeStandardDatabases) == "function" then
+		self:InitializeStandardDatabases(false)
+	end
+	if type(self.db) ~= "table" then return nil end
+	self.db.char = type(self.db.char) == "table" and self.db.char or {}
+	self.db.char.chars = type(self.db.char.chars) == "table" and self.db.char.chars or {}
+	return self.db.char.chars
+end
+
+function GMS:RegisterKnownGuid(guid)
+	local g = NormalizeGuid(guid)
+	if g == "" then return false end
+	if type(self.InitializeStandardDatabases) == "function" then
+		self:InitializeStandardDatabases(false)
+	end
+	local global = self.db and self.db.global
+	if type(global) ~= "table" then return false end
+	global.chars = type(global.chars) == "table" and global.chars or {}
+	for i = 1, #global.chars do
+		if tostring(global.chars[i] or "") == g then
+			return true
+		end
+	end
+	global.chars[#global.chars + 1] = g
+	return true
+end
+
+function GMS:EnsureGlobalCharacterRoot(guid)
+	local g = NormalizeGuid(guid)
+	if g == "" then return nil end
+	if type(self.InitializeStandardDatabases) == "function" then
+		self:InitializeStandardDatabases(false)
+	end
+	local global = self.db and self.db.global
+	if type(global) ~= "table" then return nil end
+	global.characters = type(global.characters) == "table" and global.characters or {}
+	global.characters[g] = type(global.characters[g]) == "table" and global.characters[g] or {}
+	self:RegisterKnownGuid(g)
+	return global.characters[g]
+end
+
+function GMS:SetCharacterDomainData(guid, domain, payload, meta)
+	local g = NormalizeGuid(guid)
+	local d = tostring(domain or "")
+	if g == "" or d == "" or type(payload) ~= "table" then
+		return false
+	end
+	local root = self:EnsureGlobalCharacterRoot(g)
+	if type(root) ~= "table" then return false end
+	local m = type(meta) == "table" and meta or {}
+	local ts = tonumber(m.updatedAtTs or m.ts or 0) or 0
+	if ts <= 0 then
+		ts = self:GetServerTimestamp()
+	end
+	local updatedAt = tostring(m.updatedAt or "")
+	if updatedAt == "" then
+		updatedAt = self:FormatServerTimestamp(ts)
+	end
+	root[d] = {
+		data = payload,
+		meta = {
+			sourceGuid = NormalizeGuid(m.sourceGuid) ~= "" and NormalizeGuid(m.sourceGuid) or NormalizeGuid(m.senderGuid) or "",
+			sourceName = tostring(m.sourceName or m.senderName or ""),
+			updatedAt = updatedAt,
+			updatedAtTs = ts,
+		},
+	}
+	return true
+end
+
+function GMS:GetCharacterDomainData(guid, domain)
+	local g = NormalizeGuid(guid)
+	local d = tostring(domain or "")
+	if g == "" or d == "" then return nil end
+	local global = self.db and self.db.global
+	if type(global) ~= "table" or type(global.characters) ~= "table" then
+		return nil
+	end
+	local charNode = global.characters[g]
+	if type(charNode) ~= "table" then return nil end
+	local dom = charNode[d]
+	if type(dom) ~= "table" or type(dom.data) ~= "table" or type(dom.meta) ~= "table" then
+		return nil
+	end
+	return dom
+end
+
+function GMS:EnsureGlobalGuildRoot(guildId)
+	local gid = tostring(guildId or "")
+	if gid == "" then return nil end
+	if type(self.InitializeStandardDatabases) == "function" then
+		self:InitializeStandardDatabases(false)
+	end
+	local global = self.db and self.db.global
+	if type(global) ~= "table" then return nil end
+	global.guilds = type(global.guilds) == "table" and global.guilds or {}
+	global.guilds[gid] = type(global.guilds[gid]) == "table" and global.guilds[gid] or {}
+	local root = global.guilds[gid]
+	root.meta = type(root.meta) == "table" and root.meta or {}
+	root.players = type(root.players) == "table" and root.players or {}
+	return root
+end
+
 local function BuildLocalIdentity()
 	local guid = type(UnitGUID) == "function" and tostring(UnitGUID("player") or "") or ""
 	if guid == "" then
@@ -369,18 +547,6 @@ local function BuildLocalIdentity()
 	}
 end
 
-local function EnsureRawGlobalTables()
-	local rawDB = rawget(_G, "GMS_DB")
-	if type(rawDB) ~= "table" then return nil end
-	rawDB.global = type(rawDB.global) == "table" and rawDB.global or {}
-	local global = rawDB.global
-	global.accountLinks = type(global.accountLinks) == "table" and global.accountLinks or {}
-	global.accountLinks.chars = type(global.accountLinks.chars) == "table" and global.accountLinks.chars or {}
-	global.twinks = type(global.twinks) == "table" and global.twinks or {}
-	global.twinkMeta = type(global.twinkMeta) == "table" and global.twinkMeta or {}
-	return global
-end
-
 function GMS:TrackCurrentCharacterInGlobalStores(reason)
 	if type(self.InitializeStandardDatabases) == "function" then
 		self:InitializeStandardDatabases(false)
@@ -394,11 +560,16 @@ function GMS:TrackCurrentCharacterInGlobalStores(reason)
 		return false, "no-guid"
 	end
 
-	local global = self.db.global
-	global.accountLinks = type(global.accountLinks) == "table" and global.accountLinks or {}
-	global.accountLinks.chars = type(global.accountLinks.chars) == "table" and global.accountLinks.chars or {}
-	global.twinks = type(global.twinks) == "table" and global.twinks or {}
-	global.twinkMeta = type(global.twinkMeta) == "table" and global.twinkMeta or {}
+	self:RegisterKnownGuid(id.guid)
+	local charRoot = self:GetCurrentCharRoot()
+	if type(charRoot) ~= "table" then
+		return false, "char-root-unavailable"
+	end
+	charRoot.links = type(charRoot.links) == "table" and charRoot.links or {}
+	local links = charRoot.links
+	links.chars = type(links.chars) == "table" and links.chars or {}
+	links.twinks = type(links.twinks) == "table" and links.twinks or {}
+	links.twinkMeta = type(links.twinkMeta) == "table" and links.twinkMeta or {}
 
 	local guildKey = tostring(self:GetGuildStorageKey() or "")
 	local guildName = ""
@@ -407,8 +578,8 @@ function GMS:TrackCurrentCharacterInGlobalStores(reason)
 	end
 	local seenAt = type(now) == "function" and (tonumber(now() or 0) or 0) or 0
 
-	local row = type(global.accountLinks.chars[id.guid]) == "table" and global.accountLinks.chars[id.guid] or {}
-	global.accountLinks.chars[id.guid] = row
+	local row = type(links.chars[id.guid]) == "table" and links.chars[id.guid] or {}
+	links.chars[id.guid] = row
 	row.guid = id.guid
 	row.name = id.name
 	row.realm = id.realm
@@ -422,18 +593,18 @@ function GMS:TrackCurrentCharacterInGlobalStores(reason)
 	row.lastSeenReason = tostring(reason or "db-fallback")
 
 	local hasTwink = false
-	for i = 1, #global.twinks do
-		if tostring(global.twinks[i] or "") == id.guid then
+	for i = 1, #links.twinks do
+		if tostring(links.twinks[i] or "") == id.guid then
 			hasTwink = true
 			break
 		end
 	end
 	if not hasTwink then
-		global.twinks[#global.twinks + 1] = id.guid
+		links.twinks[#links.twinks + 1] = id.guid
 	end
 
-	local meta = type(global.twinkMeta[id.guid]) == "table" and global.twinkMeta[id.guid] or {}
-	global.twinkMeta[id.guid] = meta
+	local meta = type(links.twinkMeta[id.guid]) == "table" and links.twinkMeta[id.guid] or {}
+	links.twinkMeta[id.guid] = meta
 	meta.guid = id.guid
 	meta.name = id.name
 	meta.realm = id.realm
@@ -444,48 +615,6 @@ function GMS:TrackCurrentCharacterInGlobalStores(reason)
 	meta.guild = guildName
 	meta.guildKey = guildKey
 	meta.lastSeenAt = seenAt
-
-	-- Mirror write into raw SavedVariables table so DB inspector and persistence stay in sync.
-	local rawGlobal = EnsureRawGlobalTables()
-	if type(rawGlobal) == "table" then
-		rawGlobal.accountLinks.chars[id.guid] = rawGlobal.accountLinks.chars[id.guid] or {}
-		local rawRow = rawGlobal.accountLinks.chars[id.guid]
-		rawRow.guid = id.guid
-		rawRow.name = id.name
-		rawRow.realm = id.realm
-		rawRow.name_full = id.nameFull
-		rawRow.class = id.class
-		rawRow.classFile = id.classFile
-		rawRow.level = id.level
-		rawRow.guild = guildName
-		rawRow.guildKey = guildKey
-		rawRow.lastSeenAt = seenAt
-		rawRow.lastSeenReason = tostring(reason or "db-fallback")
-
-		local rawHasTwink = false
-		for i = 1, #rawGlobal.twinks do
-			if tostring(rawGlobal.twinks[i] or "") == id.guid then
-				rawHasTwink = true
-				break
-			end
-		end
-		if not rawHasTwink then
-			rawGlobal.twinks[#rawGlobal.twinks + 1] = id.guid
-		end
-
-		rawGlobal.twinkMeta[id.guid] = rawGlobal.twinkMeta[id.guid] or {}
-		local rawMeta = rawGlobal.twinkMeta[id.guid]
-		rawMeta.guid = id.guid
-		rawMeta.name = id.name
-		rawMeta.realm = id.realm
-		rawMeta.name_full = id.nameFull
-		rawMeta.class = id.class
-		rawMeta.classFile = id.classFile
-		rawMeta.level = id.level
-		rawMeta.guild = guildName
-		rawMeta.guildKey = guildKey
-		rawMeta.lastSeenAt = seenAt
-	end
 
 	return true
 end

@@ -69,7 +69,15 @@ GMS.Comm = GMS.Comm or {}
 local Comm = GMS.Comm
 
 Comm.PREFIX = "GMS_G"
-Comm.SYNC_SUBPREFIX = "__SYNC_V1"
+Comm.SYNC_SUBPREFIX = "__SYNC_V2"
+Comm.MIN_SYNC_ADDON_VERSION = tostring((GMS and GMS.VERSION) or "0.0.0")
+Comm.SYNC_ALLOWED_DOMAINS = Comm.SYNC_ALLOWED_DOMAINS or {
+	ROSTER_META_V2 = true,
+	EQUIPMENT_V2 = true,
+	MYTHICPLUS_V2 = true,
+	RAIDS_V2 = true,
+	ACCOUNT_CHARS_V2 = true,
+}
 
 Comm._handlers = Comm._handlers or {}
 Comm._recordListeners = Comm._recordListeners or {}
@@ -110,6 +118,37 @@ Comm._syncOptionsRegistered = Comm._syncOptionsRegistered or false
 local function NormalizeName(name)
 	if type(name) ~= "string" or name == "" then return "" end
 	return string.lower(name:gsub("%s+", ""))
+end
+
+local function ParseVersionTuple(v)
+	local s = tostring(v or "")
+	local major, minor, patch = s:match("^(%d+)%.(%d+)%.(%d+)")
+	if major then
+		return tonumber(major) or 0, tonumber(minor) or 0, tonumber(patch) or 0
+	end
+	major, minor = s:match("^(%d+)%.(%d+)")
+	if major then
+		return tonumber(major) or 0, tonumber(minor) or 0, 0
+	end
+	major = s:match("^(%d+)")
+	if major then
+		return tonumber(major) or 0, 0, 0
+	end
+	return 0, 0, 0
+end
+
+local function IsVersionAtLeast(candidate, required)
+	local ca, cb, cc = ParseVersionTuple(candidate)
+	local ra, rb, rc = ParseVersionTuple(required)
+	if ca ~= ra then return ca > ra end
+	if cb ~= rb then return cb > rb end
+	return cc >= rc
+end
+
+local function IsAllowedSyncDomain(domain)
+	local d = tostring(domain or "")
+	if d == "" then return false end
+	return Comm.SYNC_ALLOWED_DOMAINS[d] == true
 end
 
 local GUILD_SENDER_CACHE_TTL = 10
@@ -316,6 +355,7 @@ local function ValidateRecord(record, opts)
 	if type(record.originGUID) ~= "string" or record.originGUID == "" then return false, "missing-origin" end
 	if type(record.charGUID) ~= "string" or record.charGUID == "" then return false, "missing-char" end
 	if type(record.domain) ~= "string" or record.domain == "" then return false, "missing-domain" end
+	if not IsAllowedSyncDomain(record.domain) then return false, "unsupported-domain" end
 	if type(record.seq) ~= "number" then return false, "missing-seq" end
 	if type(record.updatedAt) ~= "number" then return false, "missing-updatedAt" end
 	if type(record.checksum) ~= "string" or record.checksum == "" then return false, "missing-checksum" end
@@ -361,20 +401,28 @@ local function BuildMeta(record, payloadSize)
 		ts = record.updatedAt,
 		cs = record.checksum,
 		sz = tonumber(payloadSize) or 0,
+		guid = record.charGUID,
+		domain = record.domain,
+		ver = tostring((GMS and GMS.VERSION) or ""),
+		updatedAtTs = record.updatedAt,
+		checksum = record.checksum,
+		size = tonumber(payloadSize) or 0,
 	}
 end
 
 local function ParseMeta(m)
 	if type(m) ~= "table" then return nil end
+	local domain = tostring(m.domain or m.d or "")
+	local charGuid = tostring(m.guid or m.cg or "")
 	local out = {
 		key = tostring(m.k or ""),
 		originGUID = tostring(m.og or ""),
-		charGUID = tostring(m.cg or ""),
-		domain = tostring(m.d or ""),
+		charGUID = charGuid,
+		domain = domain,
 		seq = tonumber(m.seq) or 0,
-		updatedAt = tonumber(m.ts) or 0,
-		checksum = tostring(m.cs or ""),
-		size = tonumber(m.sz) or 0,
+		updatedAt = tonumber(m.updatedAtTs or m.ts) or 0,
+		checksum = tostring(m.checksum or m.cs or ""),
+		size = tonumber(m.size or m.sz) or 0,
 	}
 	if out.key == "" or out.originGUID == "" or out.charGUID == "" or out.domain == "" then
 		return nil
@@ -449,6 +497,7 @@ local function SendRaw(subPrefix, data, priority, distribution, targetName)
 		pfx = subPrefix,
 		ts  = now(),
 		v   = METADATA.VERSION,
+		av  = tostring((GMS and GMS.VERSION) or ""),
 		src = (type(UnitGUID) == "function") and UnitGUID("player") or nil,
 		d   = data,
 	}
@@ -471,6 +520,7 @@ end
 
 function Comm:RegisterRecordListener(domain, callback)
 	if type(domain) ~= "string" or domain == "" then return false end
+	if not IsAllowedSyncDomain(domain) then return false end
 	if type(callback) ~= "function" then return false end
 	self._recordListeners[domain] = self._recordListeners[domain] or {}
 	self._recordListeners[domain][#self._recordListeners[domain] + 1] = callback
@@ -549,6 +599,13 @@ local function StoreIfNewer(record, senderGUID, channel)
 		lastSender = senderGUID or "",
 		lastChannel = channel or "",
 	}
+	if GMS and type(GMS.SetCharacterDomainData) == "function" then
+		pcall(GMS.SetCharacterDomainData, GMS, record.charGUID, record.domain, record.payload, {
+			sourceGuid = tostring(record.originGUID or senderGUID or ""),
+			sourceName = "",
+			updatedAtTs = tonumber(record.updatedAt or 0) or 0,
+		})
+	end
 
 	local listeners = Comm._recordListeners[record.domain]
 	if type(listeners) == "table" then
@@ -584,19 +641,6 @@ function Comm:GetRecord(originGUID, charGUID, domain)
 		consider(store.records[key])
 	end
 
-	local rawDB = (type(_G) == "table") and rawget(_G, "GMS_DB") or nil
-	local global = (type(rawDB) == "table" and type(rawDB.global) == "table") and rawDB.global or nil
-	local guilds = (type(global) == "table" and type(global.guilds) == "table") and global.guilds or nil
-	if type(guilds) == "table" then
-		for _, gRoot in pairs(guilds) do
-			local sync = (type(gRoot) == "table" and type(gRoot.COMM_SYNC) == "table") and gRoot.COMM_SYNC or nil
-			local records = (type(sync) == "table" and type(sync.records) == "table") and sync.records or nil
-			if type(records) == "table" then
-				consider(records[key])
-			end
-		end
-	end
-
 	return best
 end
 
@@ -618,21 +662,6 @@ function Comm:GetRecordsByDomain(domain)
 	if type(store) == "table" and type(store.records) == "table" then
 		for _, rec in pairs(store.records) do
 			consider(rec)
-		end
-	end
-
-	local rawDB = (type(_G) == "table") and rawget(_G, "GMS_DB") or nil
-	local global = (type(rawDB) == "table" and type(rawDB.global) == "table") and rawDB.global or nil
-	local guilds = (type(global) == "table" and type(global.guilds) == "table") and global.guilds or nil
-	if type(guilds) == "table" then
-		for _, gRoot in pairs(guilds) do
-			local sync = (type(gRoot) == "table" and type(gRoot.COMM_SYNC) == "table") and gRoot.COMM_SYNC or nil
-			local records = (type(sync) == "table" and type(sync.records) == "table") and sync.records or nil
-			if type(records) == "table" then
-				for _, rec in pairs(records) do
-					consider(rec)
-				end
-			end
 		end
 	end
 
@@ -746,6 +775,7 @@ function Comm:PublishRecord(domain, charGUID, payload, opts)
 	local cGuid = tostring(charGUID or owner)
 	local d = tostring(domain or "")
 	if d == "" then return false, "no-domain" end
+	if not IsAllowedSyncDomain(d) then return false, "unsupported-domain" end
 
 	local ownerCharDomainKey = owner .. ":" .. cGuid .. ":" .. d
 	local seq = tonumber(opts.seq) or NextSequenceFor(ownerCharDomainKey)
@@ -790,6 +820,7 @@ function Comm:RequestCharacterDomain(charGUID, domain, opts)
 	local d = tostring(domain or "")
 	if cGuid == "" then return false, "no-char-guid" end
 	if d == "" then return false, "no-domain" end
+	if not IsAllowedSyncDomain(d) then return false, "unsupported-domain" end
 
 	local originGuid = tostring(opts.originGUID or cGuid)
 	if originGuid == "" then
@@ -1087,6 +1118,7 @@ function Comm:OnCommReceive(prefix, msg, channel, sender)
 	if not success or type(packet) ~= "table" then return end
 
 	local subPrefix = packet.pfx
+	local senderAddonVersion = tostring(packet.av or "")
 	local senderGUID = ResolveSenderGUIDFromGuildRoster(sender) or packet.src
 	local playerGUID = (type(UnitGUID) == "function") and UnitGUID("player") or nil
 
@@ -1099,6 +1131,21 @@ function Comm:OnCommReceive(prefix, msg, channel, sender)
 
 	if packet.src and senderGUID and packet.src ~= senderGUID then
 		LOCAL_LOG("WARN", "Source GUID mismatch", subPrefix, sender, packet.src, senderGUID)
+		return
+	end
+
+	local minVer = tostring(self.MIN_SYNC_ADDON_VERSION or "")
+	if minVer ~= "" and not IsVersionAtLeast(senderAddonVersion, minVer) then
+		CommThrottled(
+			"sync_version_gate",
+			tostring(senderGUID or sender or "?"),
+			"Dropped comm payload from incompatible addon version",
+			tostring(sender or ""),
+			tostring(senderGUID or ""),
+			tostring(senderAddonVersion or ""),
+			tostring(minVer),
+			tostring(subPrefix or "")
+		)
 		return
 	end
 

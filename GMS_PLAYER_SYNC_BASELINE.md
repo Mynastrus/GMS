@@ -66,6 +66,25 @@ Beispielhafte Accountfelder (gemäß GMS-Kontext):
    - `checksum`
    - `size`
 
+## Lokaler Roster-Fallback vor Comm (Pflicht)
+
+1. Reihenfolge
+   - Bevor ein Comm-Request fuer fehlende Basisdaten einer GUID gesendet wird, muss zuerst
+     der lokale GuildRoster als Datenquelle verwendet werden.
+
+2. Ziel
+   - Schnell verfuegbare Grundfelder ohne zusaetzlichen Netzwerkverkehr fuellen
+     (z. B. Name, Klasse, Level, guildbezogene Basisinfos).
+
+3. Kennzeichnung
+   - Aus Roster befuellte Basisdaten werden als vorlaeufig (`provisional`) markiert.
+
+4. Nachladen via Comm
+   - Comm-Request nur dann, wenn Pflichtfelder weiterhin fehlen oder die Daten als veraltet gelten.
+
+5. Ueberschreiben
+   - Autoritative Sync-Daten duerfen vorlaeufige Roster-Werte ersetzen.
+
 ## Twink-Verifikation (GuildRoster-Regel)
 
 - Persistenz/Source of Truth für Twink-Daten liegt in `AccountInfo`.

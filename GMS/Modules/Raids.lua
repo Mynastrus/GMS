@@ -132,7 +132,7 @@ end
 -- ###########################################################################
 
 local MODULE_NAME = METADATA.INTERN_NAME
-local RAIDS_SYNC_DOMAIN = "RAIDS_V1"
+local RAIDS_SYNC_DOMAIN = "RAIDS_V2"
 
 local RAIDS = GMS:GetModule(MODULE_NAME, true)
 if not RAIDS then

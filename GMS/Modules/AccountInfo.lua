@@ -38,7 +38,7 @@ local METADATA = {
 	VERSION      = "1.0.12",
 }
 
-local ACCOUNT_CHARS_SYNC_DOMAIN = "ACCOUNT_CHARS_V1"
+local ACCOUNT_CHARS_SYNC_DOMAIN = "ACCOUNT_CHARS_V2"
 local ACCOUNT_CHARS_PUBLISH_MIN_INTERVAL = 20
 
 local function AT(key, fallback, ...)
@@ -381,85 +381,19 @@ function AccountInfo:GetAccountLinkStore()
 	if GMS and type(GMS.InitializeStandardDatabases) == "function" then
 		GMS:InitializeStandardDatabases(false)
 	end
-	if not GMS or type(GMS.db) ~= "table" or type(GMS.db.global) ~= "table" then
+	if not GMS or type(GMS.GetCurrentCharRoot) ~= "function" then
 		return nil
 	end
-	local global = GMS.db.global
-	global.accountLinks = type(global.accountLinks) == "table" and global.accountLinks or {}
-	global.twinks = type(global.twinks) == "table" and global.twinks or {}
-	global.twinkMeta = type(global.twinkMeta) == "table" and global.twinkMeta or {}
-	local links = global.accountLinks
+	local charRoot = GMS:GetCurrentCharRoot()
+	if type(charRoot) ~= "table" then
+		return nil
+	end
+	charRoot.links = type(charRoot.links) == "table" and charRoot.links or {}
+	local links = charRoot.links
 	links.chars = type(links.chars) == "table" and links.chars or {}
 	links.synced = type(links.synced) == "table" and links.synced or {}
-
-	-- Merge persisted raw SavedVariables into AceDB tables so option dropdowns
-	-- (Main-Char select) always see all known GUID rows across sessions/chars.
-	local rawDB = type(_G) == "table" and rawget(_G, "GMS_DB") or nil
-	local rawGlobal = type(rawDB) == "table" and rawDB.global or nil
-	if type(rawGlobal) == "table" then
-		local rawLinks = type(rawGlobal.accountLinks) == "table" and rawGlobal.accountLinks or nil
-		local rawChars = rawLinks and rawLinks.chars
-		if type(rawChars) == "table" then
-			for guid, row in pairs(rawChars) do
-				local g = tostring(guid or "")
-				if g ~= "" and type(row) == "table" then
-					links.chars[g] = links.chars[g] or {}
-					local dst = links.chars[g]
-					dst.guid = g
-					dst.name = tostring(row.name or dst.name or "")
-					dst.realm = tostring(row.realm or dst.realm or "")
-					dst.name_full = tostring(row.name_full or dst.name_full or dst.name or g)
-					dst.class = tostring(row.class or dst.class or "-")
-					dst.classFile = tostring(row.classFile or dst.classFile or "")
-					dst.level = tonumber(row.level or dst.level or 0) or 0
-					dst.guild = tostring(row.guild or dst.guild or "")
-					dst.guildKey = tostring(row.guildKey or dst.guildKey or "")
-					dst.lastSeenAt = tonumber(row.lastSeenAt or dst.lastSeenAt or 0) or 0
-				end
-			end
-		end
-
-		local rawTwinks = type(rawGlobal.twinks) == "table" and rawGlobal.twinks or nil
-		if type(rawTwinks) == "table" then
-			for i = 1, #rawTwinks do
-				local guid = tostring(rawTwinks[i] or "")
-				if guid ~= "" then
-					local exists = false
-					for j = 1, #global.twinks do
-						if tostring(global.twinks[j] or "") == guid then
-							exists = true
-							break
-						end
-					end
-					if not exists then
-						global.twinks[#global.twinks + 1] = guid
-					end
-				end
-			end
-		end
-
-		local rawMeta = type(rawGlobal.twinkMeta) == "table" and rawGlobal.twinkMeta or nil
-		if type(rawMeta) == "table" then
-			for guid, row in pairs(rawMeta) do
-				local g = tostring(guid or "")
-				if g ~= "" and type(row) == "table" then
-					global.twinkMeta[g] = global.twinkMeta[g] or {}
-					local dst = global.twinkMeta[g]
-					dst.guid = g
-					dst.name = tostring(row.name or dst.name or "")
-					dst.realm = tostring(row.realm or dst.realm or "")
-					dst.name_full = tostring(row.name_full or dst.name_full or dst.name or g)
-					dst.class = tostring(row.class or dst.class or "-")
-					dst.classFile = tostring(row.classFile or dst.classFile or "")
-					dst.level = tonumber(row.level or dst.level or 0) or 0
-					dst.guild = tostring(row.guild or dst.guild or "")
-					dst.guildKey = tostring(row.guildKey or dst.guildKey or "")
-					dst.lastSeenAt = tonumber(row.lastSeenAt or dst.lastSeenAt or 0) or 0
-				end
-			end
-		end
-	end
-
+	links.twinks = type(links.twinks) == "table" and links.twinks or {}
+	links.twinkMeta = type(links.twinkMeta) == "table" and links.twinkMeta or {}
 	return links
 end
 
@@ -531,11 +465,12 @@ end
 
 local function BuildRowsFromGlobalTwinks(global, selectedGuid)
 	local out = {}
-	if type(global) ~= "table" then return out end
-	local twinks = type(global.twinks) == "table" and global.twinks or nil
+	local links = (AccountInfo and type(AccountInfo.GetAccountLinkStore) == "function") and AccountInfo:GetAccountLinkStore() or nil
+	if type(links) ~= "table" then return out end
+	local twinks = type(links.twinks) == "table" and links.twinks or nil
 	if type(twinks) ~= "table" or #twinks <= 0 then return out end
 	local selected = tostring(selectedGuid or "")
-	local metaByGuid = type(global.twinkMeta) == "table" and global.twinkMeta or {}
+	local metaByGuid = type(links.twinkMeta) == "table" and links.twinkMeta or {}
 	local selectedGuildKey = ""
 	if selected ~= "" and type(metaByGuid[selected]) == "table" then
 		selectedGuildKey = tostring(metaByGuid[selected].guildKey or "")
@@ -975,6 +910,9 @@ function AccountInfo:TrackLocalAccountCharacter(reason)
 
 	links.chars[guid] = links.chars[guid] or {}
 	local row = links.chars[guid]
+	if GMS and type(GMS.RegisterKnownGuid) == "function" then
+		GMS:RegisterKnownGuid(guid)
+	end
 	local changed = false
 
 	local function SetTextField(key, value, countAsChange)
@@ -1013,18 +951,18 @@ function AccountInfo:TrackLocalAccountCharacter(reason)
 		LOCAL_LOG("INFO", "Local account character tracked", guid, nameFull, guildKey ~= "" and guildKey or "no-guild")
 	end
 
-	if GMS and type(GMS.db) == "table" and type(GMS.db.global) == "table" then
-		local global = GMS.db.global
-		global.twinks = type(global.twinks) == "table" and global.twinks or {}
-		global.twinkMeta = type(global.twinkMeta) == "table" and global.twinkMeta or {}
+	local linksStore = self:GetAccountLinkStore()
+	if type(linksStore) == "table" then
+		linksStore.twinks = type(linksStore.twinks) == "table" and linksStore.twinks or {}
+		linksStore.twinkMeta = type(linksStore.twinkMeta) == "table" and linksStore.twinkMeta or {}
 		local exists = false
-		for i = 1, #global.twinks do
-			if tostring(global.twinks[i] or "") == guid then exists = true break end
+		for i = 1, #linksStore.twinks do
+			if tostring(linksStore.twinks[i] or "") == guid then exists = true break end
 		end
-		if not exists then global.twinks[#global.twinks + 1] = guid end
+		if not exists then linksStore.twinks[#linksStore.twinks + 1] = guid end
 
-		local meta = type(global.twinkMeta[guid]) == "table" and global.twinkMeta[guid] or {}
-		global.twinkMeta[guid] = meta
+		local meta = type(linksStore.twinkMeta[guid]) == "table" and linksStore.twinkMeta[guid] or {}
+		linksStore.twinkMeta[guid] = meta
 		meta.guid = guid
 		meta.name = tostring(name or "")
 		meta.realm = tostring(realm or "")

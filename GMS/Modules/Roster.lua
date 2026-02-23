@@ -149,11 +149,11 @@ Roster._syncNeedCounter = Roster._syncNeedCounter or 0
 Roster._syncNeedTicker = Roster._syncNeedTicker or nil
 
 local REQUIRED_SYNC_DOMAINS = {
-	account = "ACCOUNT_CHARS_V1",
-	twinks = "ACCOUNT_CHARS_V1",
-	equipment = "EQUIPMENT_V1",
-	raid = "RAIDS_V1",
-	mythicplus = "MYTHICPLUS_V1",
+	account = "ACCOUNT_CHARS_V2",
+	twinks = "ACCOUNT_CHARS_V2",
+	equipment = "EQUIPMENT_V2",
+	raid = "RAIDS_V2",
+	mythicplus = "MYTHICPLUS_V2",
 }
 
 local META_HEARTBEAT_MIN_INTERVAL = 30
@@ -289,11 +289,10 @@ local function ResolveGuidByNameFull(nameFull)
 		end
 	end
 
-	local aceGlobal, rawGlobal = GetGlobalStores()
-	local function scan(global)
-		local links = type(global) == "table" and type(global.accountLinks) == "table" and global.accountLinks or nil
-		local chars = links and type(links.chars) == "table" and links.chars or nil
-		if type(chars) ~= "table" then return nil end
+	local ai = GMS and (GMS:GetModule("ACCOUNTINFO", true) or GMS:GetModule("AccountInfo", true)) or nil
+	local links = type(ai) == "table" and type(ai.GetAccountLinkStore) == "function" and ai:GetAccountLinkStore() or nil
+	local chars = links and type(links.chars) == "table" and links.chars or nil
+	if type(chars) == "table" then
 		for guid, row in pairs(chars) do
 			if type(row) == "table" then
 				local n = NormalizeNameGuidKey(row.name_full or row.name or "")
@@ -306,9 +305,8 @@ local function ResolveGuidByNameFull(nameFull)
 				end
 			end
 		end
-		return nil
 	end
-	return scan(aceGlobal) or scan(rawGlobal)
+	return nil
 end
 
 local function GetStoredCharacterFallbackMeta(guid)
@@ -972,11 +970,14 @@ function Roster:SetMemberMeta(guid, meta, seenAt, opts)
 	if type(guid) ~= "string" or guid == "" then return false end
 	if type(meta) ~= "table" then return false end
 	opts = type(opts) == "table" and opts or {}
+	if GMS and type(GMS.RegisterKnownGuid) == "function" then
+		GMS:RegisterKnownGuid(guid)
+	end
 
 	local store = self:GetMemberMetaStore()
 	local t = tonumber(seenAt) or (GetTime and GetTime()) or 0
 	local sourceGuid = tostring(opts.sourceGUID or guid)
-	local domain = tostring(opts.domain or "roster_meta")
+	local domain = tostring(opts.domain or "ROSTER_META_V2")
 	local isSelfReport = IsSelfReportForGuid(guid, sourceGuid, opts.isSelfReport)
 	local localAccountGuidSet = BuildLocalAccountGuidSet()
 	local targetProtectedByLocalAccount = localAccountGuidSet[tostring(guid or "")] == true
@@ -1032,6 +1033,21 @@ function Roster:SetMemberMeta(guid, meta, seenAt, opts)
 		is_self_report = isSelfReport,
 	}
 	row.seenAt = t
+	if GMS and type(GMS.GetCurrentGuildId) == "function" and type(GMS.EnsureGlobalGuildRoot) == "function" then
+		local guildId = tostring(GMS:GetCurrentGuildId() or "")
+		local gRoot = (guildId ~= "") and GMS:EnsureGlobalGuildRoot(guildId) or nil
+		if type(gRoot) == "table" and type(gRoot.players) == "table" then
+			gRoot.players[guid] = gRoot.players[guid] or {}
+			local gp = gRoot.players[guid]
+			gp.guid = guid
+			gp.name_full = tostring(row.name_full or row.name or "")
+			gp.rank = tostring(row.rank or gp.rank or "")
+			gp.note = tostring(row.note or gp.note or "")
+			gp.points = tonumber(row.points or gp.points or 0) or 0
+			gp.updatedAtTs = tonumber(t) or 0
+			gp.updatedAt = (type(GMS.FormatServerTimestamp) == "function") and GMS:FormatServerTimestamp(gp.updatedAtTs) or ""
+		end
+	end
 	return true
 end
 
@@ -1051,9 +1067,9 @@ function Roster:GetRequiredDomainStatusForGuid(guid)
 				}
 			end
 		end
-		local f = row._freshness.roster_meta
+		local f = row._freshness.ROSTER_META_V2
 		if type(f) == "table" then
-			out.roster_meta = {
+			out.ROSTER_META_V2 = {
 				ts_server = tonumber(f.ts_server or 0) or 0,
 				source_guid = tostring(f.source_guid or g),
 				is_self_report = f.is_self_report == true,
@@ -1283,7 +1299,9 @@ local function BuildRaidStatusDetailsFromRaidsStore(all)
 		local b = byPriority[i]
 		if b and b.short ~= "" and b.short ~= "-" then
 			local raidName = tostring(b.raidName or "")
-			if raidName == "" then raidName = nil end
+			if raidName == "" then
+				return b.short, nil, i
+			end
 			return b.short, raidName, i
 		end
 	end
@@ -1582,8 +1600,8 @@ function Roster:_OnSyncNeedTicker()
 	end
 	if not anyOpen and next(self._syncNeedRequests or {}) == nil and self._syncNeedTicker then
 		local ticker = self._syncNeedTicker
-		if type(ticker.Cancel) == "function" then
-			pcall(function() ticker:Cancel() end)
+		if ticker and type(ticker["Cancel"]) == "function" then
+			pcall(ticker["Cancel"], ticker)
 		end
 		self._syncNeedTicker = nil
 	end
@@ -1610,7 +1628,7 @@ function Roster:HandleMetaNeedPacket(senderGUID, senderName, data)
 	if next(out) == nil then return end
 	local comm = GMS and GMS.Comm or nil
 	if type(comm) ~= "table" or type(comm.SendData) ~= "function" then return end
-	comm:SendData("ROSTER_META", {
+	comm:SendData("ROSTER_META_V2", {
 		op = "HAVE",
 		reqId = reqId,
 		targetGuid = targetGuid,
@@ -1677,7 +1695,7 @@ function Roster:RequestMissingDomainsForGuid(guid, reason)
 
 	local comm = GMS and GMS.Comm or nil
 	if type(comm) ~= "table" or type(comm.SendData) ~= "function" then return false end
-	local ok = comm:SendData("ROSTER_META", {
+	local ok = comm:SendData("ROSTER_META_V2", {
 		op = "NEED",
 		reqId = reqId,
 		targetGuid = targetGuid,
@@ -1708,13 +1726,13 @@ function Roster:BroadcastMetaHeartbeat(force)
 
 	local tsServer = tonumber(payload.ts_server) or (type(GetServerTime) == "function" and tonumber(GetServerTime()) or 0) or 0
 	self:SetMemberMeta(guid, payload, tsServer, {
-		domain = "roster_meta",
+		domain = "ROSTER_META_V2",
 		sourceGUID = guid,
 		isSelfReport = true,
 	})
 
 	if type(comm.PublishCharacterRecord) == "function" then
-		comm:PublishCharacterRecord("roster_meta", {
+		comm:PublishCharacterRecord("ROSTER_META_V2", {
 			guid = guid,
 			name = payload.name,
 			realm = payload.realm,
@@ -1747,7 +1765,7 @@ function Roster:BroadcastMetaHeartbeat(force)
 				self._lastHelloAnnounceAt = nowTs
 			end
 		end
-		comm:SendData("ROSTER_META", {
+		comm:SendData("ROSTER_META_V2", {
 			op = canAnnounce and "ANN" or "UPD",
 			guid = guid,
 			version = payload.version,
@@ -1779,7 +1797,7 @@ function Roster:InitCommMetaSync()
 		return false
 	end
 
-	comm:RegisterPrefix("ROSTER_META", function(senderGUID, data, raw)
+	comm:RegisterPrefix("ROSTER_META_V2", function(senderGUID, data, raw)
 		if type(data) ~= "table" then return end
 		local op = tostring(data.op or "")
 		local senderName = tostring((type(raw) == "table" and raw.senderName) or "")
@@ -1816,7 +1834,7 @@ function Roster:InitCommMetaSync()
 		}
 		local seenAt = tonumber(data.ts_server or data.ts) or (type(GetServerTime) == "function" and tonumber(GetServerTime()) or 0) or 0
 		if Roster:SetMemberMeta(guid, payload, seenAt, {
-			domain = "roster_meta",
+			domain = "ROSTER_META_V2",
 			sourceGUID = senderGUID or guid,
 			isSelfReport = (tostring(senderGUID or "") == guid),
 		}) then
@@ -1840,7 +1858,7 @@ function Roster:InitCommMetaSync()
 
 				local resp = CollectLocalMetaPayload()
 				local respTs = tonumber(resp.ts_server) or (type(GetServerTime) == "function" and tonumber(GetServerTime()) or 0) or 0
-				comm:SendData("ROSTER_META", {
+				comm:SendData("ROSTER_META_V2", {
 					op = "RESP",
 					guid = selfGuid,
 					version = resp.version,
@@ -1863,7 +1881,7 @@ function Roster:InitCommMetaSync()
 			end
 		end
 
-		comm:RegisterRecordListener("roster_meta", function(record)
+		comm:RegisterRecordListener("ROSTER_META_V2", function(record)
 			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
 			local payload = record.payload
 			if type(payload) ~= "table" then return end
@@ -1884,7 +1902,7 @@ function Roster:InitCommMetaSync()
 				raid_name = payload.raid_name or payload.best_raid_name,
 				raid_priority = payload.raid_priority or payload.best_raid_priority,
 			}, record.updatedAt or ((GetTime and GetTime()) or 0), {
-				domain = "roster_meta",
+				domain = "ROSTER_META_V2",
 				sourceGUID = record.originGUID,
 				isSelfReport = (tostring(record.originGUID or "") == tostring(record.charGUID or "")),
 			}) then
@@ -1893,7 +1911,7 @@ function Roster:InitCommMetaSync()
 			end
 		end)
 
-		comm:RegisterRecordListener("EQUIPMENT_V1", function(record)
+		comm:RegisterRecordListener("EQUIPMENT_V2", function(record)
 			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
 			local payload = record.payload
 			if type(payload) ~= "table" or type(payload.snapshot) ~= "table" then return end
@@ -1910,7 +1928,7 @@ function Roster:InitCommMetaSync()
 			end
 		end)
 
-		comm:RegisterRecordListener("MYTHICPLUS_V1", function(record)
+		comm:RegisterRecordListener("MYTHICPLUS_V2", function(record)
 			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
 			local payload = record.payload
 			if type(payload) ~= "table" then return end
@@ -1928,7 +1946,7 @@ function Roster:InitCommMetaSync()
 			end
 		end)
 
-		comm:RegisterRecordListener("RAIDS_V1", function(record)
+		comm:RegisterRecordListener("RAIDS_V2", function(record)
 			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
 			local payload = record.payload
 			if type(payload) ~= "table" or type(payload.raids) ~= "table" then return end
@@ -1947,7 +1965,7 @@ function Roster:InitCommMetaSync()
 			end
 		end)
 
-		comm:RegisterRecordListener("ACCOUNT_CHARS_V1", function(record)
+		comm:RegisterRecordListener("ACCOUNT_CHARS_V2", function(record)
 			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
 			local didAccount = Roster:SetMemberMeta(record.originGUID, {}, record.updatedAt or ((GetTime and GetTime()) or 0), {
 				domain = "account",
@@ -1967,7 +1985,7 @@ function Roster:InitCommMetaSync()
 
 	if type(comm.GetRecordsByDomain) == "function" then
 		local hydrateHandlers = {}
-		hydrateHandlers[#hydrateHandlers + 1] = { domain = "roster_meta", fn = function(record)
+		hydrateHandlers[#hydrateHandlers + 1] = { domain = "ROSTER_META_V2", fn = function(record)
 			local payload = record.payload
 			if type(payload) ~= "table" then return end
 			Roster:SetMemberMeta(record.originGUID, {
@@ -1987,13 +2005,13 @@ function Roster:InitCommMetaSync()
 				raid_name = payload.raid_name or payload.best_raid_name,
 				raid_priority = payload.raid_priority or payload.best_raid_priority,
 			}, record.updatedAt or ((GetTime and GetTime()) or 0), {
-				domain = "roster_meta",
+				domain = "ROSTER_META_V2",
 				sourceGUID = record.originGUID,
 				isSelfReport = (tostring(record.originGUID or "") == tostring(record.charGUID or "")),
 			})
 		end }
 
-		hydrateHandlers[#hydrateHandlers + 1] = { domain = "EQUIPMENT_V1", fn = function(record)
+		hydrateHandlers[#hydrateHandlers + 1] = { domain = "EQUIPMENT_V2", fn = function(record)
 			local payload = record.payload
 			if type(payload) ~= "table" or type(payload.snapshot) ~= "table" then return end
 			local ilvl = BuildItemLevelFromEquipmentSnapshot(payload.snapshot)
@@ -2006,7 +2024,7 @@ function Roster:InitCommMetaSync()
 			end
 		end }
 
-		hydrateHandlers[#hydrateHandlers + 1] = { domain = "MYTHICPLUS_V1", fn = function(record)
+		hydrateHandlers[#hydrateHandlers + 1] = { domain = "MYTHICPLUS_V2", fn = function(record)
 			local payload = record.payload
 			if type(payload) ~= "table" then return end
 			local mplus = tonumber(payload.score)
@@ -2019,7 +2037,7 @@ function Roster:InitCommMetaSync()
 			end
 		end }
 
-		hydrateHandlers[#hydrateHandlers + 1] = { domain = "RAIDS_V1", fn = function(record)
+		hydrateHandlers[#hydrateHandlers + 1] = { domain = "RAIDS_V2", fn = function(record)
 			local payload = record.payload
 			if type(payload) ~= "table" or type(payload.raids) ~= "table" then return end
 			local raid, raidName, raidPriority = BuildRaidStatusDetailsFromRaidsStore(payload.raids)
@@ -2032,7 +2050,7 @@ function Roster:InitCommMetaSync()
 			end
 		end }
 
-		hydrateHandlers[#hydrateHandlers + 1] = { domain = "ACCOUNT_CHARS_V1", fn = function(record)
+		hydrateHandlers[#hydrateHandlers + 1] = { domain = "ACCOUNT_CHARS_V2", fn = function(record)
 			Roster:SetMemberMeta(record.originGUID, {}, record.updatedAt or ((GetTime and GetTime()) or 0), {
 				domain = "account",
 				sourceGUID = record.originGUID,
@@ -3640,8 +3658,8 @@ function Roster:OnDisable()
 	end
 	self._commTicker = nil
 	local needTicker = self._syncNeedTicker
-	if needTicker and type(needTicker.Cancel) == "function" then
-		pcall(function() needTicker:Cancel() end)
+	if needTicker and type(needTicker["Cancel"]) == "function" then
+		pcall(needTicker["Cancel"], needTicker)
 	end
 	self._syncNeedTicker = nil
 	self._syncNeedRequests = {}
@@ -3743,5 +3761,6 @@ function Roster:GetMemberByGUID(guid)
 	end
 	return nil
 end
+
 
 
