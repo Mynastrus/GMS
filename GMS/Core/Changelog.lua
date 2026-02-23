@@ -36,7 +36,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.13",
+	VERSION      = "1.3.14",
 }
 
 -- ###########################################################################
@@ -110,6 +110,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 -- ###########################################################################
 
 local RELEASES = {
+	{
+		version = "1.5.2",
+		date = "2026-02-23",
+		title_en = "Cross-guild sync visibility, context hydration stability, and roster identity hardening",
+		title_de = "Guild-uebergreifende Sync-Sichtbarkeit, stabile Kontext-Hydration und gehaertete Roster-Identitaetsauflosung",
+		notes_en = {
+			"Comm record lookup now merges domain/key reads across all persisted guild stores and picks the freshest record, preventing hidden data when records are split across guild keys.",
+			"Roster character identity handling was hardened with strict Player-GUID validation and stable name-to-GUID fallback paths for transient GUID gaps.",
+			"Roster row click navigation now forwards a resolved fallback GUID to CharInfo when live roster GUIDs are missing or invalid.",
+			"CharInfo context mode now resolves missing/invalid context GUIDs from roster and stored account-link mappings for more reliable target selection.",
+			"CharInfo context bootstrap now requests all relevant sync domains (roster meta, Mythic+, raids, equipment, account links) to hydrate external data consistently.",
+		},
+		notes_de = {
+			"Die Comm-Record-Suche fuehrt Domain-/Key-Abfragen jetzt ueber alle persistierten Guild-Stores zusammen und waehlt jeweils den frischesten Datensatz; dadurch verschwinden keine Daten mehr bei verteilten Guild-Keys.",
+			"Die Charakter-Identitaetslogik im Roster wurde mit strikter Player-GUID-Validierung und stabilen Name-zu-GUID-Fallbacks gegen temporaere GUID-Luecken gehaertet.",
+			"Beim Klick auf eine Roster-Zeile wird jetzt ein aufgeloester Fallback-GUID an CharInfo uebergeben, falls die Live-Roster-GUID fehlt oder ungueltig ist.",
+			"Der CharInfo-Kontextmodus loest fehlende/ungueltige Kontext-GUIDs nun aus Roster- und gespeicherten Account-Link-Mappings auf und stabilisiert damit die Zielauswahl.",
+			"Der CharInfo-Kontext-Bootstrap fordert jetzt alle relevanten Sync-Domaenen (Roster-Meta, Mythic+, Raids, Equipment, Account-Links) an, damit externe Daten konsistent hydratisiert werden.",
+		},
+	},
 	{
 		version = "1.5.1",
 		date = "2026-02-22",
