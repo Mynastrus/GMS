@@ -1,6 +1,8 @@
 # GMS Database Schema (Canonical)
 
-Status: binding target schema for upcoming refactor/migration.
+Status: binding canonical schema for hard cutover rollout.
+
+Implementation policy: hard cutover, no migration.
 
 ## 1) Top-level model
 
@@ -74,7 +76,7 @@ global.characters[guid].<domain> = {
     sourceGuid = "Player-1408-0A5D1356",
     sourceName = "Ritschy-Norgannon",
     updatedAt = "2026-02-23 21:14:05",
-    -- optional: updatedAtTs = 1771881245
+    updatedAtTs = 1771881245,
   },
 }
 ```
@@ -84,7 +86,7 @@ global.characters[guid].<domain> = {
 - `updatedAt` must keep this exact format:
   - `YYYY-MM-DD HH:MM:SS`
 - `updatedAt` is always server time.
-- Optional `updatedAtTs` may be stored for sorting/comparison only.
+- `updatedAtTs` is mandatory (Unix timestamp, same update moment as `updatedAt`).
 - UI/default display must rely on `updatedAt` format above.
 
 ## 6) Identity rules
@@ -127,6 +129,16 @@ links = {
 
 ## 8) Migration intent
 
-- Existing DB paths may coexist during migration.
-- Target writes must move to this schema.
-- Read compatibility layers are allowed until all modules are switched.
+- No migration layer is allowed.
+- Legacy DB trees are not read.
+- Legacy DB trees are not transformed.
+- On rollout, only this schema is considered valid.
+- Existing persisted data outside this schema may be discarded/reset.
+
+## 9) Compatibility and sync gate (mandatory)
+
+- Sync with older GMS versions must be rejected.
+- A strict minimum sync protocol/app version must be enforced before processing inbound payloads.
+- If sender version is below required version:
+  - ignore payload
+  - optionally log a concise incompatibility warning

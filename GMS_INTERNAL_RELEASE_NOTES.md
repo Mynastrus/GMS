@@ -25,7 +25,7 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - [ ] (noch keine Eintraege)
 
 ### Rules/Infra
-- [ ] (noch keine Eintraege)
+- DB schema policy hardened in `GMS_DB_SCHEMA.md`: hard cutover only, no migration layer, and mandatory sync block for older GMS versions.
 
 ## Last Release Snapshot
 
