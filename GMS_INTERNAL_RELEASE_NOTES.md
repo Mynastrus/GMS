@@ -26,9 +26,13 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - Modules switched to V2 sync domains: `GMS/Modules/Equipment.lua`, `GMS/Modules/Raids.lua`, `GMS/Modules/MythicPlus.lua`, `GMS/Modules/AccountInfo.lua`, `GMS/Modules/Roster.lua`, `GMS/Modules/CharInfo.lua`.
 - Account link storage moved to local char tree in `GMS/Modules/AccountInfo.lua` (`char.*.chars.links`) as source of truth.
 - Roster/CharInfo adjusted to roster-first hydration and V2 domain handling in `GMS/Modules/Roster.lua` and `GMS/Modules/CharInfo.lua`.
+- Equipment persistence compacted in `GMS/Modules/Equipment.lua`: snapshot slots now store raw item links only (including full hyperlink when available), while DB character domain write remains canonical `data/meta`.
+- CharInfo equipment rendering in `GMS/Modules/CharInfo.lua` now resolves names, icons, ilvl, VZ (enchants/sockets), and TSET from compact raw links with API fallback.
+- Roster fallback readers/writers in `GMS/Modules/Roster.lua` aligned to canonical character domain nodes (`CHARINFO`, `EQUIPMENT`) with legacy-read fallback only.
 
 ### Fixed
-- [ ] (noch keine Eintraege)
+- DB wipe/reset in `GMS/Core/Database.lua` now performs a hard reset of `GMS_DB`, `GMS_Logging_DB`, and `GMS_UIDB` roots and clears runtime DB handles to avoid stale AceDB proxy data after reset.
+- CHARINFO local bootstrap in `GMS/Modules/CharInfo.lua` now persists local version metadata through canonical `global.characters[guid].CHARINFO = { data, meta }`.
 
 ### Rules/Infra
 - DB schema policy hardened in `GMS_DB_SCHEMA.md`: hard cutover only, no migration layer, and mandatory sync block for older GMS versions.

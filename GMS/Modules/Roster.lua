@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.1.23",
+	VERSION      = "1.1.25",
 }
 
 local LibStub = LibStub
@@ -56,6 +56,7 @@ local UnitRace                   = UnitRace
 local UnitLevel                  = UnitLevel
 local GetServerTime              = GetServerTime
 local GetAverageItemLevel        = GetAverageItemLevel
+local GetDetailedItemLevelInfo   = GetDetailedItemLevelInfo
 local GameTooltip                = GameTooltip
 local UIParent                   = UIParent
 local EasyMenu                   = EasyMenu
@@ -236,18 +237,40 @@ end
 local GetLastOnlineByRosterIndex
 local BuildRaidStatusFromRaidsStore
 
+local function ResolveSnapshotSlotItemLevel(slot)
+	if type(slot) == "table" then
+		local ilvl = tonumber(slot.itemLevel)
+		if ilvl and ilvl > 0 then
+			return ilvl
+		end
+		local rawLink = tostring(slot.itemString or slot.link or "")
+		if rawLink ~= "" and type(GetDetailedItemLevelInfo) == "function" then
+			local dyn = tonumber(GetDetailedItemLevelInfo(rawLink) or 0) or 0
+			if dyn > 0 then
+				return dyn
+			end
+		end
+		return nil
+	end
+	if type(slot) == "string" and slot ~= "" and type(GetDetailedItemLevelInfo) == "function" then
+		local dyn = tonumber(GetDetailedItemLevelInfo(slot) or 0) or 0
+		if dyn > 0 then
+			return dyn
+		end
+	end
+	return nil
+end
+
 local function BuildItemLevelFromStoredSnapshot(snapshot)
 	if type(snapshot) ~= "table" or type(snapshot.slots) ~= "table" then return nil end
 	local relevantSlots = { 1, 2, 3, 15, 5, 9, 10, 6, 7, 8, 11, 12, 13, 14, 16, 17 }
 	local total, count = 0, 0
 	for i = 1, #relevantSlots do
 		local slot = snapshot.slots[relevantSlots[i]]
-		if type(slot) == "table" then
-			local ilvl = tonumber(slot.itemLevel)
-			if ilvl and ilvl > 0 then
-				total = total + ilvl
-				count = count + 1
-			end
+		local ilvl = ResolveSnapshotSlotItemLevel(slot)
+		if ilvl and ilvl > 0 then
+			total = total + ilvl
+			count = count + 1
 		end
 	end
 	if count <= 0 then return nil end
@@ -322,7 +345,14 @@ local function GetStoredCharacterFallbackMeta(guid)
 
 	local out = {}
 	local eq = type(char.EQUIPMENT) == "table" and char.EQUIPMENT or nil
-	local eqSnap = eq and type(eq.equipment) == "table" and eq.equipment.snapshot or nil
+	local eqData = (eq and type(eq.data) == "table") and eq.data or nil
+	local eqSnap = nil
+	if type(eqData) == "table" and type(eqData.slots) == "table" then
+		eqSnap = eqData
+	elseif eq and type(eq.equipment) == "table" and type(eq.equipment.snapshot) == "table" then
+		-- Legacy fallback.
+		eqSnap = eq.equipment.snapshot
+	end
 	local ilvl = BuildItemLevelFromStoredSnapshot(eqSnap)
 	if ilvl and ilvl > 0 then out.ilvl = ilvl end
 
@@ -340,7 +370,8 @@ local function GetStoredCharacterFallbackMeta(guid)
 	end
 
 	local charInfo = type(char.CHARINFO) == "table" and char.CHARINFO or nil
-	local gmsVersion = charInfo and tostring(charInfo.gmsVersion or "") or ""
+	local charInfoData = (charInfo and type(charInfo.data) == "table") and charInfo.data or charInfo
+	local gmsVersion = charInfoData and tostring(charInfoData.gmsVersion or "") or ""
 	if gmsVersion ~= "" then
 		out.gmsVersion = gmsVersion
 	end
@@ -354,34 +385,16 @@ local function SaveStoredCharacterVersion(guid, version, seenAt, sourceGuid)
 	if g == "" or v == "" then return false end
 	local ts = tonumber(seenAt or 0) or 0
 	local src = tostring(sourceGuid or "")
-
-	local function writeGlobal(global)
-		if type(global) ~= "table" then return false end
-		global.characters = type(global.characters) == "table" and global.characters or {}
-		local c = type(global.characters[g]) == "table" and global.characters[g] or {}
-		global.characters[g] = c
-		c.CHARINFO = type(c.CHARINFO) == "table" and c.CHARINFO or {}
-		local ci = c.CHARINFO
-		ci.gmsVersion = v
-		if ts > 0 then
-			ci.lastVersionUpdate = ts
-		end
-		if src ~= "" then
-			ci.versionSourceGuid = src
-		end
-		return true
+	if GMS and type(GMS.SetCharacterDomainData) == "function" then
+		return GMS:SetCharacterDomainData(g, "CHARINFO", {
+			gmsVersion = v,
+		}, {
+			sourceGuid = src ~= "" and src or g,
+			sourceName = "",
+			updatedAtTs = ts,
+		})
 	end
-
-	local ok = false
-	if GMS and type(GMS.db) == "table" and type(GMS.db.global) == "table" then
-		ok = writeGlobal(GMS.db.global) or ok
-	end
-	local rawDB = (type(_G) == "table") and rawget(_G, "GMS_DB") or nil
-	if type(rawDB) == "table" then
-		rawDB.global = type(rawDB.global) == "table" and rawDB.global or {}
-		ok = writeGlobal(rawDB.global) or ok
-	end
-	return ok
+	return false
 end
 
 -- ---------------------------------------------------------------------------
@@ -1359,12 +1372,10 @@ local function BuildItemLevelFromEquipmentSnapshot(snapshot)
 	for i = 1, #relevantSlots do
 		local slotId = relevantSlots[i]
 		local item = snapshot.slots[slotId]
-		if type(item) == "table" then
-			local ilvl = tonumber(item.itemLevel)
-			if ilvl and ilvl > 0 then
-				total = total + ilvl
-				count = count + 1
-			end
+		local ilvl = ResolveSnapshotSlotItemLevel(item)
+		if ilvl and ilvl > 0 then
+			total = total + ilvl
+			count = count + 1
 		end
 	end
 	if count <= 0 then return nil end

@@ -52,7 +52,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.15",
+	VERSION      = "1.3.18",
 }
 
 -- ###########################################################################
@@ -184,6 +184,22 @@ local function _getCharKey()
 	return nil
 end
 
+local function _getPlayerNameFull()
+	local name, realm = nil, nil
+	if UnitFullName then
+		local n, r = UnitFullName("player")
+		if n and n ~= "" then name = tostring(n) end
+		if r and r ~= "" then realm = tostring(r) end
+	end
+	if (not name or name == "") and UnitName then
+		name = tostring(UnitName("player") or "")
+	end
+	if name and name ~= "" and realm and realm ~= "" then
+		return name .. "-" .. realm
+	end
+	return tostring(name or "")
+end
+
 -- Equipment options (migrated to RegisterModuleOptions API)
 EQUIP._options = EQUIP._options or nil
 
@@ -192,56 +208,13 @@ local OPTIONS_DEFAULTS = {
 	lastScanTs = 0,
 }
 
--- Equipment data storage (managed via new API)
-local function _getDirectCharOptionsStore()
-	if GMS and type(GMS.InitializeStandardDatabases) == "function" then
-		GMS:InitializeStandardDatabases(false)
-	end
-
-	if not GMS or type(GMS.db) ~= "table" or type(GMS.db.global) ~= "table" then
-		return nil
-	end
-
-	local charKey = _getCharKey()
-	if type(charKey) ~= "string" or charKey == "" then
-		if type(GMS.GetCharacterGUID) == "function" then
-			charKey = GMS:GetCharacterGUID()
-		end
-	end
-	if type(charKey) ~= "string" or charKey == "" then
-		return nil
-	end
-
-	local global = GMS.db.global
-	global.characters = type(global.characters) == "table" and global.characters or {}
-	local charStore = global.characters[charKey]
-	if type(charStore) ~= "table" then
-		charStore = {}
-		global.characters[charKey] = charStore
-	end
-
-	local optStore = charStore.EQUIPMENT
-	if type(optStore) ~= "table" then
-		optStore = {}
-		charStore.EQUIPMENT = optStore
-	end
-
-	if optStore.autoScan == nil then
-		optStore.autoScan = OPTIONS_DEFAULTS.autoScan
-	end
-	optStore.lastScanTs = tonumber(optStore.lastScanTs) or tonumber(OPTIONS_DEFAULTS.lastScanTs) or 0
-	optStore.equipment = type(optStore.equipment) == "table" and optStore.equipment or {}
-
-	return optStore
-end
-
 local function _getOptionsStore()
-	local direct = _getDirectCharOptionsStore()
-	if type(direct) == "table" then
-		EQUIP._options = direct
-		return direct
-	end
-	return EQUIP._options
+	local opts = EQUIP._options
+	if type(opts) ~= "table" then return nil end
+	opts.autoScan = (opts.autoScan == nil) and OPTIONS_DEFAULTS.autoScan or (opts.autoScan == true)
+	opts.lastScanTs = tonumber(opts.lastScanTs) or tonumber(OPTIONS_DEFAULTS.lastScanTs) or 0
+	opts.equipment = type(opts.equipment) == "table" and opts.equipment or {}
+	return opts
 end
 
 local function _getEquipmentStore()
@@ -318,23 +291,16 @@ function EQUIP:InitializeOptions()
 		end
 	end
 
-	local direct = _getDirectCharOptionsStore()
-	if type(direct) == "table" then
-		self._options = direct
+	if self._options then
 		self:_TryFlushBufferedSnapshot("mem-flush")
+	end
+	if self._options then
 		self._storePollActive = false
 		self._pollTries = 0
-		LOCAL_LOG("INFO", "Equipment options initialized (direct CHAR store)")
+		LOCAL_LOG("INFO", "Equipment options initialized")
 	else
-		if self._options then
-			self:_TryFlushBufferedSnapshot("mem-flush")
-		end
-		if self._options then
-			LOCAL_LOG("INFO", "Equipment options initialized")
-		else
-			LOCAL_LOG("WARN", "Equipment options unavailable after initialization")
-			self:_StartStorePoll()
-		end
+		LOCAL_LOG("WARN", "Equipment options unavailable after initialization")
+		self:_StartStorePoll()
 	end
 end
 
@@ -356,94 +322,39 @@ local function _getPlayerGuid()
 	return nil
 end
 
-local function _splitKeepingEmpty(input, sep)
-	local txt = tostring(input or "")
-	local out = {}
-	local start = 1
-	while true do
-		local pos = string.find(txt, sep, start, true)
-		if not pos then
-			out[#out + 1] = string.sub(txt, start)
-			break
-		end
-		out[#out + 1] = string.sub(txt, start, pos - 1)
-		start = pos + 1
-	end
-	return out
-end
-
 local function _extractItemString(link)
 	if type(link) ~= "string" or link == "" then return nil end
+	if string.find(link, "item:", 1, true) == 1 then
+		return link
+	end
 	local itemString = link:match("|H(item:[^|]+)|h")
 	if type(itemString) ~= "string" or itemString == "" then return nil end
 	return itemString
 end
 
-local function _parseItemLink(link, itemLoc, slotId)
-	if type(link) ~= "string" or link == "" then return nil end
-	local itemString = _extractItemString(link)
-	if not itemString then return nil end
-
-	local parts = _splitKeepingEmpty(itemString, ":")
-	local enchantId = tonumber(parts[3] or "0") or 0
-	local gemIds = {
-		tonumber(parts[4] or "0") or 0,
-		tonumber(parts[5] or "0") or 0,
-		tonumber(parts[6] or "0") or 0,
-		tonumber(parts[7] or "0") or 0,
-	}
-	local gemCount = 0
-	for i = 1, #gemIds do
-		if tonumber(gemIds[i] or 0) > 0 then
-			gemCount = gemCount + 1
+local function _normalizeSlotRawLink(slotData)
+	if type(slotData) == "string" and slotData ~= "" then
+		-- Keep full hyperlink if available so item names can render immediately from DB.
+		if string.find(slotData, "|Hitem:", 1, true) then
+			return slotData
+		end
+		return _extractItemString(slotData)
+	end
+	if type(slotData) == "table" then
+		if type(slotData.link) == "string" and slotData.link ~= "" then
+			if string.find(slotData.link, "|Hitem:", 1, true) then
+				return slotData.link
+			end
+			local fromLink = _extractItemString(slotData.link)
+			if type(fromLink) == "string" and fromLink ~= "" then
+				return fromLink
+			end
+		end
+		if type(slotData.itemString) == "string" and slotData.itemString ~= "" then
+			return _extractItemString(slotData.itemString)
 		end
 	end
-
-	local numBonusIds = tonumber(parts[14] or "0") or 0
-	local bonusIds = {}
-	if numBonusIds > 0 then
-		for i = 1, numBonusIds do
-			bonusIds[i] = tonumber(parts[14 + i] or "0") or 0
-		end
-	end
-
-	local icon = 0
-	if type(GetItemInfoInstant) == "function" then
-		local _, _, _, _, iconID = GetItemInfoInstant(link)
-		icon = tonumber(iconID or 0) or 0
-	end
-
-	local setId = 0
-	if type(GetItemInfo) == "function" then
-		local _, _, _, _, _, _, _, _, _, iconFromInfo, _, _, _, _, _, itemSetID = GetItemInfo(link)
-		local infoIcon = tonumber(iconFromInfo or 0) or 0
-		if infoIcon > 0 then
-			icon = infoIcon
-		end
-		setId = tonumber(itemSetID or 0) or 0
-	end
-
-	local itemLevel = nil
-	if type(C_Item) == "table" and type(C_Item.GetCurrentItemLevel) == "function" and itemLoc then
-		itemLevel = tonumber(C_Item.GetCurrentItemLevel(itemLoc) or 0) or nil
-		if itemLevel and itemLevel <= 0 then itemLevel = nil end
-	end
-
-	return {
-		slotId = tonumber(slotId) or 0,
-		link = link,
-		itemString = itemString,
-		itemId = tonumber(parts[2] or "0") or 0,
-		icon = icon,
-		enchantId = enchantId,
-		hasEnchant = enchantId > 0,
-		gemIds = gemIds,
-		gemCount = gemCount,
-		hasSocketedGem = gemCount > 0,
-		setId = setId,
-		bonusIds = bonusIds,
-		itemLevel = itemLevel,
-	}
+	return nil
 end
 
 local function _buildSnapshotDigest(snapshot)
@@ -452,10 +363,8 @@ local function _buildSnapshotDigest(snapshot)
 	local parts = {}
 	for i = 1, #INV_SLOTS do
 		local slotId = INV_SLOTS[i]
-		local parsed = slots[slotId]
-		local itemString = (type(parsed) == "table" and parsed.itemString) or ""
-		local itemLevel = (type(parsed) == "table" and tonumber(parsed.itemLevel)) or 0
-		parts[#parts + 1] = tostring(slotId) .. "=" .. tostring(itemString) .. "@" .. tostring(itemLevel)
+		local itemString = _extractItemString(_normalizeSlotRawLink(slots[slotId]) or "") or ""
+		parts[#parts + 1] = tostring(slotId) .. "=" .. tostring(itemString)
 	end
 	return table.concat(parts, "|")
 end
@@ -481,7 +390,7 @@ local function _scanEquipmentSlot(slotId)
 	end
 	if type(C_Item) == "table" and itemLoc and type(C_Item.DoesItemExist) == "function" and C_Item.DoesItemExist(itemLoc) then
 		local link = type(C_Item.GetItemLink) == "function" and C_Item.GetItemLink(itemLoc) or nil
-		return _parseItemLink(link, itemLoc, slotId)
+		return _normalizeSlotRawLink(link)
 	end
 	return nil
 end
@@ -606,6 +515,10 @@ function EQUIP:SaveSnapshot(snapshot, reason)
 	if type(snapshot.slots) ~= "table" then
 		snapshot.slots = {}
 	end
+	for i = 1, #INV_SLOTS do
+		local slotId = INV_SLOTS[i]
+		snapshot.slots[slotId] = _normalizeSlotRawLink(snapshot.slots[slotId])
+	end
 
 	local digest = _buildSnapshotDigest(snapshot)
 
@@ -613,7 +526,6 @@ function EQUIP:SaveSnapshot(snapshot, reason)
 	if not store then
 		self._mem = self._mem or {}
 		self._mem.snapshot = snapshot
-		self._mem.lastDigest = digest
 		self:_StartStorePoll()
 		LOCAL_LOG("WARN", "SaveSnapshot: Equipment options not available, stored in memory buffer")
 		return true
@@ -622,38 +534,26 @@ function EQUIP:SaveSnapshot(snapshot, reason)
 	self._storePollActive = false
 	self._pollTries = 0
 
-	local previousDigest = tostring(store.lastDigest or "")
+	local previousDigest = ""
+	if type(store.snapshot) == "table" then
+		previousDigest = _buildSnapshotDigest(store.snapshot)
+	end
 	store.snapshot = snapshot
-	store.lastDigest = digest
+	store.lastDigest = nil
 	local opts = _getOptionsStore()
 	if opts then
 		opts.lastScanTs = snapshot.ts or 0
 	end
 
-	-- Mirror into raw SavedVariables for DB inspector consistency and
-	-- to guarantee persistence visibility even when AceDB proxies lag.
-	if type(_G) == "table" then
-		_G.GMS_DB = type(_G.GMS_DB) == "table" and _G.GMS_DB or {}
-		_G.GMS_DB.global = type(_G.GMS_DB.global) == "table" and _G.GMS_DB.global or {}
-		_G.GMS_DB.global.characters = type(_G.GMS_DB.global.characters) == "table" and _G.GMS_DB.global.characters or {}
-		local rawKey = tostring(snapshot.guid or "")
-		if rawKey ~= "" then
-			local rawChar = _G.GMS_DB.global.characters[rawKey]
-			if type(rawChar) ~= "table" then
-				rawChar = {}
-				_G.GMS_DB.global.characters[rawKey] = rawChar
-			end
-			local rawEq = rawChar.EQUIPMENT
-			if type(rawEq) ~= "table" then
-				rawEq = {}
-				rawChar.EQUIPMENT = rawEq
-			end
-			rawEq.autoScan = (opts and opts.autoScan == true) and true or (rawEq.autoScan == true)
-			rawEq.lastScanTs = tonumber(snapshot.ts or 0) or 0
-			rawEq.equipment = type(rawEq.equipment) == "table" and rawEq.equipment or {}
-			rawEq.equipment.snapshot = snapshot
-			rawEq.equipment.lastDigest = digest
-		end
+	-- Canonical character domain persistence (global.characters[guid].EQUIPMENT = {data,meta}).
+	if GMS and type(GMS.SetCharacterDomainData) == "function" then
+		GMS:SetCharacterDomainData(snapshot.guid, "EQUIPMENT", {
+			slots = snapshot.slots,
+		}, {
+			sourceGuid = snapshot.guid,
+			sourceName = _getPlayerNameFull(),
+			updatedAtTs = tonumber(snapshot.ts or 0) or 0,
+		})
 	end
 
 	if digest ~= "" and digest ~= previousDigest then

@@ -9,7 +9,7 @@ local METADATA = {
 	INTERN_NAME  = "DB",
 	SHORT_NAME   = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION      = "1.1.15",
+	VERSION      = "1.1.16",
 }
 
 -- Blizzard Globals
@@ -786,26 +786,28 @@ end
 function GMS:Database_ResetAll()
 	LOCAL_LOG("WARN", "Database RESET requested")
 
-	if self.db then
-		self.db:ResetProfile()
-		if type(self.db.global) == "table" then
-			wipe(self.db.global)
-			self.db.global.version = 2
-			self.db.global.characters = {}
-			self.db.global.guilds = {}
-		end
+	-- Hard reset: clear complete SavedVariables roots (not just profile/global subsets).
+	local rootDb = rawget(_G, "GMS_DB")
+	if type(rootDb) == "table" then
+		wipe(rootDb)
 	end
+	_G.GMS_DB = {}
 
-	if self.logging_db then
-		-- Reset logging db - char logs and profile
-		self.logging_db.char = type(self.logging_db.char) == "table" and self.logging_db.char or {}
-		self.logging_db.profile = type(self.logging_db.profile) == "table" and self.logging_db.profile or {}
-		self.logging_db.char.logs = {}
-		self.logging_db.profile.ingestPos = 0
+	local rootLogDb = rawget(_G, "GMS_Logging_DB")
+	if type(rootLogDb) == "table" then
+		wipe(rootLogDb)
 	end
+	_G.GMS_Logging_DB = {}
 
-	local uiDB = rawget(_G, "GMS_UIDB")
-	if type(uiDB) == "table" then wipe(uiDB) end
+	local rootUiDb = rawget(_G, "GMS_UIDB")
+	if type(rootUiDb) == "table" then
+		wipe(rootUiDb)
+	end
+	_G.GMS_UIDB = {}
+
+	-- Drop runtime AceDB references so no stale table proxies are reused pre-reload.
+	self.db = nil
+	self.logging_db = nil
 
 	LOCAL_LOG("INFO", "All databases reset to defaults")
 

@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.15",
+	VERSION      = "1.1.20",
 }
 
 local LibStub = LibStub
@@ -44,6 +44,9 @@ local UnitFactionGroup           = UnitFactionGroup
 local GetSpecialization          = GetSpecialization
 local GetSpecializationInfo      = GetSpecializationInfo
 local GetAverageItemLevel        = GetAverageItemLevel
+local GetDetailedItemLevelInfo   = GetDetailedItemLevelInfo
+local GetServerTime              = GetServerTime
+local GetItemInfo               = GetItemInfo
 local GetItemInfoInstant         = GetItemInfoInstant
 local UnitGUID                   = UnitGUID
 local UnitExists                 = UnitExists
@@ -461,6 +464,115 @@ local function GetTargetSnapshot()
 	}
 end
 
+local function _splitItemStringFields(rawLink)
+	local out = {}
+	local txt = tostring(rawLink or "")
+	local start = 1
+	while true do
+		local pos = string.find(txt, ":", start, true)
+		if not pos then
+			out[#out + 1] = string.sub(txt, start)
+			break
+		end
+		out[#out + 1] = string.sub(txt, start, pos - 1)
+		start = pos + 1
+	end
+	return out
+end
+
+local function _extractItemStringFromRawLink(rawLink)
+	local txt = tostring(rawLink or "")
+	if txt == "" then return "" end
+	if string.find(txt, "item:", 1, true) == 1 then
+		return txt
+	end
+	local itemString = txt:match("|H(item:[^|]+)|h")
+	if type(itemString) == "string" and itemString ~= "" then
+		return itemString
+	end
+	return txt
+end
+
+local function ResolveEquipmentSnapshotSlotData(slot, slotId)
+	local rawLink = ""
+	local itemString = ""
+	local icon = nil
+	local hasEnchant = false
+	local hasSocketedGem = false
+	local isTierSet = false
+	local ilvl = nil
+	local setId = 0
+	if type(slot) == "table" then
+		rawLink = tostring(slot.link or slot.itemString or "")
+		local itemLevel = tonumber(slot.itemLevel or 0) or 0
+		ilvl = (itemLevel > 0) and itemLevel or nil
+		icon = tonumber(slot.icon or 0) or 0
+		local enchantId = tonumber(slot.enchantId or 0) or 0
+		hasEnchant = (slot.hasEnchant == true) or (enchantId > 0)
+		hasSocketedGem = (slot.hasSocketedGem == true) or ((tonumber(slot.gemCount or 0) or 0) > 0)
+		setId = tonumber(slot.setId or 0) or 0
+	elseif type(slot) == "string" then
+		rawLink = tostring(slot)
+	end
+	itemString = _extractItemStringFromRawLink(rawLink)
+	if itemString ~= "" then
+		local parts = _splitItemStringFields(itemString)
+		local enchantId = tonumber(parts[3] or "0") or 0
+		if enchantId > 0 then
+			hasEnchant = true
+		end
+		for i = 4, 7 do
+			local gemId = tonumber(parts[i] or "0") or 0
+			if gemId > 0 then
+				hasSocketedGem = true
+				break
+			end
+		end
+	end
+	if ilvl == nil and rawLink ~= "" and type(GetDetailedItemLevelInfo) == "function" then
+		local dyn = tonumber(GetDetailedItemLevelInfo(itemString ~= "" and itemString or rawLink) or 0) or 0
+		if dyn > 0 then
+			ilvl = dyn
+		end
+	end
+	local displayText = rawLink
+	if rawLink ~= "" and type(GetItemInfo) == "function" then
+		local itemName, itemLink, _, _, _, _, _, _, _, iconFromInfo, _, _, _, _, _, itemSetID = GetItemInfo(itemString ~= "" and itemString or rawLink)
+		if type(itemLink) == "string" and itemLink ~= "" then
+			displayText = itemLink
+		elseif type(itemName) == "string" and itemName ~= "" then
+			displayText = itemName
+		end
+		local iIcon = tonumber(iconFromInfo or 0) or 0
+		if iIcon > 0 then
+			icon = iIcon
+		end
+		local sid = tonumber(itemSetID or 0) or 0
+		if sid > 0 then
+			setId = sid
+		end
+	end
+	if (not icon or icon <= 0) and rawLink ~= "" and type(GetItemInfoInstant) == "function" then
+		local _, _, _, _, iconID = GetItemInfoInstant(itemString ~= "" and itemString or rawLink)
+		icon = tonumber(iconID or 0) or 0
+	end
+	if icon and icon <= 0 then
+		icon = EQUIP_DEFAULT_ICON
+	end
+	local sid = tonumber(slotId or 0) or 0
+	local tierSlot = (sid == 1 or sid == 3 or sid == 5 or sid == 7 or sid == 10)
+	isTierSet = tierSlot and ((tonumber(setId or 0) or 0) > 0)
+	return {
+		link = rawLink,
+		text = displayText,
+		itemLevel = ilvl,
+		icon = icon,
+		hasEnchant = (hasEnchant == true) or (hasSocketedGem == true),
+		hasSocketedGem = hasSocketedGem == true,
+		isTierSet = isTierSet,
+	}
+end
+
 local function BuildItemLevelFromEquipmentSnapshot(snapshot)
 	if type(snapshot) ~= "table" or type(snapshot.slots) ~= "table" then return nil end
 	local relevantSlots = { 1, 2, 3, 15, 5, 9, 10, 6, 7, 8, 11, 12, 13, 14, 16, 17 }
@@ -468,19 +580,16 @@ local function BuildItemLevelFromEquipmentSnapshot(snapshot)
 	local count = 0
 	for i = 1, #relevantSlots do
 		local slotId = relevantSlots[i]
-		local item = snapshot.slots[slotId]
-		if type(item) == "table" then
-			local ilvl = tonumber(item.itemLevel)
-			if ilvl and ilvl > 0 then
-				total = total + ilvl
-				count = count + 1
-			end
+		local slotData = ResolveEquipmentSnapshotSlotData(snapshot.slots[slotId], slotId)
+		local ilvl = tonumber(slotData.itemLevel)
+		if ilvl and ilvl > 0 then
+			total = total + ilvl
+			count = count + 1
 		end
 	end
 	if count <= 0 then return nil, 0 end
 	return (total / count), count
 end
-
 local function BuildRaidStatusFromRaidsStore(all)
 	if type(all) ~= "table" then return "-" end
 
@@ -655,66 +764,28 @@ local EQUIP_DEFAULT_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 
 local function BuildEquipmentRowsFromSnapshot(snapshot)
 	local hasSnapshot = type(snapshot) == "table" and type(snapshot.slots) == "table"
-
 	local rows = {}
 	for i = 1, #EQUIP_SLOT_ORDER do
 		local slotId = EQUIP_SLOT_ORDER[i]
 		local slot = hasSnapshot and snapshot.slots[slotId] or nil
-		local link = ""
-		local text = ""
-		local ilvl = nil
-		local icon = nil
-		local hasEnchant = false
-		local isTierSet = false
-
-		if type(slot) == "table" then
-			link = tostring(slot.link or "")
-			local itemId = tonumber(slot.itemId or 0) or 0
-			local itemLevel = tonumber(slot.itemLevel or 0) or 0
-			ilvl = (itemLevel > 0) and itemLevel or nil
-
-			icon = tonumber(slot.icon or 0) or 0
-			if icon <= 0 and link ~= "" and type(GetItemInfoInstant) == "function" then
-				local _, _, _, _, iconID = GetItemInfoInstant(link)
-				icon = tonumber(iconID or 0) or 0
-			end
-			if icon <= 0 and (link ~= "" or itemId > 0) then
-				icon = EQUIP_DEFAULT_ICON
-			end
-
-			if link ~= "" then
-				text = link
-			elseif itemId > 0 then
-				text = string.format("item:%d", itemId)
-			end
-
-			local enchantId = tonumber(slot.enchantId or 0) or 0
-			hasEnchant = (slot.hasEnchant == true) or (enchantId > 0)
-
-			local setId = tonumber(slot.setId or 0) or 0
-			local tierSlot = EQUIP_TIER_SLOT_IDS[tonumber(slotId or 0) or 0] == true
-			isTierSet = (slot.isTierSet == true) or (tierSlot and setId > 0)
-		end
-
+		local resolved = ResolveEquipmentSnapshotSlotData(slot, slotId)
 		rows[#rows + 1] = {
 			slotId = slotId,
 			slotName = EQUIP_SLOT_NAMES[slotId] or ("Slot " .. tostring(slotId)),
-			text = text,
-			link = link,
-			icon = icon,
-			hasEnchant = hasEnchant,
-			isTierSet = isTierSet,
-			itemLevel = ilvl,
+			text = tostring(resolved.text or resolved.link or ""),
+			link = tostring(resolved.link or ""),
+			icon = resolved.icon,
+			hasEnchant = resolved.hasEnchant == true,
+			isTierSet = resolved.isTierSet == true,
+			itemLevel = resolved.itemLevel,
 		}
 	end
-
 	local ilvl, slots = nil, 0
 	if hasSnapshot then
 		ilvl, slots = BuildItemLevelFromEquipmentSnapshot(snapshot)
 	end
 	return rows, ilvl, tonumber(slots) or 0
 end
-
 local function BuildMythicRows(dungeons, includeDefaults)
 	local rows = {}
 	local byKey = {}
@@ -1609,6 +1680,9 @@ local function GetCharScopedModuleBucket(guid, moduleKey)
 		if type(mod) ~= "table" then
 			return nil
 		end
+		if type(mod.data) == "table" then
+			return mod.data
+		end
 		return mod
 	end
 
@@ -1654,7 +1728,8 @@ local function GetStoredCharacterVersionByGuid(guid)
 		local chars = type(global.characters) == "table" and global.characters or nil
 		local c = chars and type(chars[g]) == "table" and chars[g] or nil
 		local ci = c and type(c.CHARINFO) == "table" and c.CHARINFO or nil
-		local v = ci and tostring(ci.gmsVersion or "") or ""
+		local ciData = (ci and type(ci.data) == "table") and ci.data or ci
+		local v = ciData and tostring(ciData.gmsVersion or "") or ""
 		return v
 	end
 	local aceGlobal = (GMS and GMS.db and type(GMS.db.global) == "table") and GMS.db.global or nil
@@ -2189,9 +2264,14 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		local eqSnapshot = equip and equip._options and equip._options.equipment and equip._options.equipment.snapshot or nil
 		if type(eqSnapshot) ~= "table" then
 			local eqBucket = GetCharScopedModuleBucket(playerGuid, "EQUIPMENT")
-			if type(eqBucket) == "table" and type(eqBucket.equipment) == "table" and type(eqBucket.equipment.snapshot) == "table" then
-				eqSnapshot = eqBucket.equipment.snapshot
-				data.equipment.source = "Saved character DB"
+			if type(eqBucket) == "table" then
+				if type(eqBucket.slots) == "table" then
+					eqSnapshot = eqBucket
+					data.equipment.source = "Saved character DB"
+				elseif type(eqBucket.equipment) == "table" and type(eqBucket.equipment.snapshot) == "table" then
+					eqSnapshot = eqBucket.equipment.snapshot
+					data.equipment.source = "Saved character DB"
+				end
 			end
 		end
 		if type(eqSnapshot) ~= "table" and type(equip) == "table" and type(equip._mem) == "table"
@@ -2385,7 +2465,14 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		end
 		if not data.equipment.hasData then
 			local eqBucket = GetCharScopedModuleBucket(targetGuid, "EQUIPMENT")
-			local eqSnapshot = type(eqBucket) == "table" and type(eqBucket.equipment) == "table" and eqBucket.equipment.snapshot or nil
+			local eqSnapshot = nil
+			if type(eqBucket) == "table" then
+				if type(eqBucket.slots) == "table" then
+					eqSnapshot = eqBucket
+				elseif type(eqBucket.equipment) == "table" and type(eqBucket.equipment.snapshot) == "table" then
+					eqSnapshot = eqBucket.equipment.snapshot
+				end
+			end
 			if type(eqSnapshot) == "table" then
 				local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(eqSnapshot)
 				if ilvl and ilvl > 0 then
@@ -3959,6 +4046,26 @@ function CHARINFO:InitializeOptions()
 		end
 	else
 		LOCAL_LOG("DEBUG", "CHARINFO options not available or auto-log disabled")
+	end
+
+	local version = tostring((GMS and GMS.VERSION) or "")
+	local sourceGuid = tostring((type(UnitGUID) == "function" and UnitGUID("player")) or "")
+	if sourceGuid == "" and GMS and type(GMS.GetCharacterGUID) == "function" then
+		sourceGuid = tostring(GMS:GetCharacterGUID() or "")
+	end
+	if version ~= "" and sourceGuid ~= "" and GMS and type(GMS.SetCharacterDomainData) == "function" then
+		local snap = GetPlayerSnapshot()
+		local ts = (type(GetServerTime) == "function" and tonumber(GetServerTime()) or nil)
+		if not ts then
+			ts = (type(time) == "function" and tonumber(time()) or 0) or 0
+		end
+		GMS:SetCharacterDomainData(sourceGuid, "CHARINFO", {
+			gmsVersion = version,
+		}, {
+			sourceGuid = sourceGuid,
+			sourceName = tostring((snap and snap.name_full) or ""),
+			updatedAtTs = ts,
+		})
 	end
 end
 
