@@ -2,7 +2,7 @@
 --	GMS/Modules/Equipment.lua
 --	Equipment MODULE (Ace)
 --	- Auto-Scan: nach Login (delayed) + bei Änderungen (debounced)
---	- Speichert Snapshot pro Charakter in SavedVariables: GMS_DB.global.characters[charKey].EQUIPMENT
+--	- Speichert Snapshot pro Charakter in SavedVariables: GMS_DB.global.characters[charKey].EQUIPMENT_V2
 --	  (global, damit andere Chars es sehen können)
 --	- charKey: UnitGUID("player") (Fallback: Name-Realm)
 --	- Memory buffer falls SV noch nicht verfügbar ist, Migration sobald möglich
@@ -52,7 +52,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.19",
+	VERSION      = "1.3.21",
 }
 
 -- ###########################################################################
@@ -208,6 +208,20 @@ local OPTIONS_DEFAULTS = {
 	lastScanTs = 0,
 }
 
+local function _purgeLegacyEquipmentDomain()
+	local db = GMS and GMS.db or nil
+	local global = db and db.global or nil
+	local guid = type(UnitGUID) == "function" and UnitGUID("player") or nil
+	if type(global) == "table" and type(global.characters) == "table"
+		and type(guid) == "string" and guid ~= "" then
+		local node = global.characters[guid]
+		if type(node) == "table" and node.EQUIPMENT ~= nil then
+			node.EQUIPMENT = nil
+			LOCAL_LOG("INFO", "Purged legacy EQUIPMENT domain node", guid)
+		end
+	end
+end
+
 local function _getOptionsStore()
 	local opts = EQUIP._options
 	if type(opts) ~= "table" then return nil end
@@ -277,7 +291,8 @@ function EQUIP:InitializeOptions()
 	-- Register equipment options using new API
 	if GMS and type(GMS.RegisterModuleOptions) == "function" then
 		pcall(function()
-			GMS:RegisterModuleOptions("Equipment", OPTIONS_DEFAULTS, "CHAR")
+			-- Store module options locally in profile scope; do not pollute global character domains.
+			GMS:RegisterModuleOptions("Equipment", OPTIONS_DEFAULTS, "PROFILE")
 		end)
 	end
 
@@ -297,6 +312,7 @@ function EQUIP:InitializeOptions()
 	if self._options then
 		self._storePollActive = false
 		self._pollTries = 0
+		_purgeLegacyEquipmentDomain()
 		LOCAL_LOG("INFO", "Equipment options initialized")
 	else
 		LOCAL_LOG("WARN", "Equipment options unavailable after initialization")
@@ -541,9 +557,9 @@ function EQUIP:SaveSnapshot(snapshot, reason)
 		opts.lastScanTs = snapshot.ts or 0
 	end
 
-	-- Canonical character domain persistence (global.characters[guid].EQUIPMENT = {data,meta}).
+	-- Canonical character domain persistence (global.characters[guid].EQUIPMENT_V2 = {data,meta}).
 	if GMS and type(GMS.SetCharacterDomainData) == "function" then
-		GMS:SetCharacterDomainData(snapshot.guid, "EQUIPMENT", snapshot.slots, {
+		GMS:SetCharacterDomainData(snapshot.guid, "EQUIPMENT_V2", snapshot.slots, {
 			sourceGuid = snapshot.guid,
 			sourceName = _getPlayerNameFull(),
 			updatedAtTs = tonumber(snapshot.ts or 0) or 0,

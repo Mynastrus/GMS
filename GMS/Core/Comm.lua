@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "COMM",
 	SHORT_NAME   = "Comm",
 	DISPLAY_NAME = "Kommunikation",
-	VERSION      = "1.2.13",
+	VERSION      = "1.2.14",
 }
 
 ---@diagnostic disable: undefined-global
@@ -603,6 +603,11 @@ local function StoreIfNewer(record, senderGUID, channel)
 		pcall(GMS.SetCharacterDomainData, GMS, record.charGUID, record.domain, record.payload, {
 			sourceGuid = tostring(record.originGUID or senderGUID or ""),
 			sourceName = "",
+			updatedAtTs = tonumber(record.updatedAt or 0) or 0,
+		})
+	end
+	if GMS and type(GMS.UpsertGuildPlayer) == "function" then
+		pcall(GMS.UpsertGuildPlayer, GMS, record.charGUID, {
 			updatedAtTs = tonumber(record.updatedAt or 0) or 0,
 		})
 	end

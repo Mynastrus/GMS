@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "GUILDLOG",
 	SHORT_NAME   = "GuildLog",
 	DISPLAY_NAME = "Guild Log",
-	VERSION      = "1.1.17",
+	VERSION      = "1.1.18",
 }
 
 local LibStub = LibStub
@@ -886,6 +886,13 @@ local function BuildCurrentRosterSnapshot()
 				status = status,
 				classFileName = tostring(classFileName or ""),
 			}
+			if type(guid) == "string" and guid ~= "" and GMS and type(GMS.UpsertGuildPlayer) == "function" then
+				GMS:UpsertGuildPlayer(guid, {
+					name_full = normalizedName,
+					rank = tostring(rank or ""),
+					note = tostring(note or ""),
+				})
+			end
 		end
 	end
 	return out

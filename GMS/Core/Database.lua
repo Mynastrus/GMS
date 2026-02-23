@@ -9,7 +9,7 @@ local METADATA = {
 	INTERN_NAME  = "DB",
 	SHORT_NAME   = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION      = "1.1.19",
+	VERSION      = "1.1.25",
 }
 
 -- Blizzard Globals
@@ -141,6 +141,11 @@ local LOGGING_DEFAULTS = {
 	global = {},
 }
 
+local HydrateGuildMeta
+local EnsureGuidInGlobal
+local EnsureAccountGuidInGlobal
+local NormalizeGuid
+
 -- ###########################################################################
 -- #	STANDARD DATABASE INIT
 -- ###########################################################################
@@ -152,13 +157,30 @@ function GMS:InitializeStandardDatabases(force)
 	end
 
 	local function NormalizeGlobalSchema()
+		local function IsNumericGuildKey(v)
+			local s = tostring(v or "")
+			return s:match("^%d+$") ~= nil
+		end
+
+		local function MergeGuildBuckets(dst, src)
+			if type(dst) ~= "table" or type(src) ~= "table" then return end
+			for k, v in pairs(src) do
+				if type(v) == "table" then
+					dst[k] = type(dst[k]) == "table" and dst[k] or {}
+					MergeGuildBuckets(dst[k], v)
+				elseif dst[k] == nil then
+					dst[k] = v
+				end
+			end
+		end
+
 		local global = self.db and self.db.global
 		if type(global) ~= "table" then
 			self.db.global = {}
 			global = self.db.global
 		end
 		global.version = tonumber(global.version) or 3
-		global.chars = type(global.chars) == "table" and global.chars or {}
+		global.accountChars = type(global.accountChars) == "table" and global.accountChars or {}
 		global.characters = type(global.characters) == "table" and global.characters or {}
 		global.guilds = type(global.guilds) == "table" and global.guilds or {}
 		-- Hard cutover cleanup for deprecated roots.
@@ -175,9 +197,10 @@ function GMS:InitializeStandardDatabases(force)
 			_G.GMS_DB = rawDB
 		end
 		rawDB.global = type(rawDB.global) == "table" and rawDB.global or {}
-		rawDB.global.chars = type(rawDB.global.chars) == "table" and rawDB.global.chars or {}
+		rawDB.global.accountChars = type(rawDB.global.accountChars) == "table" and rawDB.global.accountChars or {}
 		rawDB.global.characters = type(rawDB.global.characters) == "table" and rawDB.global.characters or {}
 		rawDB.global.guilds = type(rawDB.global.guilds) == "table" and rawDB.global.guilds or {}
+		rawDB.global.chars = nil
 		rawDB.global.accountLinks = nil
 		rawDB.global.twinks = nil
 		rawDB.global.twinkMeta = nil
@@ -189,9 +212,42 @@ function GMS:InitializeStandardDatabases(force)
 		rawDB.profiles = type(rawDB.profiles) == "table" and rawDB.profiles or {}
 
 		if type(self.db) == "table" and type(self.db.global) == "table" then
-			self.db.global.chars = rawDB.global.chars
+			self.db.global.accountChars = rawDB.global.accountChars
 			self.db.global.characters = rawDB.global.characters
 			self.db.global.guilds = rawDB.global.guilds
+		end
+
+		-- Hard cutover: guild buckets are keyed by guildClubId only.
+		local currentGuildId = self:GetCurrentGuildId()
+		local guilds = rawDB.global.guilds
+		if type(guilds) == "table" then
+			if type(currentGuildId) == "string" and currentGuildId ~= "" then
+				guilds[currentGuildId] = type(guilds[currentGuildId]) == "table" and guilds[currentGuildId] or {}
+				HydrateGuildMeta(self, guilds[currentGuildId], currentGuildId)
+			end
+			for k, v in pairs(guilds) do
+				if not IsNumericGuildKey(k) then
+					if type(currentGuildId) == "string" and currentGuildId ~= "" and type(v) == "table" then
+						MergeGuildBuckets(guilds[currentGuildId], v)
+					end
+					guilds[k] = nil
+				end
+			end
+			-- Ensure guild roster GUIDs are always mirrored in global.characters.
+			for _, gRoot in pairs(guilds) do
+				if type(gRoot) == "table" then
+					gRoot.players = nil
+					gRoot.roster = type(gRoot.roster) == "table" and gRoot.roster or {}
+					for pGuid, pRow in pairs(gRoot.roster) do
+						local normalized = EnsureGuidInGlobal and EnsureGuidInGlobal(global, pGuid) or nil
+						if type(normalized) == "string" and normalized ~= "" and normalized ~= pGuid then
+							gRoot.roster[normalized] = type(gRoot.roster[normalized]) == "table" and gRoot.roster[normalized] or {}
+							MergeGuildBuckets(gRoot.roster[normalized], pRow)
+							gRoot.roster[pGuid] = nil
+						end
+					end
+				end
+			end
 		end
 
 		local charRoot = self.db and self.db.char
@@ -278,96 +334,40 @@ function GMS:GetCharacterGUID()
 end
 
 function GMS:GetGuildStorageKey()
-	local function normalize(s)
-		return tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")
-	end
-
-	local function getCanonicalKey()
-		if not IsInGuild or not IsInGuild() then return nil end
-		local guildName = nil
-		if type(GetGuildInfo) == "function" then
-			local n = select(1, GetGuildInfo("player"))
-			if type(n) == "string" and n ~= "" then guildName = n end
-		end
-		if (not guildName or guildName == "") and type(C_GuildInfo) == "table" and type(C_GuildInfo.GetGuildInfo) == "function" then
-			local ok, n = pcall(C_GuildInfo.GetGuildInfo, "player")
-			if ok and type(n) == "string" and n ~= "" then guildName = n end
-		end
-		guildName = normalize(guildName)
-		if guildName == "" then return nil end
-		local realm = normalize((type(GetRealmName) == "function" and GetRealmName()) or "Unknown")
-		local faction = normalize((type(UnitFactionGroup) == "function" and UnitFactionGroup("player")) or "Unknown")
-		if realm == "" then realm = "Unknown" end
-		if faction == "" then faction = "Unknown" end
-		return string.format("%s|%s|%s", realm, faction, guildName), guildName, faction
-	end
-
-	local canonical, guildName, faction = getCanonicalKey()
-	local guidKey = self:GetGuildGUID()
-
-	-- Fallback: if exactly one guild bucket exists, reuse it.
-	if self.db and type(self.db.global) == "table" and type(self.db.global.guilds) == "table" then
-		local buckets = self.db.global.guilds
-
-		if type(canonical) == "string" and canonical ~= "" and type(buckets[canonical]) == "table" then
-			return canonical
-		end
-		if type(guidKey) == "string" and guidKey ~= "" and type(buckets[guidKey]) == "table" then
-			return guidKey
-		end
-
-		-- Legacy key recovery: find unique key by guild/faction suffix.
-		local suffixMatch = nil
-		local suffixCount = 0
-		local preferredByData = nil
-		if guildName and guildName ~= "" then
-			local suffix = "|" .. tostring(guildName)
-			local factionNeedle = "|" .. tostring(faction or "")
-			for k, v in pairs(buckets) do
-				if type(k) == "string" and type(v) == "table" and k:sub(-#suffix) == suffix then
-					if faction == "" or k:find(factionNeedle, 1, true) then
-						suffixCount = suffixCount + 1
-						if not suffixMatch then suffixMatch = k end
-						if type(v.GUILDLOG) == "table" and type(v.GUILDLOG.entries) == "table" and #v.GUILDLOG.entries > 0 then
-							preferredByData = k
-						end
-					end
-				end
-			end
-		end
-		if preferredByData then
-			return preferredByData
-		end
-		if suffixCount == 1 and suffixMatch then
-			return suffixMatch
-		end
-
-		local first = nil
-		local count = 0
-		for k in pairs(buckets) do
-			if type(k) == "string" and k ~= "" then
-				count = count + 1
-				if not first then first = k end
-				if count > 1 then break end
-			end
-		end
-		if count == 1 and first then
-			return first
-		end
-	end
-
-	if type(canonical) == "string" and canonical ~= "" then return canonical end
-	if type(guidKey) == "string" and guidKey ~= "" then return guidKey end
-	return nil
+	-- Hard cutover: storage key equals guildClubId.
+	return self:GetCurrentGuildId()
 end
 
-local function NormalizeGuid(guid)
+NormalizeGuid = function(guid)
 	local g = tostring(guid or "")
 	if g == "" then return "" end
 	if g:match("^Player%-%d+%-%x+$") then
 		return g
 	end
 	return ""
+end
+
+EnsureGuidInGlobal = function(global, guid)
+	if type(global) ~= "table" then return nil end
+	local g = NormalizeGuid(guid)
+	if g == "" then return nil end
+	global.characters = type(global.characters) == "table" and global.characters or {}
+	global.characters[g] = type(global.characters[g]) == "table" and global.characters[g] or {}
+	return g
+end
+
+EnsureAccountGuidInGlobal = function(global, guid)
+	if type(global) ~= "table" then return nil end
+	local g = NormalizeGuid(guid)
+	if g == "" then return nil end
+	global.accountChars = type(global.accountChars) == "table" and global.accountChars or {}
+	for i = 1, #global.accountChars do
+		if tostring(global.accountChars[i] or "") == g then
+			return g
+		end
+	end
+	global.accountChars[#global.accountChars + 1] = g
+	return g
 end
 
 function GMS:GetServerTimestamp()
@@ -411,7 +411,41 @@ function GMS:GetCurrentGuildId()
 	if type(id) == "string" and id ~= "" then
 		return id
 	end
-	return self:GetGuildStorageKey()
+	return nil
+end
+
+HydrateGuildMeta = function(self, root, guildId)
+	if type(root) ~= "table" then return end
+	root.meta = type(root.meta) == "table" and root.meta or {}
+	local meta = root.meta
+	local gid = tostring(guildId or "")
+	if gid ~= "" then
+		meta.guildClubId = gid
+	end
+
+	local guildName = ""
+	if type(GetGuildInfo) == "function" then
+		guildName = tostring(select(1, GetGuildInfo("player")) or "")
+	end
+	if guildName == "" and type(C_GuildInfo) == "table" and type(C_GuildInfo.GetGuildInfo) == "function" then
+		local ok, n = pcall(C_GuildInfo.GetGuildInfo, "player")
+		if ok then guildName = tostring(n or "") end
+	end
+
+	local realm = tostring((type(GetRealmName) == "function" and GetRealmName()) or "")
+	local faction = tostring((type(UnitFactionGroup) == "function" and UnitFactionGroup("player")) or "")
+	if guildName ~= "" then meta.name = guildName end
+	if realm ~= "" then meta.realm = realm end
+	if faction ~= "" then meta.faction = faction end
+	if guildName ~= "" and realm ~= "" and faction ~= "" then
+		meta.displayKey = string.format("%s|%s|%s", realm, faction, guildName)
+	end
+
+	local ts = (type(self.GetServerTimestamp) == "function") and tonumber(self:GetServerTimestamp() or 0) or 0
+	if ts and ts > 0 and type(self.FormatServerTimestamp) == "function" then
+		meta.updatedAt = self:FormatServerTimestamp(ts)
+		meta.updatedAtTs = ts
+	end
 end
 
 function GMS:GetCurrentCharRoot()
@@ -432,14 +466,7 @@ function GMS:RegisterKnownGuid(guid)
 	end
 	local global = self.db and self.db.global
 	if type(global) ~= "table" then return false end
-	global.chars = type(global.chars) == "table" and global.chars or {}
-	for i = 1, #global.chars do
-		if tostring(global.chars[i] or "") == g then
-			return true
-		end
-	end
-	global.chars[#global.chars + 1] = g
-	return true
+	return EnsureAccountGuidInGlobal(global, g) ~= nil
 end
 
 function GMS:EnsureGlobalCharacterRoot(guid)
@@ -450,10 +477,9 @@ function GMS:EnsureGlobalCharacterRoot(guid)
 	end
 	local global = self.db and self.db.global
 	if type(global) ~= "table" then return nil end
-	global.characters = type(global.characters) == "table" and global.characters or {}
-	global.characters[g] = type(global.characters[g]) == "table" and global.characters[g] or {}
-	self:RegisterKnownGuid(g)
-	return global.characters[g]
+	local normalized = EnsureGuidInGlobal(global, g)
+	if type(normalized) ~= "string" or normalized == "" then return nil end
+	return global.characters[normalized]
 end
 
 function GMS:SetCharacterDomainData(guid, domain, payload, meta)
@@ -517,9 +543,57 @@ function GMS:EnsureGlobalGuildRoot(guildId)
 	global.guilds = type(global.guilds) == "table" and global.guilds or {}
 	global.guilds[gid] = type(global.guilds[gid]) == "table" and global.guilds[gid] or {}
 	local root = global.guilds[gid]
-	root.meta = type(root.meta) == "table" and root.meta or {}
-	root.players = type(root.players) == "table" and root.players or {}
+	HydrateGuildMeta(self, root, gid)
+	root.players = nil
+	root.roster = type(root.roster) == "table" and root.roster or {}
 	return root
+end
+
+function GMS:UpsertGuildPlayer(guid, playerData, guildId)
+	local g = NormalizeGuid(guid)
+	if g == "" then return false end
+	if type(self.InitializeStandardDatabases) == "function" then
+		self:InitializeStandardDatabases(false)
+	end
+	local global = self.db and self.db.global
+	if type(global) ~= "table" then return false end
+	if not EnsureGuidInGlobal(global, g) then return false end
+
+	local gid = tostring(guildId or self:GetCurrentGuildId() or "")
+	if gid == "" then return false end
+	local gRoot = self:EnsureGlobalGuildRoot(gid)
+	if type(gRoot) ~= "table" then return false end
+	gRoot.roster = type(gRoot.roster) == "table" and gRoot.roster or {}
+
+	local row = type(gRoot.roster[g]) == "table" and gRoot.roster[g] or {}
+	gRoot.roster[g] = row
+	row.guid = g
+
+	local pd = type(playerData) == "table" and playerData or {}
+	local nameFull = tostring(pd.name_full or pd.nameFull or pd.name or row.name_full or "")
+	if nameFull ~= "" then row.name_full = nameFull end
+
+	if pd.rank ~= nil then row.rank = tostring(pd.rank or "") end
+	if pd.note ~= nil then row.note = tostring(pd.note or "") end
+	if pd.points ~= nil then row.points = tonumber(pd.points or 0) or 0 end
+
+	row.rank = tostring(row.rank or "")
+	row.note = tostring(row.note or "")
+	row.points = tonumber(row.points or 0) or 0
+
+	local ts = tonumber(pd.updatedAtTs or pd.ts or 0) or 0
+	if ts > 0 and ts < 1000000000 then
+		ts = 0
+	end
+	if ts <= 0 then
+		ts = self:GetServerTimestamp()
+	end
+	row.updatedAtTs = ts
+	row.updatedAt = tostring(pd.updatedAt or "")
+	if row.updatedAt == "" then
+		row.updatedAt = self:FormatServerTimestamp(ts)
+	end
+	return true
 end
 
 local function BuildLocalIdentity()
@@ -744,12 +818,11 @@ local function GetScopeRoot(self, scope)
 		return global.characters[cKey]
 	elseif scope == "GUILD" then
 		global.guilds = type(global.guilds) == "table" and global.guilds or {}
-		local gKey = self:GetGuildStorageKey()
+		local gKey = self:GetCurrentGuildId()
 		if type(gKey) ~= "string" or gKey == "" then
 			return nil
 		end
-		global.guilds[gKey] = type(global.guilds[gKey]) == "table" and global.guilds[gKey] or {}
-		return global.guilds[gKey]
+		return self:EnsureGlobalGuildRoot(gKey)
 	end
 	return nil
 end

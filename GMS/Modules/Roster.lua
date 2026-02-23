@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.1.26",
+	VERSION      = "1.1.29",
 }
 
 local LibStub = LibStub
@@ -359,15 +359,9 @@ local function GetStoredCharacterFallbackMeta(guid)
 	if type(char) ~= "table" then return nil end
 
 	local out = {}
-	local eq = type(char.EQUIPMENT) == "table" and char.EQUIPMENT or nil
+	local eq = type(char.EQUIPMENT_V2) == "table" and char.EQUIPMENT_V2 or nil
 	local eqData = (eq and type(eq.data) == "table") and eq.data or nil
-	local eqSnap = nil
-	if type(eqData) == "table" then
-		eqSnap = ResolveEquipmentSlotsTable(eqData)
-	elseif eq and type(eq.equipment) == "table" and type(eq.equipment.snapshot) == "table" then
-		-- Legacy fallback.
-		eqSnap = eq.equipment.snapshot
-	end
+	local eqSnap = ResolveEquipmentSlotsTable(eqData)
 	local ilvl = BuildItemLevelFromStoredSnapshot(eqSnap)
 	if ilvl and ilvl > 0 then out.ilvl = ilvl end
 
@@ -998,8 +992,8 @@ function Roster:SetMemberMeta(guid, meta, seenAt, opts)
 	if type(guid) ~= "string" or guid == "" then return false end
 	if type(meta) ~= "table" then return false end
 	opts = type(opts) == "table" and opts or {}
-	if GMS and type(GMS.RegisterKnownGuid) == "function" then
-		GMS:RegisterKnownGuid(guid)
+	if GMS and type(GMS.EnsureGlobalCharacterRoot) == "function" then
+		GMS:EnsureGlobalCharacterRoot(guid)
 	end
 
 	local store = self:GetMemberMetaStore()
@@ -1061,20 +1055,14 @@ function Roster:SetMemberMeta(guid, meta, seenAt, opts)
 		is_self_report = isSelfReport,
 	}
 	row.seenAt = t
-	if GMS and type(GMS.GetCurrentGuildId) == "function" and type(GMS.EnsureGlobalGuildRoot) == "function" then
-		local guildId = tostring(GMS:GetCurrentGuildId() or "")
-		local gRoot = (guildId ~= "") and GMS:EnsureGlobalGuildRoot(guildId) or nil
-		if type(gRoot) == "table" and type(gRoot.players) == "table" then
-			gRoot.players[guid] = gRoot.players[guid] or {}
-			local gp = gRoot.players[guid]
-			gp.guid = guid
-			gp.name_full = tostring(row.name_full or row.name or "")
-			gp.rank = tostring(row.rank or gp.rank or "")
-			gp.note = tostring(row.note or gp.note or "")
-			gp.points = tonumber(row.points or gp.points or 0) or 0
-			gp.updatedAtTs = tonumber(t) or 0
-			gp.updatedAt = (type(GMS.FormatServerTimestamp) == "function") and GMS:FormatServerTimestamp(gp.updatedAtTs) or ""
-		end
+	if GMS and type(GMS.UpsertGuildPlayer) == "function" then
+		GMS:UpsertGuildPlayer(guid, {
+			name_full = tostring(row.name_full or row.name or ""),
+			rank = tostring(row.rank or ""),
+			note = tostring(row.note or ""),
+			points = tonumber(row.points or 0) or 0,
+			updatedAtTs = tonumber(t) or 0,
+		})
 	end
 	return true
 end

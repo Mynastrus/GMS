@@ -31,11 +31,20 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - Roster fallback readers/writers in `GMS/Modules/Roster.lua` aligned to canonical character domain nodes (`CHARINFO`, `EQUIPMENT`) with legacy-read fallback only.
 - Equipment V2 wire payload in `GMS/Modules/Equipment.lua` switched to compact slot-map only (`EQUIPMENT_V2.data` now directly contains slot entries, no wrapper fields like `module/reason/snapshot/version`).
 - Equipment domain fallback readers in `GMS/Modules/Roster.lua` and `GMS/Modules/CharInfo.lua` now accept both canonical compact slot-map and legacy wrapped snapshot payloads.
+- Hard cutover to `EQUIPMENT_V2` completed: `GMS/Modules/Equipment.lua` now persists only `global.characters[guid].EQUIPMENT_V2`; `GMS/Modules/Roster.lua` and `GMS/Modules/CharInfo.lua` no longer read legacy `EQUIPMENT` buckets/snapshots.
+- Canonical schema updated in `GMS_DB_SCHEMA.md`: equipment domain key is `EQUIPMENT_V2` only; legacy `EQUIPMENT` is explicitly removed.
+- `GMS/Modules/Equipment.lua` options scope moved from `CHAR` to `PROFILE` and now purges legacy `global.characters[guid].EQUIPMENT` nodes to prevent old option payload reappearing after DB reset.
+- Canonical naming aligned with runtime intent: `global.chars` renamed to `global.accountChars` (local account GUIDs only), and guild member table renamed from `global.guilds[guildClubId].players` to `global.guilds[guildClubId].roster` (hard cut, no migration).
 
 ### Fixed
 - DB wipe/reset in `GMS/Core/Database.lua` now performs a hard reset of `GMS_DB`, `GMS_Logging_DB`, and `GMS_UIDB` roots and clears runtime DB handles to avoid stale AceDB proxy data after reset.
 - CHARINFO local bootstrap in `GMS/Modules/CharInfo.lua` now persists local version metadata through canonical `global.characters[guid].CHARINFO = { data, meta }`.
 - DB Inspector serialization in `GMS/Core/Database.lua` now shows raw item strings (e.g. `item:...`) instead of UI-resolved item hyperlinks.
+- Guild storage normalization in `GMS/Core/Database.lua` now enforces numeric `guildClubId` keys only, migrates legacy string buckets (e.g. `Realm|Faction|Guild`) into the active club-id bucket, and removes deprecated string-key buckets.
+- Guild root metadata hydration added in `GMS/Core/Database.lua`: `global.guilds[guildClubId].meta` is now auto-populated (`guildClubId`, `name`, `realm`, `faction`, `displayKey`, `updatedAt`) and no longer remains empty after initialization.
+- Guild root metadata in `GMS/Core/Database.lua` now also persists `updatedAtTs` alongside `updatedAt`.
+- Character/guild indexing is now consistent across read/receive/save paths: `global.characters[guid]` is auto-created for known guild/player GUIDs, and `global.guilds[guildClubId].players[guid]` is upserted centrally via `GMS:UpsertGuildPlayer(...)` from DB/Comm/Roster/GuildLog flows.
+- Roster ingest in `GMS/Modules/Roster.lua` now ensures `global.characters[guid]` directly and no longer writes remote guild GUIDs into `global.accountChars`.
 
 ### Rules/Infra
 - DB schema policy hardened in `GMS_DB_SCHEMA.md`: hard cutover only, no migration layer, and mandatory sync block for older GMS versions.

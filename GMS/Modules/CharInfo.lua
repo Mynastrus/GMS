@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.21",
+	VERSION      = "1.1.22",
 }
 
 local LibStub = LibStub
@@ -2277,17 +2277,6 @@ local function BuildCharData(player, ctxGuid, ctxName)
 
 		local equip = GMS and GMS:GetModule("Equipment", true) or nil
 		local eqSnapshot = equip and equip._options and equip._options.equipment and equip._options.equipment.snapshot or nil
-		if type(eqSnapshot) ~= "table" then
-			local eqBucket = GetCharScopedModuleBucket(playerGuid, "EQUIPMENT")
-			if type(eqBucket) == "table" then
-				local slotPayload = ResolveEquipmentSlotsTable(eqBucket)
-					or (type(eqBucket.equipment) == "table" and type(eqBucket.equipment.snapshot) == "table" and ResolveEquipmentSlotsTable(eqBucket.equipment.snapshot))
-				if type(slotPayload) == "table" then
-					eqSnapshot = slotPayload
-					data.equipment.source = "Saved character DB"
-				end
-			end
-		end
 		if type(eqSnapshot) ~= "table" and type(equip) == "table" and type(equip._mem) == "table"
 			and type(equip._mem.snapshot) == "table" then
 			eqSnapshot = equip._mem.snapshot
@@ -2297,7 +2286,6 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			local payloadLocalE, payloadLocalESource = GetLatestOrCachedDomainPayload("EQUIPMENT_V2", playerGuid)
 			if type(payloadLocalE) == "table" then
 				local slots = ResolveEquipmentSlotsTable(payloadLocalE)
-					or (type(payloadLocalE.snapshot) == "table" and ResolveEquipmentSlotsTable(payloadLocalE.snapshot))
 				if type(slots) == "table" then
 					eqSnapshot = slots
 					data.equipment.source = (payloadLocalESource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V2"
@@ -2473,7 +2461,6 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		local payloadEquip, payloadEquipSource = GetLatestOrCachedDomainPayload("EQUIPMENT_V2", targetGuid)
 		if type(payloadEquip) == "table" then
 			local slotPayload = ResolveEquipmentSlotsTable(payloadEquip)
-				or (type(payloadEquip.snapshot) == "table" and ResolveEquipmentSlotsTable(payloadEquip.snapshot))
 			if type(slotPayload) == "table" then
 				local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(slotPayload)
 				if ilvl and ilvl > 0 then
@@ -2485,30 +2472,6 @@ local function BuildCharData(player, ctxGuid, ctxName)
 				data.equipment.source = (payloadEquipSource == "cache") and "Saved character DB" or "Synced EQUIPMENT_V2"
 			end
 		end
-		if not data.equipment.hasData then
-			local eqBucket = GetCharScopedModuleBucket(targetGuid, "EQUIPMENT")
-			local eqSnapshot = nil
-			if type(eqBucket) == "table" then
-				local slotPayload = ResolveEquipmentSlotsTable(eqBucket)
-					or (type(eqBucket.equipment) == "table" and type(eqBucket.equipment.snapshot) == "table" and ResolveEquipmentSlotsTable(eqBucket.equipment.snapshot))
-				if type(slotPayload) == "table" then
-					eqSnapshot = slotPayload
-				end
-			end
-			if type(eqSnapshot) == "table" then
-				local rows, ilvl, slots = BuildEquipmentRowsFromSnapshot(eqSnapshot)
-				if ilvl and ilvl > 0 then
-					data.equipment.ilvl = ilvl
-				end
-				data.equipment.rows = rows
-				data.equipment.slots = slots
-				data.equipment.hasData = (#rows > 0) or (data.equipment.ilvl and data.equipment.ilvl > 0) or data.equipment.hasData
-				if data.equipment.hasData then
-					data.equipment.source = "Saved character DB"
-				end
-			end
-		end
-
 		-- CharInfo bootstrap: exactly one request per target/context-open.
 		local needsBootstrap = false
 		if type(payloadMeta) ~= "table" then needsBootstrap = true end
@@ -4131,5 +4094,4 @@ function CHARINFO:OnDisable()
 	self._ticker = nil
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
-
 

@@ -9,7 +9,7 @@ Implementation policy: hard cutover, no migration.
 ```lua
 GMS_DB = {
   global = {
-    chars = { "Player-...", "Player-..." },
+    accountChars = { "Player-...", "Player-..." },
     guilds = { ["<guildClubId>"] = { ... } },
     characters = { ["Player-..."] = { ... } },
   },
@@ -23,8 +23,8 @@ GMS_DB = {
 
 ## 2) Responsibilities per tree
 
-- `global.chars`
-  - Purpose: list of all known GUIDs only.
+- `global.accountChars`
+  - Purpose: list of own account GUIDs of this client only.
   - No domain payload here.
 
 - `global.guilds`
@@ -36,6 +36,7 @@ GMS_DB = {
   - Purpose: general character data per GUID (synced, parsed, self-related).
   - Domain payload lives here (`identity`, `equipment`, `raids`, `mythicplus`, etc.).
   - Every domain submenu must include data origin + last update metadata.
+  - Equipment domain key is mandatory `EQUIPMENT_V2` (hard cut).
 
 - `char["<CharName> - <Realm>"].chars`
   - Purpose: local account tree of the current client only.
@@ -54,7 +55,7 @@ global.guilds[guildId] = {
     displayKey = "Norgannon|Alliance|Holy Storm", -- from guild context
     updatedAt = "2026-02-23 21:14:05",
   },
-  players = {
+  roster = {
     ["Player-1408-0A5D1356"] = {
       note = "Core Raider",
       points = 120,
@@ -132,6 +133,7 @@ links = {
 - No migration layer is allowed.
 - Legacy DB trees are not read.
 - Legacy DB trees are not transformed.
+- Legacy equipment domain `EQUIPMENT` is removed and must not be read or written.
 - On rollout, only this schema is considered valid.
 - Existing persisted data outside this schema may be discarded/reset.
 
