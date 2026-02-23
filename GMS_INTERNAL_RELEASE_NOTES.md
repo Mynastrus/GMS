@@ -19,7 +19,8 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - Mandatory per-domain metadata documented (`data` + `meta` with `sourceGuid`, `sourceName`, `updatedAt`).
 
 ### Changed
-- [ ] (noch keine Eintraege)
+- Sync protocol rules moved/refined in `GMS_PLAYER_SYNC_BASELINE.md` (strict version gate, `*_V2` domain namespace, minimal `ANN/REQ/PUSH` flow, ANN header contract).
+- `GMS_DB_SCHEMA.md` adjusted to reference sync protocol ownership in `GMS_PLAYER_SYNC_BASELINE.md`.
 
 ### Fixed
 - [ ] (noch keine Eintraege)

@@ -142,3 +142,6 @@ links = {
 - If sender version is below required version:
   - ignore payload
   - optionally log a concise incompatibility warning
+
+Note: detailed transport/protocol rules (domain namespace, opcode flow, compatibility gates)
+are specified in `GMS_PLAYER_SYNC_BASELINE.md`.

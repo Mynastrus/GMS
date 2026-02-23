@@ -40,6 +40,32 @@ Beispielhafte Accountfelder (gemäß GMS-Kontext):
 - `raid`
 - `mplus`
 
+## Protokoll- und Versionsregeln (Pflicht)
+
+1. Harte Kompatibilitaetsgrenze
+   - Sync-Payloads von aelteren, nicht kompatiblen GMS-Versionen werden verworfen.
+   - Verarbeitung startet erst nach erfolgreichem Versions-Gate.
+
+2. Domain-Namespace
+   - Domain-Identifier sind schema-versioniert.
+   - Fuer den Hard-Cut sind ausschliesslich `*_V2` Domains gueltig.
+   - Beispiele: `EQUIPMENT_V2`, `RAIDS_V2`, `MYTHICPLUS_V2`, `ACCOUNT_CHARS_V2`.
+   - `*_V1` Domains gelten als Legacy und werden nicht verarbeitet.
+
+3. Minimaler Sync-Flow
+   - `ANN` (Announce): Header-only (kein Payload), kuendigt neuen Stand an.
+   - `REQ` (Request): Empfaenger fordert Datensatz gezielt an, falls lokal fehlend/aelter.
+   - `PUSH` (Push): Sender liefert Datensatz.
+   - Grosse Payloads werden als gechunkter `PUSH` uebertragen (kein separater Legacy-Flow erforderlich).
+
+4. Header-Felder fuer `ANN` (Header-only)
+   - `guid`
+   - `domain`
+   - `ver`
+   - `updatedAtTs`
+   - `checksum`
+   - `size`
+
 ## Twink-Verifikation (GuildRoster-Regel)
 
 - Persistenz/Source of Truth für Twink-Daten liegt in `AccountInfo`.
