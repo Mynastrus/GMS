@@ -29,6 +29,7 @@ if not GMS then return end
 ---@diagnostic disable: undefined-global
 local _G                            = _G
 local GetTime                       = GetTime
+local GetServerTime                 = GetServerTime
 local type                          = type
 local tostring                      = tostring
 local select                        = select
@@ -78,7 +79,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.22",
+	VERSION      = "1.2.23",
 }
 
 -- ###########################################################################
@@ -1006,17 +1007,26 @@ end
 -- # CLEANUP: remove expired CURRENT lockouts (best persists)
 -- ###########################################################################
 
-local function cleanupExpiredCurrent(raidEntry, tsNow, graceSeconds)
+local function cleanupExpiredCurrent(raidEntry, tsNow, tsNowServer, graceSeconds)
 	graceSeconds = graceSeconds or 60
 	if type(raidEntry) ~= "table" then return end
 	if type(raidEntry.current) ~= "table" then return end
-	if type(tsNow) ~= "number" then return end
+	if type(tsNow) ~= "number" and type(tsNowServer) ~= "number" then return end
 
 	for diffID, cur in pairs(raidEntry.current) do
 		if type(cur) == "table" then
-			local resetAt = cur.resetAt
-			if type(resetAt) == "number" and tsNow > (resetAt + graceSeconds) then
-				raidEntry.current[diffID] = nil
+			local resetAt = tonumber(cur.resetAt)
+			if type(resetAt) == "number" and resetAt > 0 then
+				-- New format: server epoch seconds. Legacy format: GetTime()-based runtime seconds.
+				local cmpNow = nil
+				if resetAt >= 1000000000 then
+					cmpNow = tonumber(tsNowServer)
+				else
+					cmpNow = tonumber(tsNow)
+				end
+				if type(cmpNow) == "number" and cmpNow > (resetAt + graceSeconds) then
+					raidEntry.current[diffID] = nil
+				end
 			end
 		end
 	end
@@ -2314,11 +2324,12 @@ function RAIDS:OnUpdateInstanceInfo()
 		return
 	end
 	local tsNow = now()
+	local tsNowServer = (type(GetServerTime) == "function" and tonumber(GetServerTime()) or nil)
 
 	-- Cleanup expired current lockouts (do not touch best)
 	for _, raidEntry in pairs(raidsStore) do
 		if type(raidEntry) == "table" then
-			cleanupExpiredCurrent(raidEntry, tsNow, 60)
+			cleanupExpiredCurrent(raidEntry, tsNow, tsNowServer, 60)
 		end
 	end
 
@@ -2462,8 +2473,13 @@ function RAIDS:OnUpdateInstanceInfo()
 						cur.bosses       = bosses
 						cur.resetSeconds = tonumber(reset) or reset
 
-						if type(tsNow) == "number" and type(reset) == "number" then
-							cur.resetAt = tsNow + reset
+						if type(reset) == "number" then
+							if type(tsNowServer) == "number" and tsNowServer > 0 then
+								cur.resetAt = tsNowServer + reset
+							elseif type(tsNow) == "number" then
+								-- Legacy fallback if server time is unavailable.
+								cur.resetAt = tsNow + reset
+							end
 						end
 
 						raidEntry.lastScan = tsNow

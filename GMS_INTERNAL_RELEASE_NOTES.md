@@ -46,6 +46,8 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - Roster ingest in `GMS/Modules/Roster.lua` now ensures `global.characters[guid]` directly and no longer writes remote guild GUIDs into `global.accountChars`.
 - CharInfo Mythic+ rendering in `GMS/Modules/CharInfo.lua` was stabilized after reloads, migrated to split V/T columns, centered total score display, and Blizzard-style score coloring for totals and key-level colors.
 - RAIDS_V2 sync payload in `GMS/Modules/Raids.lua` now publishes compact one-line `data[raidId]` entries consistently, while `GMS/Modules/Roster.lua` accepts both legacy and compact RAIDS_V2 payload formats.
+- RAIDS lockout timing now uses absolute server time in `GMS/Modules/Raids.lua` (`resetAt = GetServerTime() + resetSeconds`) with legacy-safe cleanup logic for older runtime-time entries.
+- CharInfo raid lockout rendering in `GMS/Modules/CharInfo.lua` now filters expired lockouts reliably and supports both compact `c<diff>=k/t/l/e/r` and extended `c<diff>=k/t/l/e/r/bossCsv` RAIDS_V2 formats.
 
 ### Rules/Infra
 - DB schema policy hardened in `GMS_DB_SCHEMA.md`: hard cutover only, no migration layer, and mandatory sync block for older GMS versions.

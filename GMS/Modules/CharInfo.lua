@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.40",
+	VERSION      = "1.1.41",
 }
 
 local LibStub = LibStub
@@ -686,8 +686,19 @@ local function DecodeRaidV2LineEntry(instanceID, packed)
 				end
 			elseif key:match("^c%d+$") then
 				local d = tonumber(key:sub(2))
-				local k, t, l, e, r, bcsv = val:match("^(%-?%d+)%/(%-?%d+)%/(%-?%d+)%/(%-?%d+)%/(%-?%d+)%/(.*)$")
-				k, t, l, e, r = tonumber(k), tonumber(t), tonumber(l), tonumber(e), tonumber(r)
+				-- Accept both compact variants:
+				-- c<diff>=k/t/l/e/r
+				-- c<diff>=k/t/l/e/r/bossCsv
+				local seg = {}
+				for token in string.gmatch(tostring(val or ""), "([^/]+)") do
+					seg[#seg + 1] = token
+				end
+				local k = tonumber(seg[1])
+				local t = tonumber(seg[2])
+				local l = tonumber(seg[3])
+				local e = tonumber(seg[4])
+				local r = tonumber(seg[5])
+				local bcsv = seg[6] or ""
 				if d then
 					local bosses = {}
 					for token in string.gmatch(tostring(bcsv or ""), "([^,]+)") do
@@ -1535,6 +1546,8 @@ local function BuildRaidRows(all, catalog)
 	if type(catalog) ~= "table" then
 		catalog = BuildRaidCatalogLookup()
 	end
+	local nowTs = tonumber((type(GetTime) == "function" and GetTime()) or 0) or 0
+	local nowServerTs = tonumber((type(GetServerTime) == "function" and GetServerTime()) or 0) or 0
 
 	local function NormalizeRaidNameKey(name)
 		local s = string.lower(tostring(name or ""))
@@ -1558,6 +1571,27 @@ local function BuildRaidRows(all, catalog)
 		return nil
 	end
 
+	local function IsCurrentLockoutActive(cur)
+		if type(cur) ~= "table" then return false end
+		local resetAt = tonumber(cur.resetAt or cur.resetSeconds) or 0
+		if resetAt > 0 then
+			if resetAt >= 1000000000 then
+				-- New format: absolute server epoch.
+				return nowServerTs > 0 and resetAt > (nowServerTs + 1)
+			end
+			-- Legacy format: GetTime()-based value from older versions.
+			-- Only valid within the same session.
+			return resetAt > (nowTs + 1)
+		end
+		if cur.locked == true or cur.extended == true then
+			return true
+		end
+		-- Legacy fallback without timing flags.
+		local killed = tonumber(cur.killed) or 0
+		local total = tonumber(cur.total) or 0
+		return killed > 0 and total > 0
+	end
+
 	local STATIC_RAID_META_BY_INSTANCE = {
 		[2657] = {
 			name = LT("CHARINFO_RAID_NAME_NERUBAR", "Palast der Nerub'ar"),
@@ -1572,6 +1606,14 @@ local function BuildRaidRows(all, catalog)
 			description = LT("CHARINFO_RAID_DESC_MANAFORGE_OMEGA", "Eine Titanen-Manaschmiede mit arkanen Sicherheitsmechanismen."),
 		},
 	}
+	local STATIC_NAME_NORM_TO_INSTANCE = {}
+	for iid, meta in pairs(STATIC_RAID_META_BY_INSTANCE) do
+		local nm = type(meta) == "table" and tostring(meta.name or "") or ""
+		local nn = NormalizeRaidNameKey(nm)
+		if nn ~= "" then
+			STATIC_NAME_NORM_TO_INSTANCE[nn] = tonumber(iid) or iid
+		end
+	end
 	local ACTIVE_RAID_ORDER = { 2810, 2769, 2657 } -- newest -> oldest (current retail season set)
 	local ACTIVE_RAID_SET = {}
 	for i = 1, #ACTIVE_RAID_ORDER do
@@ -1706,6 +1748,9 @@ local function BuildRaidRows(all, catalog)
 						end
 					end
 				end
+				if not instanceID and normalizedName ~= "" then
+					instanceID = tonumber(STATIC_NAME_NORM_TO_INSTANCE[normalizedName]) or nil
+				end
 			end
 			if instanceID and ACTIVE_RAID_SET[instanceID] then
 				local raidName = tostring(entry.name or "")
@@ -1736,25 +1781,27 @@ local function BuildRaidRows(all, catalog)
 				if type(entry.current) == "table" then
 					for rawDiffID, cur in pairs(entry.current) do
 						if type(cur) == "table" then
-							local canonicalDiffID = CanonicalRaidDiffID(rawDiffID, cur.diffTag)
-							if canonicalDiffID then
-								local cKilled = tonumber(cur.killed) or 0
-								local cTotal = tonumber(cur.total) or tonumber(row.total) or 0
-								local prev = row.current[canonicalDiffID]
-								local pKilled = tonumber(prev and prev.killed or 0) or 0
-								local pTotal = tonumber(prev and prev.total or 0) or 0
-								if (cKilled > pKilled) or (cKilled == pKilled and cTotal > pTotal) then
-									row.current[canonicalDiffID] = {
-										text = FormatRaidProgress(cKilled, cTotal),
-										killed = cKilled,
-										total = cTotal,
-										bosses = type(cur.bosses) == "table" and cur.bosses or {},
-									}
-								elseif type(cur.bosses) == "table" and type(prev) == "table" then
-									prev.bosses = type(prev.bosses) == "table" and prev.bosses or {}
-									for encID, isKilled in pairs(cur.bosses) do
-										if isKilled then
-											prev.bosses[encID] = true
+							if IsCurrentLockoutActive(cur) then
+								local canonicalDiffID = CanonicalRaidDiffID(rawDiffID, cur.diffTag)
+								if canonicalDiffID then
+									local cKilled = tonumber(cur.killed) or 0
+									local cTotal = tonumber(cur.total) or tonumber(row.total) or 0
+									local prev = row.current[canonicalDiffID]
+									local pKilled = tonumber(prev and prev.killed or 0) or 0
+									local pTotal = tonumber(prev and prev.total or 0) or 0
+									if (cKilled > pKilled) or (cKilled == pKilled and cTotal > pTotal) then
+										row.current[canonicalDiffID] = {
+											text = FormatRaidProgress(cKilled, cTotal),
+											killed = cKilled,
+											total = cTotal,
+											bosses = type(cur.bosses) == "table" and cur.bosses or {},
+										}
+									elseif type(cur.bosses) == "table" and type(prev) == "table" then
+										prev.bosses = type(prev.bosses) == "table" and prev.bosses or {}
+										for encID, isKilled in pairs(cur.bosses) do
+											if isKilled then
+												prev.bosses[encID] = true
+											end
 										end
 									end
 								end
