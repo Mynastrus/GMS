@@ -9,7 +9,7 @@ local METADATA = {
 	INTERN_NAME  = "DB",
 	SHORT_NAME   = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION      = "1.1.25",
+	VERSION      = "1.1.26",
 }
 
 -- Blizzard Globals
@@ -217,6 +217,16 @@ function GMS:InitializeStandardDatabases(force)
 			self.db.global.guilds = rawDB.global.guilds
 		end
 
+		local function IsCharacterNodeEmpty(node)
+			if type(node) ~= "table" then return true end
+			for _, v in pairs(node) do
+				if v ~= nil then
+					return false
+				end
+			end
+			return true
+		end
+
 		-- Hard cutover: guild buckets are keyed by guildClubId only.
 		local currentGuildId = self:GetCurrentGuildId()
 		local guilds = rawDB.global.guilds
@@ -233,19 +243,28 @@ function GMS:InitializeStandardDatabases(force)
 					guilds[k] = nil
 				end
 			end
-			-- Ensure guild roster GUIDs are always mirrored in global.characters.
+			-- Normalize guild roster GUID keys; do not create empty character roots.
 			for _, gRoot in pairs(guilds) do
 				if type(gRoot) == "table" then
 					gRoot.players = nil
 					gRoot.roster = type(gRoot.roster) == "table" and gRoot.roster or {}
 					for pGuid, pRow in pairs(gRoot.roster) do
-						local normalized = EnsureGuidInGlobal and EnsureGuidInGlobal(global, pGuid) or nil
+						local normalized = NormalizeGuid and NormalizeGuid(pGuid) or nil
 						if type(normalized) == "string" and normalized ~= "" and normalized ~= pGuid then
 							gRoot.roster[normalized] = type(gRoot.roster[normalized]) == "table" and gRoot.roster[normalized] or {}
 							MergeGuildBuckets(gRoot.roster[normalized], pRow)
 							gRoot.roster[pGuid] = nil
 						end
 					end
+				end
+			end
+		end
+
+		-- Remove empty character roots to keep global.characters clean.
+		if type(global.characters) == "table" then
+			for guid, node in pairs(global.characters) do
+				if IsCharacterNodeEmpty(node) then
+					global.characters[guid] = nil
 				end
 			end
 		end
@@ -557,7 +576,6 @@ function GMS:UpsertGuildPlayer(guid, playerData, guildId)
 	end
 	local global = self.db and self.db.global
 	if type(global) ~= "table" then return false end
-	if not EnsureGuidInGlobal(global, g) then return false end
 
 	local gid = tostring(guildId or self:GetCurrentGuildId() or "")
 	if gid == "" then return false end

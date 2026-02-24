@@ -3,7 +3,7 @@
 --  RAIDS MODULE (Ace)
 --  - Kein UI
 --  - Nur aktueller Spieler (charKey = UnitGUID("player"))
---  - Persistenz: GMS_DB.global.characters[charKey].RAIDS
+--  - Persistenz: GMS_DB.global.characters[charKey].RAIDS_V2
 --  - Key pro Raid: Encounter Journal instanceID (EJ)
 --  - Current (lockout-spezifisch) pro Difficulty: "H 3/8", Boss-Kills, resetAt
 --  - Best (persistiert) pro Raid: höchste Difficulty + Progress (zuerst diff, dann killed)
@@ -78,7 +78,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.19",
+	VERSION      = "1.2.22",
 }
 
 -- ###########################################################################
@@ -144,16 +144,6 @@ if GMS and type(GMS.RegisterModule) == "function" then
 	GMS:RegisterModule(RAIDS, METADATA)
 end
 
-local OPTIONS_DEFAULTS = {
-	scanLegacy = { type = "toggle", name = "Legacy Raids scannen", default = false },
-	rebuild = { type = "execute", name = "Katalog neu aufbauen", func = function()
-		local R = GMS:GetModule("RAIDS", true)
-		if R then R:RebuildCatalog() end
-	end },
-	raids = {}, -- { [instanceID] = { current = {...}, best = {...} } }
-	lastScan = 0,
-}
-
 local STORE_POLL_MAX_TRIES = 25
 local STORE_POLL_INTERVAL = 1.0
 local STATS_ENRICH_LOGIN_GRACE = 30
@@ -177,23 +167,293 @@ local RAID_STATS_CATEGORY_KEYWORDS = {
 RAIDS._catalog = nil
 
 function RAIDS:InitializeOptions()
-	-- Register character-scoped raid options
-	if GMS and type(GMS.RegisterModuleOptions) == "function" then
-		pcall(function()
-			GMS:RegisterModuleOptions("RAIDS", OPTIONS_DEFAULTS, "CHAR")
-		end)
+	self._options = self._options or {}
+	LOCAL_LOG("INFO", "Raids options initialized (RAIDS_V2 char scope)")
+end
+
+local function EnsureRaidsV2Store(charStore)
+	if type(charStore) ~= "table" then
+		return nil, false
+	end
+	local migrated = false
+	local legacyStore = type(charStore.RAIDS) == "table" and charStore.RAIDS or nil
+	local raidsNode = type(charStore.RAIDS_V2) == "table" and charStore.RAIDS_V2 or nil
+	if type(raidsNode) ~= "table" then
+		raidsNode = { data = {}, meta = {} }
+		charStore.RAIDS_V2 = raidsNode
+	end
+	raidsNode.data = type(raidsNode.data) == "table" and raidsNode.data or {}
+	raidsNode.meta = type(raidsNode.meta) == "table" and raidsNode.meta or {}
+
+	local function split(s, sep)
+		local out = {}
+		local str = tostring(s or "")
+		if str == "" then return out end
+		local start = 1
+		while true do
+			local p = string.find(str, sep, start, true)
+			if not p then
+				out[#out + 1] = string.sub(str, start)
+				break
+			end
+			out[#out + 1] = string.sub(str, start, p - 1)
+			start = p + #sep
+		end
+		return out
 	end
 
-	-- Retrieve options table
-	if GMS and type(GMS.GetModuleOptions) == "function" then
-		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "RAIDS")
-		if ok and opts then
-			self._options = opts
-			LOCAL_LOG("INFO", "Raids options initialized (CHAR scope)")
-		else
-			LOCAL_LOG("WARN", "Failed to retrieve Raids options")
+	local function encodeBosses(bosses)
+		if type(bosses) ~= "table" then return "" end
+		local ids = {}
+		for encID, killed in pairs(bosses) do
+			if killed then
+				local n = tonumber(encID)
+				if n then ids[#ids + 1] = n end
+			end
+		end
+		table.sort(ids)
+		local out = {}
+		for i = 1, #ids do out[i] = tostring(ids[i]) end
+		return table.concat(out, ",")
+	end
+
+	local function decodeBosses(csv)
+		local out = {}
+		local s = tostring(csv or "")
+		if s == "" then return out end
+		for token in string.gmatch(s, "([^,]+)") do
+			local n = tonumber(token)
+			if n then out[n] = true end
+		end
+		return out
+	end
+
+	local function serializeRaidEntry(entry)
+		if type(entry) ~= "table" then return "" end
+		local parts = {}
+		parts[#parts + 1] = "v=1"
+		parts[#parts + 1] = "t=" .. tostring(tonumber(entry.total) or 0)
+		parts[#parts + 1] = "ls=" .. tostring(tonumber(entry.lastScan) or 0)
+		local current = type(entry.current) == "table" and entry.current or {}
+		local diffs = { 17, 14, 15, 16 }
+		for i = 1, #diffs do
+			local d = diffs[i]
+			local cur = current[d]
+			if type(cur) == "table" then
+				local k = tonumber(cur.killed) or 0
+				local t = tonumber(cur.total) or 0
+				local l = (cur.locked == true) and 1 or 0
+				local e = (cur.extended == true) and 1 or 0
+				local r = tonumber(cur.resetAt or cur.resetSeconds) or 0
+				local b = encodeBosses(cur.bosses)
+				parts[#parts + 1] = "c" .. tostring(d) .. "=" .. table.concat({ tostring(k), tostring(t), tostring(l), tostring(e), tostring(r), b }, "/")
+			end
+		end
+		local bestStats = type(entry.bestStats) == "table" and entry.bestStats or nil
+		if bestStats then
+			parts[#parts + 1] = "b=" .. table.concat({
+				tostring(tonumber(bestStats.diffID) or 0),
+				tostring(tonumber(bestStats.killed) or 0),
+				tostring(tonumber(bestStats.total) or 0),
+			}, "/")
+		end
+		local bestStatsByDiff = type(entry.bestStatsByDiff) == "table" and entry.bestStatsByDiff or nil
+		if bestStatsByDiff then
+			local diffs = { 17, 14, 15, 16 }
+			for i = 1, #diffs do
+				local d = diffs[i]
+				local node = bestStatsByDiff[d]
+				if type(node) == "table" then
+					parts[#parts + 1] = "bs" .. tostring(d) .. "=" .. table.concat({
+						tostring(tonumber(node.killed) or 0),
+						tostring(tonumber(node.total) or 0),
+					}, "/")
+				end
+			end
+		end
+		return table.concat(parts, ";")
+	end
+
+	local function deserializeRaidEntry(instanceID, line)
+		local function localDiffTag(d)
+			local n = tonumber(d) or 0
+			if n == 17 then return "LFR" end
+			if n == 14 then return "N" end
+			if n == 15 then return "H" end
+			if n == 16 then return "M" end
+			return tostring(d or "?")
+		end
+		local entry = {
+			instanceID = tonumber(instanceID) or instanceID,
+			name = tostring(instanceID),
+			total = 0,
+			current = {},
+			bestStatsByDiff = {},
+		}
+		local text = tostring(line or "")
+		if text == "" then
+			return entry
+		end
+		for _, part in ipairs(split(text, ";")) do
+			local k, v = part:match("^([^=]+)=(.*)$")
+			if k and v then
+				if k == "t" then
+					entry.total = tonumber(v) or entry.total
+				elseif k == "ls" then
+					entry.lastScan = tonumber(v) or entry.lastScan
+				elseif k == "b" then
+					local seg = split(v, "/")
+					local d = tonumber(seg[1])
+					if d then
+						entry.bestStats = {
+							diffID = d,
+							diffTag = localDiffTag(d),
+							killed = tonumber(seg[2]) or 0,
+							total = tonumber(seg[3]) or 0,
+						}
+						entry.bestStats.short = localDiffTag(entry.bestStats.diffID) .. " " .. tostring(entry.bestStats.killed or 0) .. "/" .. tostring(entry.bestStats.total or 0)
+						entry.best = entry.bestStats
+						entry.bestSource = "stats"
+					end
+				elseif k:match("^bs%d+$") then
+					local d = tonumber(k:sub(3))
+					local seg = split(v, "/")
+					if d then
+						local killed = tonumber(seg[1]) or 0
+						local total = tonumber(seg[2]) or 0
+						entry.bestStatsByDiff[d] = {
+							diffID = d,
+							diffTag = localDiffTag(d),
+							killed = killed,
+							total = total,
+							short = localDiffTag(d) .. " " .. tostring(killed or 0) .. "/" .. tostring(total or 0),
+						}
+					end
+				elseif k:match("^c%d+$") then
+					local d = tonumber(k:sub(2))
+					local seg = split(v, "/")
+					if d then
+						entry.current[d] = {
+							diffID = d,
+							diffTag = localDiffTag(d),
+							killed = tonumber(seg[1]) or 0,
+							total = tonumber(seg[2]) or 0,
+							locked = tonumber(seg[3]) == 1,
+							extended = tonumber(seg[4]) == 1,
+							resetAt = tonumber(seg[5]) or 0,
+							bosses = decodeBosses(seg[6] or ""),
+						}
+						entry.current[d].short = localDiffTag(d) .. " " .. tostring(entry.current[d].killed or 0) .. "/" .. tostring(entry.current[d].total or 0)
+					end
+				end
+			end
+		end
+		return entry
+	end
+
+	local function buildLogicalRaids()
+		local logical = {}
+		local data = raidsNode.data
+
+		-- Current format: data[raidID] = "<one-line>"
+		for raidID, raw in pairs(data) do
+			if type(raidID) ~= "string" and type(raidID) ~= "number" then
+				-- skip
+			else
+				local key = tostring(raidID)
+				if type(raw) == "string" then
+					logical[tonumber(raidID) or key] = deserializeRaidEntry(raidID, raw)
+				elseif type(raw) == "table" and (type(raw.current) == "table" or type(raw.best) == "table" or type(raw.bestStats) == "table") then
+					logical[tonumber(raidID) or key] = raw
+					migrated = true
+				end
+			end
+		end
+
+		-- Legacy embedded "raids" table in RAIDS_V2.data
+		local legacyNested = type(data.raids) == "table" and data.raids or nil
+		if type(legacyNested) == "table" then
+			for raidID, entry in pairs(legacyNested) do
+				if type(entry) == "table" then
+					local key = tonumber(raidID) or tostring(raidID)
+					logical[key] = entry
+				end
+			end
+			migrated = true
+		end
+
+		-- Legacy RAIDS root
+		if type(legacyStore) == "table" and type(legacyStore.raids) == "table" then
+			for raidID, entry in pairs(legacyStore.raids) do
+				if type(entry) == "table" then
+					local key = tonumber(raidID) or tostring(raidID)
+					if type(logical[key]) ~= "table" then
+						logical[key] = entry
+					end
+				end
+			end
+			migrated = true
+		end
+		return logical
+	end
+
+	local logicalRaids = buildLogicalRaids()
+	local meta = raidsNode.meta
+	if meta.scanLegacy == nil then
+		meta.scanLegacy = (type(legacyStore) == "table" and legacyStore.scanLegacy == true) or false
+	end
+	meta.lastScan = tonumber(meta.lastScan) or tonumber(type(legacyStore) == "table" and legacyStore.lastScan) or 0
+	meta.lastDigest = tostring(meta.lastDigest or (type(legacyStore) == "table" and legacyStore.lastDigest) or "")
+	meta.module = METADATA.SHORT_NAME
+	meta.version = METADATA.VERSION
+
+	-- Enforce compact persisted structure: only raidid->line inside data.
+	local compact = {}
+	for raidID, entry in pairs(logicalRaids) do
+		if type(entry) == "table" then
+			compact[raidID] = serializeRaidEntry(entry)
 		end
 	end
+	raidsNode.data = compact
+	raidsNode.meta = meta
+
+	-- Legacy RAIDS persistence is removed; keep only RAIDS_V2.
+	charStore.RAIDS = nil
+
+	return {
+		node = raidsNode,
+		raids = logicalRaids,
+		meta = meta,
+		scanLegacy = meta.scanLegacy == true,
+		rebuild = { type = "execute", name = "Katalog neu aufbauen" },
+		module = METADATA.SHORT_NAME,
+		version = METADATA.VERSION,
+		lastScan = tonumber(meta.lastScan) or 0,
+		lastDigest = tostring(meta.lastDigest or ""),
+	}, migrated
+end
+
+local function PurgeLegacyRaidsStores()
+	if not GMS or type(GMS.db) ~= "table" or type(GMS.db.global) ~= "table" then
+		return 0
+	end
+	local chars = GMS.db.global.characters
+	if type(chars) ~= "table" then
+		return 0
+	end
+	local migratedCount = 0
+	for _, charStore in pairs(chars) do
+		if type(charStore) == "table" and type(charStore.RAIDS) == "table" then
+			local _, migrated = EnsureRaidsV2Store(charStore)
+			if migrated then
+				migratedCount = migratedCount + 1
+			end
+		elseif type(charStore) == "table" and charStore.RAIDS ~= nil then
+			charStore.RAIDS = nil
+			migratedCount = migratedCount + 1
+		end
+	end
+	return migratedCount
 end
 
 local function getDirectCharStore(charKey)
@@ -212,25 +472,102 @@ local function getDirectCharStore(charKey)
 		charStore = {}
 		global.characters[key] = charStore
 	end
-	local raidsStore = charStore.RAIDS
-	if type(raidsStore) ~= "table" then
-		raidsStore = {}
-		charStore.RAIDS = raidsStore
-	end
-	if raidsStore.scanLegacy == nil then raidsStore.scanLegacy = false end
-	if type(raidsStore.rebuild) ~= "table" then
-		raidsStore.rebuild = { type = "execute", name = "Katalog neu aufbauen" }
-	end
-	raidsStore.raids = type(raidsStore.raids) == "table" and raidsStore.raids or {}
-	raidsStore.lastScan = tonumber(raidsStore.lastScan) or 0
+	local raidsStore = EnsureRaidsV2Store(charStore)
 	return raidsStore
 end
 
 local function getRaidsStore()
-	local store = getDirectCharStore()
+	local store = (type(RAIDS._options) == "table" and type(RAIDS._options.raids) == "table") and RAIDS._options or getDirectCharStore()
 	if not store then return nil end
-	store.raids = store.raids or {}
+	store.raids = type(store.raids) == "table" and store.raids or {}
 	return store.raids
+end
+
+local function PersistRaidsV2Store(store)
+	if type(store) ~= "table" or type(store.node) ~= "table" then
+		return false
+	end
+	store.node.data = type(store.node.data) == "table" and store.node.data or {}
+	store.node.meta = type(store.node.meta) == "table" and store.node.meta or {}
+
+	local meta = store.node.meta
+	meta.scanLegacy = (store.scanLegacy == true)
+	meta.lastScan = tonumber(store.lastScan) or tonumber(meta.lastScan) or 0
+	meta.lastDigest = tostring(store.lastDigest or meta.lastDigest or "")
+	meta.module = METADATA.SHORT_NAME
+	meta.version = METADATA.VERSION
+
+	local function encodeBosses(bosses)
+		if type(bosses) ~= "table" then return "" end
+		local ids = {}
+		for encID, killed in pairs(bosses) do
+			if killed then
+				local n = tonumber(encID)
+				if n then ids[#ids + 1] = n end
+			end
+		end
+		table.sort(ids)
+		local out = {}
+		for i = 1, #ids do out[i] = tostring(ids[i]) end
+		return table.concat(out, ",")
+	end
+
+	local function serializeRaidEntry(entry)
+		if type(entry) ~= "table" then return "" end
+		local parts = {}
+		parts[#parts + 1] = "v=1"
+		parts[#parts + 1] = "t=" .. tostring(tonumber(entry.total) or 0)
+		parts[#parts + 1] = "ls=" .. tostring(tonumber(entry.lastScan) or 0)
+		local current = type(entry.current) == "table" and entry.current or {}
+		local diffs = { 17, 14, 15, 16 }
+		for i = 1, #diffs do
+			local d = diffs[i]
+			local cur = current[d]
+			if type(cur) == "table" then
+				local k = tonumber(cur.killed) or 0
+				local t = tonumber(cur.total) or 0
+				local l = (cur.locked == true) and 1 or 0
+				local e = (cur.extended == true) and 1 or 0
+				local r = tonumber(cur.resetAt or cur.resetSeconds) or 0
+				local b = encodeBosses(cur.bosses)
+				parts[#parts + 1] = "c" .. tostring(d) .. "=" .. table.concat({ tostring(k), tostring(t), tostring(l), tostring(e), tostring(r), b }, "/")
+			end
+		end
+		local bestStats = type(entry.bestStats) == "table" and entry.bestStats or nil
+		if bestStats then
+			parts[#parts + 1] = "b=" .. table.concat({
+				tostring(tonumber(bestStats.diffID) or 0),
+				tostring(tonumber(bestStats.killed) or 0),
+				tostring(tonumber(bestStats.total) or 0),
+			}, "/")
+		end
+		local bestStatsByDiff = type(entry.bestStatsByDiff) == "table" and entry.bestStatsByDiff or nil
+		if bestStatsByDiff then
+			local diffs = { 17, 14, 15, 16 }
+			for i = 1, #diffs do
+				local d = diffs[i]
+				local node = bestStatsByDiff[d]
+				if type(node) == "table" then
+					parts[#parts + 1] = "bs" .. tostring(d) .. "=" .. table.concat({
+						tostring(tonumber(node.killed) or 0),
+						tostring(tonumber(node.total) or 0),
+					}, "/")
+				end
+			end
+		end
+		return table.concat(parts, ";")
+	end
+
+	local compact = {}
+	local raids = type(store.raids) == "table" and store.raids or {}
+	for raidID, entry in pairs(raids) do
+		if type(entry) == "table" then
+			compact[raidID] = serializeRaidEntry(entry)
+		end
+	end
+	store.node.data = compact
+	store.node.meta = meta
+	return true
 end
 
 RAIDS.METADATA = METADATA
@@ -371,11 +708,90 @@ local function _publishRaidsToGuild(payload, reason)
 	if type(comm) ~= "table" or type(comm.PublishCharacterRecord) ~= "function" then
 		return false, "comm-unavailable"
 	end
+
+	local function encodeBosses(bosses)
+		if type(bosses) ~= "table" then return "" end
+		local ids = {}
+		for encID, killed in pairs(bosses) do
+			if killed then
+				local n = tonumber(encID)
+				if n then ids[#ids + 1] = n end
+			end
+		end
+		table.sort(ids)
+		local out = {}
+		for i = 1, #ids do out[i] = tostring(ids[i]) end
+		return table.concat(out, ",")
+	end
+
+	local function serializeRaidEntry(entry)
+		if type(entry) ~= "table" then return "" end
+		local parts = {}
+		parts[#parts + 1] = "v=1"
+		parts[#parts + 1] = "t=" .. tostring(tonumber(entry.total) or 0)
+		parts[#parts + 1] = "ls=" .. tostring(tonumber(entry.lastScan) or 0)
+		local current = type(entry.current) == "table" and entry.current or {}
+		local diffs = { 17, 14, 15, 16 }
+		for i = 1, #diffs do
+			local d = diffs[i]
+			local cur = current[d]
+			if type(cur) == "table" then
+				local k = tonumber(cur.killed) or 0
+				local t = tonumber(cur.total) or 0
+				local l = (cur.locked == true) and 1 or 0
+				local e = (cur.extended == true) and 1 or 0
+				local r = tonumber(cur.resetAt or cur.resetSeconds) or 0
+				local b = encodeBosses(cur.bosses)
+				parts[#parts + 1] = "c" .. tostring(d) .. "=" .. table.concat({ tostring(k), tostring(t), tostring(l), tostring(e), tostring(r), b }, "/")
+			end
+		end
+		local bestStats = type(entry.bestStats) == "table" and entry.bestStats or nil
+		if bestStats then
+			parts[#parts + 1] = "b=" .. table.concat({
+				tostring(tonumber(bestStats.diffID) or 0),
+				tostring(tonumber(bestStats.killed) or 0),
+				tostring(tonumber(bestStats.total) or 0),
+			}, "/")
+		end
+		local bestStatsByDiff = type(entry.bestStatsByDiff) == "table" and entry.bestStatsByDiff or nil
+		if bestStatsByDiff then
+			local diffs = { 17, 14, 15, 16 }
+			for i = 1, #diffs do
+				local d = diffs[i]
+				local node = bestStatsByDiff[d]
+				if type(node) == "table" then
+					parts[#parts + 1] = "bs" .. tostring(d) .. "=" .. table.concat({
+						tostring(tonumber(node.killed) or 0),
+						tostring(tonumber(node.total) or 0),
+					}, "/")
+				end
+			end
+		end
+		return table.concat(parts, ";")
+	end
+
+	local compactData = nil
+	if type(payload) == "table" and type(payload.node) == "table" and type(payload.node.data) == "table" then
+		compactData = payload.node.data
+	else
+		local raids = type(payload) == "table" and payload or {}
+		local compact = {}
+		for raidID, entry in pairs(raids) do
+			if type(entry) == "table" then
+				compact[raidID] = serializeRaidEntry(entry)
+			end
+		end
+		compactData = compact
+	end
+
 	local wire = {
-		module = METADATA.SHORT_NAME,
-		version = METADATA.VERSION,
-		reason = tostring(reason or "unknown"),
-		raids = payload,
+		data = compactData or {},
+		meta = {
+			module = METADATA.SHORT_NAME,
+			version = METADATA.VERSION,
+			reason = tostring(reason or "unknown"),
+			updatedAt = tonumber(now() or 0) or 0,
+		},
 	}
 	return comm:PublishCharacterRecord(RAIDS_SYNC_DOMAIN, wire)
 end
@@ -396,7 +812,10 @@ local function _buildRaidsDigest(raidsStore)
 		local raidEntry = raidsStore[iid]
 		if type(raidEntry) == "table" then
 			out[#out + 1] = "I:" .. tostring(iid) .. ":" .. tostring(raidEntry.total or 0)
-			local best = raidEntry.best
+			local best = raidEntry.bestStats
+			if type(best) ~= "table" and tostring(raidEntry.bestSource or "") == "stats" then
+				best = raidEntry.best
+			end
 			if type(best) == "table" then
 				out[#out + 1] = "B:" .. tostring(best.diffID or "") .. ":" .. tostring(best.killed or 0) .. "/" .. tostring(best.total or 0)
 			else
@@ -437,7 +856,10 @@ local function _hasAnyBestProgress(raidsStore)
 	if type(raidsStore) ~= "table" then return false end
 	for _, raidEntry in pairs(raidsStore) do
 		if type(raidEntry) == "table" then
-			local best = raidEntry.best
+			local best = raidEntry.bestStats
+			if type(best) ~= "table" and tostring(raidEntry.bestSource or "") == "stats" then
+				best = raidEntry.best
+			end
 			if type(best) == "table" then
 				local killed = tonumber(best.killed) or 0
 				local total = tonumber(best.total) or 0
@@ -533,6 +955,49 @@ local function updateBest(raidEntry, diffID, killed, total)
 				total   = candidate.total,
 				short   = candidate.short,
 			}
+		end
+	end
+end
+
+local function updateBestFromStats(raidEntry, diffID, killed, total)
+	if type(raidEntry) ~= "table" then return end
+	if type(diffID) ~= "number" then return end
+
+	killed = tonumber(killed) or 0
+	total  = tonumber(total) or 0
+
+	raidEntry.bestStatsByDiff = raidEntry.bestStatsByDiff or {}
+
+	local prev = raidEntry.bestStatsByDiff[diffID]
+	if type(prev) ~= "table" or (tonumber(prev.killed) or 0) < killed then
+		raidEntry.bestStatsByDiff[diffID] = {
+			diffID  = diffID,
+			diffTag = diffTag(diffID),
+			killed  = killed,
+			total   = total,
+			short   = buildShort(diffID, killed, total),
+		}
+	end
+
+	local candidate = raidEntry.bestStatsByDiff[diffID]
+	if candidate then
+		if type(raidEntry.bestStats) ~= "table" or betterThan(candidate, raidEntry.bestStats) then
+			raidEntry.bestStats = {
+				diffID  = candidate.diffID,
+				diffTag = candidate.diffTag,
+				killed  = candidate.killed,
+				total   = candidate.total,
+				short   = candidate.short,
+			}
+			-- Backward compatibility: keep legacy "best" mirror, but mark source.
+			raidEntry.best = {
+				diffID  = candidate.diffID,
+				diffTag = candidate.diffTag,
+				killed  = candidate.killed,
+				total   = candidate.total,
+				short   = candidate.short,
+			}
+			raidEntry.bestSource = "stats"
 		end
 	end
 end
@@ -692,14 +1157,48 @@ local function mergeRaidEntryInto(target, source)
 		end
 	end
 
-	if type(source.best) == "table" and (type(target.best) ~= "table" or betterThan(source.best, target.best)) then
-		target.best = {
-			diffID = tonumber(source.best.diffID) or nil,
-			diffTag = tostring(source.best.diffTag or ""),
-			killed = tonumber(source.best.killed) or 0,
-			total = tonumber(source.best.total) or sourceTotal,
-			short = tostring(source.best.short or ""),
+	if type(source.bestStatsByDiff) == "table" then
+		target.bestStatsByDiff = (type(target.bestStatsByDiff) == "table") and target.bestStatsByDiff or {}
+		for diffID, srcBest in pairs(source.bestStatsByDiff) do
+			if type(srcBest) == "table" then
+				local dstBest = target.bestStatsByDiff[diffID]
+				local srcKilled = tonumber(srcBest.killed) or 0
+				local dstKilled = tonumber(dstBest and dstBest.killed or 0) or 0
+				if type(dstBest) ~= "table" or srcKilled > dstKilled then
+					target.bestStatsByDiff[diffID] = {
+						diffID = tonumber(srcBest.diffID) or tonumber(diffID) or diffID,
+						diffTag = tostring(srcBest.diffTag or diffTag(tonumber(diffID) or diffID)),
+						killed = srcKilled,
+						total = tonumber(srcBest.total) or sourceTotal,
+						short = tostring(srcBest.short or buildShort(tonumber(diffID) or diffID, srcKilled, tonumber(srcBest.total) or sourceTotal)),
+					}
+				end
+			end
+		end
+	end
+
+	local sourceBestStats = nil
+	if type(source.bestStats) == "table" then
+		sourceBestStats = source.bestStats
+	elseif tostring(source.bestSource or "") == "stats" and type(source.best) == "table" then
+		sourceBestStats = source.best
+	end
+	if type(sourceBestStats) == "table" and (type(target.bestStats) ~= "table" or betterThan(sourceBestStats, target.bestStats)) then
+		target.bestStats = {
+			diffID = tonumber(sourceBestStats.diffID) or nil,
+			diffTag = tostring(sourceBestStats.diffTag or ""),
+			killed = tonumber(sourceBestStats.killed) or 0,
+			total = tonumber(sourceBestStats.total) or sourceTotal,
+			short = tostring(sourceBestStats.short or ""),
 		}
+		target.best = {
+			diffID = tonumber(sourceBestStats.diffID) or nil,
+			diffTag = tostring(sourceBestStats.diffTag or ""),
+			killed = tonumber(sourceBestStats.killed) or 0,
+			total = tonumber(sourceBestStats.total) or sourceTotal,
+			short = tostring(sourceBestStats.short or ""),
+		}
+		target.bestSource = "stats"
 	end
 
 	local srcLastScan = tonumber(source.lastScan)
@@ -1190,9 +1689,9 @@ local function ApplyRaidBestFromCharacterStatistics(raidsStore, catalog, tsNow, 
 				local total = tonumber(bestNode and bestNode.total or 0) or tonumber(raidEntry.total) or 0
 				if total <= 0 then total = killed end
 				if dID and killed > 0 then
-					local prevShort = type(raidEntry.best) == "table" and tostring(raidEntry.best.short or "") or ""
-					updateBest(raidEntry, dID, killed, total)
-					local nextShort = type(raidEntry.best) == "table" and tostring(raidEntry.best.short or "") or ""
+					local prevShort = type(raidEntry.bestStats) == "table" and tostring(raidEntry.bestStats.short or "") or ""
+					updateBestFromStats(raidEntry, dID, killed, total)
+					local nextShort = type(raidEntry.bestStats) == "table" and tostring(raidEntry.bestStats.short or "") or ""
 					if nextShort ~= "" and nextShort ~= prevShort then
 						applied = applied + 1
 					end
@@ -1553,8 +2052,9 @@ function RAIDS:_RunStandaloneStatisticsEnrichment(reason)
 	local digest = _buildRaidsDigest(raidsStore)
 	local previousDigest = tostring(store.lastDigest or "")
 	store.lastDigest = digest
+	PersistRaidsV2Store(store)
 	if digest ~= "" and digest ~= previousDigest then
-		local ok, publishReason = _publishRaidsToGuild(raidsStore, reason or "stats-standalone")
+		local ok, publishReason = _publishRaidsToGuild(store, reason or "stats-standalone")
 		if ok then
 			LOCAL_LOG("COMM", "Raids snapshot published", reason or "stats-standalone")
 		else
@@ -1606,6 +2106,10 @@ end
 
 function RAIDS:OnInitialize()
 	LOCAL_LOG("INFO", "Initializing Raids module", METADATA.VERSION)
+	local purged = PurgeLegacyRaidsStores()
+	if purged > 0 then
+		LOCAL_LOG("INFO", "Migrated legacy RAIDS stores to RAIDS_V2", purged)
+	end
 	self:InitializeOptions()
 	self._pendingScan = false
 	self._scanToken = 0
@@ -1962,8 +2466,6 @@ function RAIDS:OnUpdateInstanceInfo()
 							cur.resetAt = tsNow + reset
 						end
 
-						updateBest(raidEntry, dID, killed, total)
-
 						raidEntry.lastScan = tsNow
 						raidEntry.lastReason = self._pendingReason
 						ingested = ingested + 1
@@ -2037,8 +2539,9 @@ function RAIDS:OnUpdateInstanceInfo()
 	local digest = _buildRaidsDigest(raidsStore)
 	local previousDigest = tostring(store.lastDigest or "")
 	store.lastDigest = digest
+	PersistRaidsV2Store(store)
 	if digest ~= "" and digest ~= previousDigest then
-		local ok, publishReason = _publishRaidsToGuild(raidsStore, self._pendingReason)
+		local ok, publishReason = _publishRaidsToGuild(store, self._pendingReason)
 		if ok then
 			LOCAL_LOG("COMM", "Raids snapshot published", self._pendingReason or "?")
 		else

@@ -36,8 +36,7 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - `GMS/Modules/Equipment.lua` options scope moved from `CHAR` to `PROFILE` and now purges legacy `global.characters[guid].EQUIPMENT` nodes to prevent old option payload reappearing after DB reset.
 - Canonical naming aligned with runtime intent: `global.chars` renamed to `global.accountChars` (local account GUIDs only), and guild member table renamed from `global.guilds[guildClubId].players` to `global.guilds[guildClubId].roster` (hard cut, no migration).
 
-### Fixed
-- DB wipe/reset in `GMS/Core/Database.lua` now performs a hard reset of `GMS_DB`, `GMS_Logging_DB`, and `GMS_UIDB` roots and clears runtime DB handles to avoid stale AceDB proxy data after reset.
+### Fixed`r`n- Lua syntax error in `GMS/Modules/MythicPlus.lua` fixed: replaced invalid `}` with `end` in `_PublishMythicToGuild` payload loop; module `METADATA.VERSION` bumped to `1.1.8`.`r`n- DB wipe/reset in `GMS/Core/Database.lua` now performs a hard reset of `GMS_DB`, `GMS_Logging_DB`, and `GMS_UIDB` roots and clears runtime DB handles to avoid stale AceDB proxy data after reset.
 - CHARINFO local bootstrap in `GMS/Modules/CharInfo.lua` now persists local version metadata through canonical `global.characters[guid].CHARINFO = { data, meta }`.
 - DB Inspector serialization in `GMS/Core/Database.lua` now shows raw item strings (e.g. `item:...`) instead of UI-resolved item hyperlinks.
 - Guild storage normalization in `GMS/Core/Database.lua` now enforces numeric `guildClubId` keys only, migrates legacy string buckets (e.g. `Realm|Faction|Guild`) into the active club-id bucket, and removes deprecated string-key buckets.
@@ -45,6 +44,8 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - Guild root metadata in `GMS/Core/Database.lua` now also persists `updatedAtTs` alongside `updatedAt`.
 - Character/guild indexing is now consistent across read/receive/save paths: `global.characters[guid]` is auto-created for known guild/player GUIDs, and `global.guilds[guildClubId].players[guid]` is upserted centrally via `GMS:UpsertGuildPlayer(...)` from DB/Comm/Roster/GuildLog flows.
 - Roster ingest in `GMS/Modules/Roster.lua` now ensures `global.characters[guid]` directly and no longer writes remote guild GUIDs into `global.accountChars`.
+- CharInfo Mythic+ rendering in `GMS/Modules/CharInfo.lua` was stabilized after reloads, migrated to split V/T columns, centered total score display, and Blizzard-style score coloring for totals and key-level colors.
+- RAIDS_V2 sync payload in `GMS/Modules/Raids.lua` now publishes compact one-line `data[raidId]` entries consistently, while `GMS/Modules/Roster.lua` accepts both legacy and compact RAIDS_V2 payload formats.
 
 ### Rules/Infra
 - DB schema policy hardened in `GMS_DB_SCHEMA.md`: hard cutover only, no migration layer, and mandatory sync block for older GMS versions.
@@ -54,3 +55,4 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - Version: `1.5.2`
 - Date: `2026-02-23`
 - Source: `GMS/Core/Changelog.lua` -> `RELEASES[1]`
+

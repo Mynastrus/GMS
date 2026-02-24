@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.22",
+	VERSION      = "1.1.40",
 }
 
 local LibStub = LibStub
@@ -620,11 +620,10 @@ local function BuildRaidStatusFromRaidsStore(all)
 				best = { diff = diff, killed = killed, short = short }
 			end
 		end
-		consider(raidEntry.best)
-		if type(raidEntry.current) == "table" then
-			for _, cur in pairs(raidEntry.current) do
-				consider(cur)
-			end
+		if type(raidEntry.bestStats) == "table" then
+			consider(raidEntry.bestStats)
+		elseif tostring(raidEntry.bestSource or "") == "stats" and type(raidEntry.best) == "table" then
+			consider(raidEntry.best)
 		end
 		return best
 	end
@@ -641,6 +640,100 @@ local function BuildRaidStatusFromRaidsStore(all)
 		end
 	end
 	return bestShort
+end
+
+local function DecodeRaidV2LineEntry(instanceID, packed)
+	local function diffTagText(d)
+		local n = tonumber(d) or 0
+		if n == 17 then return "LFR" end
+		if n == 14 then return "N" end
+		if n == 15 then return "H" end
+		if n == 16 then return "M" end
+		return tostring(d or "?")
+	end
+	local entry = {
+		instanceID = tonumber(instanceID) or instanceID,
+		name = tostring(instanceID or ""),
+		total = 0,
+		current = {},
+		bestStatsByDiff = {},
+	}
+	local line = tostring(packed or "")
+	if line == "" then
+		return entry
+	end
+	for part in string.gmatch(line, "([^;]+)") do
+		local key, val = part:match("^([^=]+)=(.*)$")
+		if key and val then
+			if key == "t" then
+				entry.total = tonumber(val) or entry.total
+			elseif key == "ls" then
+				entry.lastScan = tonumber(val) or entry.lastScan
+			elseif key == "b" then
+				local d, k, t = val:match("^(%-?%d+)%/(%-?%d+)%/(%-?%d+)$")
+				d, k, t = tonumber(d), tonumber(k), tonumber(t)
+				if d then
+					entry.bestStats = { diffID = d, killed = k or 0, total = t or 0, short = tostring(diffTagText(d) .. " " .. tostring(k or 0) .. "/" .. tostring(t or 0)) }
+					entry.best = entry.bestStats
+					entry.bestSource = "stats"
+				end
+			elseif key:match("^bs%d+$") then
+				local d = tonumber(key:sub(3))
+				local k, t = val:match("^(%-?%d+)%/(%-?%d+)$")
+				k, t = tonumber(k), tonumber(t)
+				if d then
+					entry.bestStatsByDiff[d] = { diffID = d, killed = k or 0, total = t or 0, short = tostring(diffTagText(d) .. " " .. tostring(k or 0) .. "/" .. tostring(t or 0)) }
+				end
+			elseif key:match("^c%d+$") then
+				local d = tonumber(key:sub(2))
+				local k, t, l, e, r, bcsv = val:match("^(%-?%d+)%/(%-?%d+)%/(%-?%d+)%/(%-?%d+)%/(%-?%d+)%/(.*)$")
+				k, t, l, e, r = tonumber(k), tonumber(t), tonumber(l), tonumber(e), tonumber(r)
+				if d then
+					local bosses = {}
+					for token in string.gmatch(tostring(bcsv or ""), "([^,]+)") do
+						local n = tonumber(token)
+						if n then bosses[n] = true end
+					end
+					entry.current[d] = {
+						diffID = d,
+						killed = k or 0,
+						total = t or 0,
+						locked = l == 1,
+						extended = e == 1,
+						resetAt = r or 0,
+						bosses = bosses,
+					}
+					entry.current[d].text = string.format("%d / %d", entry.current[d].killed, entry.current[d].total)
+				end
+			end
+		end
+	end
+	return entry
+end
+
+local function ResolveRaidsStorePayload(raw)
+	if type(raw) ~= "table" then
+		return nil
+	end
+	if type(raw.raids) == "table" then
+		return raw.raids
+	end
+	local data = type(raw.data) == "table" and raw.data or raw
+	if type(data) ~= "table" then
+		return nil
+	end
+	local out = {}
+	local found = false
+	for raidID, node in pairs(data) do
+		if type(node) == "table" and (type(node.current) == "table" or type(node.best) == "table" or type(node.bestStats) == "table") then
+			out[tonumber(raidID) or raidID] = node
+			found = true
+		elseif type(node) == "string" then
+			out[tonumber(raidID) or raidID] = DecodeRaidV2LineEntry(raidID, node)
+			found = true
+		end
+	end
+	return found and out or nil
 end
 
 local function GetTalentLoadoutName()
@@ -804,25 +897,136 @@ end
 local function BuildMythicRows(dungeons, includeDefaults)
 	local rows = {}
 	local byKey = {}
+
+	local function resolveMapName(mapId)
+		local mid = tonumber(mapId or 0) or 0
+		if mid > 0 and type(C_ChallengeMode) == "table" and type(C_ChallengeMode.GetMapUIInfo) == "function" then
+			local n = tostring(select(1, C_ChallengeMode.GetMapUIInfo(mid)) or "")
+			if n ~= "" then return n end
+		end
+		return (mid > 0) and ("Dungeon " .. tostring(mid)) or ""
+	end
+
+	local function addRow(mapId, name, level, score, completed, extra)
+		local mId = tonumber(mapId or 0) or 0
+		local n = tostring(name or "")
+		if n == "" then
+			n = resolveMapName(mId)
+		end
+		if n == "" then return end
+		local key = (mId > 0) and ("id:" .. tostring(mId)) or ("name:" .. string.lower(n))
+		if byKey[key] ~= nil then return end
+		extra = type(extra) == "table" and extra or {}
+		rows[#rows + 1] = {
+			name = n,
+			level = tonumber(level) or 0,
+			score = tonumber(score) or 0,
+			mapId = mId,
+			completed = (completed == true),
+			fortifiedLevel = tonumber(extra.fl) or 0,
+			fortifiedScore = tonumber(extra.fs) or 0,
+			fortifiedCompleted = (extra.fc == true),
+			tyrannicalLevel = tonumber(extra.tl) or 0,
+			tyrannicalScore = tonumber(extra.ts) or 0,
+			tyrannicalCompleted = (extra.tc == true),
+			isPlaceholder = false,
+		}
+		byKey[key] = true
+	end
+
+	local function decodePacked(raw)
+		local v = tostring(raw or "")
+		local fl, fs, fc, tl, ts, tc = v:match("^(%-?%d+):(%-?%d+):([01]):(%-?%d+):(%-?%d+):([01]):%-?%d+$")
+		if not fl then
+            fl, fs, fc, tl, ts, tc = v:match("^(%-?%d+):(%-?%d+):([01]):(%-?%d+):(%-?%d+):([01]):%-?%d+:[^:]*$")
+		end
+		if fl then
+			local nfs = tonumber(fs) or 0
+			local nts = tonumber(ts) or 0
+			local nfl = tonumber(fl) or 0
+			local ntl = tonumber(tl) or 0
+			return {
+				l = (nfl > ntl) and nfl or ntl,
+				s = nfs + nts,
+				c = (fc == "1") or (tc == "1"),
+				n = "",
+				fl = nfl,
+				fs = nfs,
+				fc = (fc == "1"),
+				tl = ntl,
+				ts = nts,
+				tc = (tc == "1"),
+			}
+		end
+
+		local l, s, c, _, _, n = v:match("^(%-?%d+):(%-?%d+):([01]):(%-?%d+):([^:]*):(.*)$")
+		if l then
+			local name = tostring(n or "")
+			name = name:gsub("%%3A", ":"):gsub("%%25", "%%")
+			local nl = tonumber(l) or 0
+			local ns = tonumber(s) or 0
+			local nc = (c == "1")
+			return {
+				l = nl,
+				s = ns,
+				c = nc,
+				n = name,
+				fl = nl,
+				fs = ns,
+				fc = nc,
+				tl = 0,
+				ts = 0,
+				tc = false,
+			}
+		end
+
+		local l2, s2, c2 = v:match("^(%-?%d+):(%-?%d+):([01]):")
+		if l2 then
+			local nl = tonumber(l2) or 0
+			local ns = tonumber(s2) or 0
+			local nc = (c2 == "1")
+			return {
+				l = nl,
+				s = ns,
+				c = nc,
+				n = "",
+				fl = nl,
+				fs = ns,
+				fc = nc,
+				tl = 0,
+				ts = 0,
+				tc = false,
+			}
+		end
+		return nil
+	end
+
 	if type(dungeons) == "table" then
-		for i = 1, #dungeons do
-			local d = dungeons[i]
+		for k, d in pairs(dungeons) do
 			if type(d) == "table" then
-				local name = tostring(d.name or "")
-				local mapId = tonumber(d.mapId or 0) or 0
-				local key = (mapId > 0) and ("id:" .. tostring(mapId)) or ("name:" .. string.lower(name))
-				if name ~= "" and byKey[key] == nil then
-					local level = tonumber(d.level) or 0
-					local score = tonumber(d.score) or 0
-					rows[#rows + 1] = {
-						name = name,
-						level = level,
-						score = score,
-						mapId = mapId,
-						completed = (d.completed == true),
-						isPlaceholder = false,
-					}
-					byKey[key] = true
+				local mapId = tonumber(d.m or d.mapId or k or 0) or 0
+				local name = tostring(d.n or d.name or "")
+				local fl = tonumber(d.fl or d.fortifiedLevel or 0) or 0
+				local fs = tonumber(d.fs or d.fortifiedScore or 0) or 0
+				local fc = (d.fc == true) or (d.fortifiedCompleted == true)
+				local tl = tonumber(d.tl or d.tyrannicalLevel or 0) or 0
+				local ts = tonumber(d.ts or d.tyrannicalScore or 0) or 0
+				local tc = (d.tc == true) or (d.tyrannicalCompleted == true)
+				local score = tonumber(d.s or d.score)
+				if not score then
+					score = fs + ts
+				end
+				local level = tonumber(d.l or d.level)
+				if not level then
+					level = (fl > tl) and fl or tl
+				end
+				local completed = (d.c == true) or (d.completed == true) or fc or tc
+				addRow(mapId, name, level, score, completed, { fl = fl, fs = fs, fc = fc, tl = tl, ts = ts, tc = tc })
+			elseif type(d) == "string" then
+				local mapId = tonumber(k or 0) or 0
+				local unpacked = decodePacked(d)
+				if type(unpacked) == "table" then
+					addRow(mapId, unpacked.n, unpacked.l, unpacked.s, unpacked.c, unpacked)
 				end
 			end
 		end
@@ -834,10 +1038,7 @@ local function BuildMythicRows(dungeons, includeDefaults)
 			for i = 1, #maps do
 				local mapId = tonumber(maps[i] or 0) or 0
 				if mapId > 0 then
-					local mapName = ""
-					if type(C_ChallengeMode.GetMapUIInfo) == "function" then
-						mapName = tostring(select(1, C_ChallengeMode.GetMapUIInfo(mapId)) or "")
-					end
+					local mapName = resolveMapName(mapId)
 					if mapName == "" then
 						mapName = "Dungeon " .. tostring(mapId)
 					end
@@ -849,6 +1050,12 @@ local function BuildMythicRows(dungeons, includeDefaults)
 							score = 0,
 							mapId = mapId,
 							completed = false,
+							fortifiedLevel = 0,
+							fortifiedScore = 0,
+							fortifiedCompleted = false,
+							tyrannicalLevel = 0,
+							tyrannicalScore = 0,
+							tyrannicalCompleted = false,
 							isPlaceholder = true,
 						}
 						byKey[key] = true
@@ -864,6 +1071,45 @@ local function BuildMythicRows(dungeons, includeDefaults)
 		return tostring(a.name) < tostring(b.name)
 	end)
 	return rows
+end
+
+local function ResolveMythicPayload(raw)
+	if type(raw) ~= "table" then
+		return nil, nil
+	end
+	local payload = raw
+	if type(payload.data) == "table" and type(payload.meta) == "table" then
+		payload = payload.data
+	end
+	if type(payload) ~= "table" then
+		return nil, nil
+	end
+	local dungeons = nil
+	if type(payload.d) == "table" then
+		dungeons = payload.d
+	elseif type(payload.dungeons) == "table" then
+		dungeons = payload.dungeons
+	else
+		-- MYTHICPLUS_V2 stores map entries directly in the payload root.
+		dungeons = payload
+	end
+	local score = tonumber(payload.s or payload.score)
+	return dungeons, score
+end
+
+local function SumMythicRowsScore(rows)
+	if type(rows) ~= "table" then return nil end
+	local total = 0
+	local has = false
+	for i = 1, #rows do
+		local s = tonumber(rows[i] and rows[i].score or 0) or 0
+		if s > 0 then
+			has = true
+			total = total + s
+		end
+	end
+	if not has then return nil end
+	return total
 end
 
 local function HasMythicProgressData(score, rows)
@@ -884,9 +1130,65 @@ local function HasMythicProgressData(score, rows)
 	return false
 end
 
+local function GetMythicKeyLevelColorHex(level)
+	local l = tonumber(level) or 0
+	if l >= 7 then return "ffff8000" end -- orange
+	if l >= 5 then return "ffa335ee" end -- purple
+	if l >= 3 then return "ff0070dd" end -- blue
+	if l >= 2 then return "ff1eff00" end -- green
+	return "ffffffff"
+end
+
+local function GetMythicScoreColorHex(score)
+	local s = tonumber(score) or 0
+	if s <= 0 then
+		return "ffffffff"
+	end
+
+	local function rgbToHex(r, g, b)
+		r, g, b = tonumber(r), tonumber(g), tonumber(b)
+		if not r or not g or not b then return nil end
+		if r > 1 or g > 1 or b > 1 then
+			r, g, b = r / 255, g / 255, b / 255
+		end
+		local function ch(v)
+			local n = math.floor((math.max(0, math.min(1, v)) * 255) + 0.5)
+			return string.format("%02x", n)
+		end
+		return "ff" .. ch(r) .. ch(g) .. ch(b)
+	end
+
+	if type(C_ChallengeMode) == "table" and type(C_ChallengeMode.GetDungeonScoreRarityColor) == "function" then
+		local ok, color = pcall(C_ChallengeMode.GetDungeonScoreRarityColor, s)
+		if ok and type(color) == "table" then
+			if type(color.GenerateHexColorMarkup) == "function" then
+				local okHex, markup = pcall(color.GenerateHexColorMarkup, color)
+				if okHex and type(markup) == "string" then
+					local hex = markup:match("^|c([0-9a-fA-F]+)")
+					if type(hex) == "string" then
+						if #hex == 8 then return string.lower(hex) end
+						if #hex == 6 then return "ff" .. string.lower(hex) end
+					end
+				end
+			end
+			if type(color.GetRGB) == "function" then
+				local okRgb, r, g, b = pcall(color.GetRGB, color)
+				if okRgb then
+					local hex = rgbToHex(r, g, b)
+					if hex then return hex end
+				end
+			end
+			local hex = rgbToHex(color.r or color.R, color.g or color.G, color.b or color.B)
+			if hex then return hex end
+		end
+	end
+
+	return "ffffffff"
+end
+
 local function NormalizeSearchText(raw)
 	local s = tostring(raw or ""):lower()
-	s = s:gsub("[äáàâ]", "a"):gsub("[öóòô]", "o"):gsub("[üúùû]", "u"):gsub("ß", "ss")
+	s = s:gsub("[ï¿½ï¿½ï¿½ï¿½]", "a"):gsub("[ï¿½ï¿½ï¿½ï¿½]", "o"):gsub("[ï¿½ï¿½ï¿½ï¿½]", "u"):gsub("ï¿½", "ss")
 	s = s:gsub("[^%w%s]", " "):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
 	return s
 end
@@ -1234,6 +1536,28 @@ local function BuildRaidRows(all, catalog)
 		catalog = BuildRaidCatalogLookup()
 	end
 
+	local function NormalizeRaidNameKey(name)
+		local s = string.lower(tostring(name or ""))
+		return (s:gsub("[%s%p]+", ""))
+	end
+
+	local function CanonicalRaidDiffID(diffID, diffTagText)
+		local d = tonumber(diffID)
+		if d == 17 or d == 14 or d == 15 or d == 16 then
+			return d
+		end
+		if d == 3 or d == 4 then return 14 end
+		if d == 5 or d == 6 then return 15 end
+		if d == 7 then return 17 end
+
+		local tag = string.upper(tostring(diffTagText or ""))
+		if tag == "LFR" then return 17 end
+		if tag == "N" or tag == "NORMAL" then return 14 end
+		if tag == "H" or tag == "HEROIC" then return 15 end
+		if tag == "M" or tag == "MYTHIC" then return 16 end
+		return nil
+	end
+
 	local STATIC_RAID_META_BY_INSTANCE = {
 		[2657] = {
 			name = LT("CHARINFO_RAID_NAME_NERUBAR", "Palast der Nerub'ar"),
@@ -1360,6 +1684,29 @@ local function BuildRaidRows(all, catalog)
 	for key, entry in pairs(all) do
 		if type(entry) == "table" then
 			local instanceID = tonumber(entry.instanceID) or tonumber(key) or nil
+			if not instanceID then
+				local normalizedName = ""
+				local rawInstance = tostring(entry.instanceID or "")
+				if rawInstance:match("^name:") then
+					normalizedName = tostring(rawInstance:sub(6) or "")
+				end
+				if normalizedName == "" then
+					normalizedName = NormalizeRaidNameKey(entry.name or key)
+				end
+				if normalizedName ~= "" and type(catalog) == "table" then
+					if type(catalog.nameNormToInstanceID) == "table" then
+						instanceID = tonumber(catalog.nameNormToInstanceID[normalizedName]) or nil
+					end
+					if not instanceID and type(catalog.nameToInstanceID) == "table" then
+						for raidName, iid in pairs(catalog.nameToInstanceID) do
+							if NormalizeRaidNameKey(raidName) == normalizedName then
+								instanceID = tonumber(iid) or nil
+								if instanceID then break end
+							end
+						end
+					end
+				end
+			end
 			if instanceID and ACTIVE_RAID_SET[instanceID] then
 				local raidName = tostring(entry.name or "")
 				local total = tonumber(entry.total) or 0
@@ -1387,33 +1734,47 @@ local function BuildRaidRows(all, catalog)
 				end
 
 				if type(entry.current) == "table" then
-					for i = 1, #RAID_DIFF_ORDER do
-						local diffID = RAID_DIFF_ORDER[i]
-						local cur = entry.current[diffID]
+					for rawDiffID, cur in pairs(entry.current) do
 						if type(cur) == "table" then
-							local cKilled = tonumber(cur.killed) or 0
-							local cTotal = tonumber(cur.total) or tonumber(row.total) or 0
-							row.current[diffID] = {
-								text = FormatRaidProgress(cKilled, cTotal),
-								killed = cKilled,
-								total = cTotal,
-								bosses = type(cur.bosses) == "table" and cur.bosses or {},
-							}
+							local canonicalDiffID = CanonicalRaidDiffID(rawDiffID, cur.diffTag)
+							if canonicalDiffID then
+								local cKilled = tonumber(cur.killed) or 0
+								local cTotal = tonumber(cur.total) or tonumber(row.total) or 0
+								local prev = row.current[canonicalDiffID]
+								local pKilled = tonumber(prev and prev.killed or 0) or 0
+								local pTotal = tonumber(prev and prev.total or 0) or 0
+								if (cKilled > pKilled) or (cKilled == pKilled and cTotal > pTotal) then
+									row.current[canonicalDiffID] = {
+										text = FormatRaidProgress(cKilled, cTotal),
+										killed = cKilled,
+										total = cTotal,
+										bosses = type(cur.bosses) == "table" and cur.bosses or {},
+									}
+								elseif type(cur.bosses) == "table" and type(prev) == "table" then
+									prev.bosses = type(prev.bosses) == "table" and prev.bosses or {}
+									for encID, isKilled in pairs(cur.bosses) do
+										if isKilled then
+											prev.bosses[encID] = true
+										end
+									end
+								end
+							end
 						end
 					end
 				end
 
-				row.best = FormatBestShort(entry.best)
-				if type(entry.best) == "table" then
-					row.bestDiffID = tonumber(entry.best.diffID) or row.bestDiffID
+				local bestNode = nil
+				if type(entry.bestStats) == "table" then
+					bestNode = entry.bestStats
+				elseif tostring(entry.bestSource or "") == "stats" and type(entry.best) == "table" then
+					bestNode = entry.best
+				end
+				row.best = FormatBestShort(bestNode)
+				if type(bestNode) == "table" then
+					row.bestDiffID = tonumber(bestNode.diffID) or row.bestDiffID
 				end
 			end
 		end
-	end
-
-	local function NormalizeRaidNameKey(name)
-		local s = string.lower(tostring(name or ""))
-		return (s:gsub("[%s%p]+", ""))
 	end
 
 	local function BestRank(diffID)
@@ -1555,11 +1916,11 @@ local function BuildSelfRaidWaitingText(details)
 		return LT("CHARINFO_RAID_WAIT_SCAN_REASON", "Warte auf Raidscan (%s)...", reason)
 	end
 	if raids._statsDeferredScheduled == true then
-		return LT("CHARINFO_RAID_WAIT_DEFERRED_SCAN", "Warte auf verzögerten Raid-Statistikscan...")
+		return LT("CHARINFO_RAID_WAIT_DEFERRED_SCAN", "Warte auf verzï¿½gerten Raid-Statistikscan...")
 	end
 	local cursor = tonumber(raids._statsCategoryCursor or 1) or 1
 	if cursor > 1 then
-		return LT("CHARINFO_RAID_WAIT_STATS_RUNNING", "Raid-Statistikscan läuft...")
+		return LT("CHARINFO_RAID_WAIT_STATS_RUNNING", "Raid-Statistikscan lï¿½uft...")
 	end
 	if raids._ejUnsupported == true then
 		return LT("CHARINFO_RAID_WAIT_SAVEDINSTANCES", "Warte auf SavedInstances-Raiddaten...")
@@ -1742,7 +2103,7 @@ local function GetStoredCharacterVersionByGuid(guid)
 		if type(global) ~= "table" then return "" end
 		local chars = type(global.characters) == "table" and global.characters or nil
 		local c = chars and type(chars[g]) == "table" and chars[g] or nil
-		local ci = c and type(c.CHARINFO) == "table" and c.CHARINFO or nil
+		local ci = c and type(c.CHARINFO_V2) == "table" and c.CHARINFO_V2 or (c and type(c.CHARINFO) == "table" and c.CHARINFO or nil)
 		local ciData = (ci and type(ci.data) == "table") and ci.data or ci
 		local v = ciData and tostring(ciData.gmsVersion or "") or ""
 		return v
@@ -2193,19 +2554,19 @@ local function BuildCharData(player, ctxGuid, ctxName)
 
 		local mythic = GMS and GMS:GetModule("MythicPlus", true) or nil
 		if type(mythic) == "table" and type(mythic._options) == "table" then
-			local score = tonumber(mythic._options.score)
-			local rows = BuildMythicRows(mythic._options.dungeons, true)
-			data.mythic.score = score
+			local dungeons, score = ResolveMythicPayload(mythic._options)
+			local rows = BuildMythicRows(dungeons, true)
+			data.mythic.score = score or SumMythicRowsScore(rows)
 			data.mythic.rows = rows
 			data.mythic.hasData = HasMythicProgressData(score, rows)
 			data.mythic.source = "Local module data"
 		end
 		if not data.mythic.hasData and playerGuid ~= "" then
-			local mpBucket = GetCharScopedModuleBucket(playerGuid, "MythicPlus")
+			local mpBucket = GetCharScopedModuleBucket(playerGuid, "MYTHICPLUS_V2")
 			if type(mpBucket) == "table" then
-				local score = tonumber(mpBucket.score)
-				local rows = BuildMythicRows(mpBucket.dungeons, true)
-				data.mythic.score = score or data.mythic.score
+				local dungeons, score = ResolveMythicPayload(mpBucket)
+				local rows = BuildMythicRows(dungeons, true)
+				data.mythic.score = score or SumMythicRowsScore(rows) or data.mythic.score
 				data.mythic.rows = rows
 				data.mythic.hasData = HasMythicProgressData(score, rows)
 				if data.mythic.hasData then
@@ -2216,10 +2577,10 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		if not data.mythic.hasData and playerGuid ~= "" then
 			local payloadLocalM, payloadLocalMSource = GetLatestOrCachedDomainPayload("MYTHICPLUS_V2", playerGuid)
 			if type(payloadLocalM) == "table" then
-				local rows = BuildMythicRows(payloadLocalM.dungeons, true)
-				local score = tonumber(payloadLocalM.score)
+				local dungeons, score = ResolveMythicPayload(payloadLocalM)
+				local rows = BuildMythicRows(dungeons, true)
 				data.mythic.rows = rows
-				data.mythic.score = score or data.mythic.score
+				data.mythic.score = score or SumMythicRowsScore(rows) or data.mythic.score
 				data.mythic.hasData = HasMythicProgressData(score, rows)
 				if data.mythic.hasData then
 					data.mythic.source = (payloadLocalMSource == "cache") and "Saved character DB" or "Synced MYTHICPLUS_V2"
@@ -2238,8 +2599,8 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		data.raids.hasData = (#data.raids.rows > 0) or (data.raids.summary ~= "-" and data.raids.summary ~= "")
 		data.raids.source = "Local module data"
 		if not data.raids.hasData and playerGuid ~= "" then
-			local raidsBucket = GetCharScopedModuleBucket(playerGuid, "RAIDS")
-			local bucketRaids = type(raidsBucket) == "table" and raidsBucket.raids or nil
+			local raidsBucket = GetCharScopedModuleBucket(playerGuid, "RAIDS_V2")
+			local bucketRaids = ResolveRaidsStorePayload(raidsBucket)
 			if type(bucketRaids) == "table" then
 				data.raids.summary = BuildRaidStatusFromRaidsStore(bucketRaids)
 				data.raids.rows = BuildRaidRows(bucketRaids, raidCatalog)
@@ -2251,9 +2612,10 @@ local function BuildCharData(player, ctxGuid, ctxName)
 		end
 		if not data.raids.hasData and playerGuid ~= "" then
 			local payloadLocalR, payloadLocalRSource = GetLatestOrCachedDomainPayload("RAIDS_V2", playerGuid)
-			if type(payloadLocalR) == "table" and type(payloadLocalR.raids) == "table" then
-				local rowsLocal = BuildRaidRows(payloadLocalR.raids, raidCatalog)
-				local summaryLocal = BuildRaidStatusFromRaidsStore(payloadLocalR.raids)
+			local payloadRaids = ResolveRaidsStorePayload(payloadLocalR)
+			if type(payloadRaids) == "table" then
+				local rowsLocal = BuildRaidRows(payloadRaids, raidCatalog)
+				local summaryLocal = BuildRaidStatusFromRaidsStore(payloadRaids)
 				if summaryLocal ~= "" and summaryLocal ~= "-" then
 					data.raids.summary = summaryLocal
 				end
@@ -2374,7 +2736,7 @@ local function BuildCharData(player, ctxGuid, ctxName)
 			if v ~= "" then data.gmsVersion = v end
 			local score = tonumber(p.mplus)
 			if score and score > 0 then
-				data.mythic.score = score
+				data.mythic.score = score or SumMythicRowsScore(rows)
 				data.mythic.hasData = true
 				data.mythic.source = (payloadMetaSource == "cache") and "Saved character DB" or "Synced roster_meta"
 			end
@@ -2406,20 +2768,20 @@ local function BuildCharData(player, ctxGuid, ctxName)
 
 		local payloadM, payloadMSource = GetLatestOrCachedDomainPayload("MYTHICPLUS_V2", targetGuid)
 		if type(payloadM) == "table" then
-			local rows = BuildMythicRows(payloadM.dungeons, true)
-			local score = tonumber(payloadM.score)
+			local dungeons, score = ResolveMythicPayload(payloadM)
+			local rows = BuildMythicRows(dungeons, true)
 			data.mythic.rows = rows
-			data.mythic.score = score or data.mythic.score
+			data.mythic.score = score or SumMythicRowsScore(rows) or data.mythic.score
 			data.mythic.hasData = HasMythicProgressData(score, rows) or data.mythic.hasData
 			data.mythic.source = (payloadMSource == "cache") and "Saved character DB" or "Synced MYTHICPLUS_V2"
 		end
 		if not data.mythic.hasData then
-			local mpBucket = GetCharScopedModuleBucket(targetGuid, "MYTHICPLUS") or GetCharScopedModuleBucket(targetGuid, "MythicPlus")
+			local mpBucket = GetCharScopedModuleBucket(targetGuid, "MYTHICPLUS_V2")
 			if type(mpBucket) == "table" then
-				local rows = BuildMythicRows(mpBucket.dungeons, true)
-				local score = tonumber(mpBucket.score)
+				local dungeons, score = ResolveMythicPayload(mpBucket)
+				local rows = BuildMythicRows(dungeons, true)
 				data.mythic.rows = rows
-				data.mythic.score = score or data.mythic.score
+				data.mythic.score = score or SumMythicRowsScore(rows) or data.mythic.score
 				data.mythic.hasData = HasMythicProgressData(score, rows) or data.mythic.hasData
 				if data.mythic.hasData then
 					data.mythic.source = "Saved character DB"
@@ -2429,19 +2791,22 @@ local function BuildCharData(player, ctxGuid, ctxName)
 
 		local payloadR, payloadRSource = GetLatestOrCachedDomainPayload("RAIDS_V2", targetGuid)
 		if type(payloadR) == "table" then
+			local payloadRaids = ResolveRaidsStorePayload(payloadR)
+			if type(payloadRaids) == "table" then
 			local raidCatalog = baseRaidCatalog
-			local rows = BuildRaidRows(payloadR.raids, raidCatalog)
-			local summary = BuildRaidStatusFromRaidsStore(payloadR.raids)
+			local rows = BuildRaidRows(payloadRaids, raidCatalog)
+			local summary = BuildRaidStatusFromRaidsStore(payloadRaids)
 			if summary ~= "" and summary ~= "-" then
 				data.raids.summary = summary
 			end
 			data.raids.rows = rows
 			data.raids.hasData = (#rows > 0) or (data.raids.summary ~= "-") or data.raids.hasData
 			data.raids.source = (payloadRSource == "cache") and "Saved character DB" or "Synced RAIDS_V2"
+			end
 		end
 		if not data.raids.hasData then
-			local raidsBucket = GetCharScopedModuleBucket(targetGuid, "RAIDS")
-			local bucketRaids = type(raidsBucket) == "table" and raidsBucket.raids or nil
+			local raidsBucket = GetCharScopedModuleBucket(targetGuid, "RAIDS_V2")
+			local bucketRaids = ResolveRaidsStorePayload(raidsBucket)
 			if type(bucketRaids) == "table" then
 				local rows = BuildRaidRows(bucketRaids, baseRaidCatalog)
 				local summary = BuildRaidStatusFromRaidsStore(bucketRaids)
@@ -3160,14 +3525,18 @@ function CHARINFO:TryRegisterPage()
 			if cardWidth < 300 then cardWidth = 300 end
 
 			local portalW = 18
-			local keyW = 68
-			local scoreW = 70
-			local nameW = cardWidth - portalW - keyW - scoreW - 22
+			local keyVW = 36
+			local keyTW = 36
+			local scoreVW = 46
+			local scoreTW = 46
+			local nameW = cardWidth - portalW - keyVW - keyTW - scoreVW - scoreTW - 22
 			if nameW < 130 then
 				nameW = 130
 				portalW = 16
-				keyW = 60
-				scoreW = 64
+				keyVW = 32
+				keyTW = 32
+				scoreVW = 40
+				scoreTW = 40
 			end
 
 			local head = AceGUI:Create("SimpleGroup")
@@ -3175,37 +3544,56 @@ function CHARINFO:TryRegisterPage()
 			head:SetLayout("Flow")
 			card:AddChild(head)
 
-			local hName = AceGUI:Create("Label")
-			hName:SetWidth(nameW + portalW)
-			hName:SetText("")
-			head:AddChild(hName)
+			local hTopLeft = AceGUI:Create("Label")
+			hTopLeft:SetWidth(nameW + portalW)
+			hTopLeft:SetText("")
+			head:AddChild(hTopLeft)
 
-			local hKey = AceGUI:Create("Label")
-			hKey:SetWidth(keyW)
-			hKey:SetText("|cff9d9d9d" .. LT("CHARINFO_LABEL_KEY", "Key") .. "|r")
-			if hKey.label then
-				hKey.label:SetFontObject(GameFontNormalSmallOutline)
-				hKey.label:SetJustifyH("CENTER")
-				hKey.label:SetWordWrap(false)
+			local hFortTitle = AceGUI:Create("Label")
+			hFortTitle:SetWidth(keyVW + scoreVW)
+			hFortTitle:SetText("|cff9d9d9d" .. LT("CHARINFO_LABEL_AFFIX_FORTIFIED", "Fortified") .. "|r")
+			if hFortTitle.label then
+				hFortTitle.label:SetFontObject(GameFontNormalSmallOutline)
+				hFortTitle.label:SetJustifyH("CENTER")
+				hFortTitle.label:SetWordWrap(false)
 			end
-			head:AddChild(hKey)
+			head:AddChild(hFortTitle)
 
-			local hScore = AceGUI:Create("Label")
-			hScore:SetWidth(scoreW)
-			hScore:SetText("|cff9d9d9d" .. LT("CHARINFO_LABEL_SCORE", "Score") .. "|r")
-			if hScore.label then
-				hScore.label:SetFontObject(GameFontNormalSmallOutline)
-				hScore.label:SetJustifyH("RIGHT")
-				hScore.label:SetWordWrap(false)
+			local hTyrTitle = AceGUI:Create("Label")
+			hTyrTitle:SetWidth(keyTW + scoreTW)
+			hTyrTitle:SetText("|cff9d9d9d" .. LT("CHARINFO_LABEL_AFFIX_TYRANNICAL", "Tyrannical") .. "|r")
+			if hTyrTitle.label then
+				hTyrTitle.label:SetFontObject(GameFontNormalSmallOutline)
+				hTyrTitle.label:SetJustifyH("CENTER")
+				hTyrTitle.label:SetWordWrap(false)
 			end
-			head:AddChild(hScore)
+			head:AddChild(hTyrTitle)
 
 			local maxRows = math.min(#details.mythic.rows, 10)
 			for i = 1, maxRows do
 				local row = details.mythic.rows[i]
-				local levelText = (tonumber(row.level) or 0) > 0 and ("+" .. tostring(row.level)) or "-"
-				local scoreText = (tonumber(row.score) or 0) > 0 and tostring(row.score) or "-"
-
+				local fortifiedLevel = tonumber(row.fortifiedLevel) or 0
+				local tyrannicalLevel = tonumber(row.tyrannicalLevel) or 0
+				local fortifiedScore = tonumber(row.fortifiedScore) or 0
+				local tyrannicalScore = tonumber(row.tyrannicalScore) or 0
+				if fortifiedLevel <= 0 and tyrannicalLevel <= 0 then
+					local fallbackLevel = tonumber(row.level) or 0
+					if fallbackLevel > 0 then
+						fortifiedLevel = fallbackLevel
+					end
+				end
+				if fortifiedScore <= 0 and tyrannicalScore <= 0 then
+					local fallbackScore = tonumber(row.score) or 0
+					if fallbackScore > 0 then
+						fortifiedScore = fallbackScore
+					end
+				end
+				local fortLevelText = fortifiedLevel > 0 and ("+" .. tostring(fortifiedLevel)) or "-"
+				local tyrLevelText = tyrannicalLevel > 0 and ("+" .. tostring(tyrannicalLevel)) or "-"
+				local fortScoreText = fortifiedScore > 0 and tostring(fortifiedScore) or "-"
+				local tyrScoreText = tyrannicalScore > 0 and tostring(tyrannicalScore) or "-"
+				local fortLevelColor = GetMythicKeyLevelColorHex(fortifiedLevel)
+				local tyrLevelColor = GetMythicKeyLevelColorHex(tyrannicalLevel)
 				local rowGroup = AceGUI:Create("SimpleGroup")
 				rowGroup:SetFullWidth(true)
 				rowGroup:SetLayout("Flow")
@@ -3249,10 +3637,10 @@ function CHARINFO:TryRegisterPage()
 						GameTooltip:AddLine("|cff03A9F4Klick: Instanzportal zaubern|r", 1, 1, 1)
 					elseif portalSpellID then
 						GameTooltip:SetText("|cffffcc00Kein passender Portalzauber gefunden|r", 1, 1, 1)
-						GameTooltip:AddLine("|cff9d9d9dPortalzauber-ID erkannt, aber nicht im Spellbook/als gelernt verfügbar.|r", 1, 1, 1)
+						GameTooltip:AddLine("|cff9d9d9dPortalzauber-ID erkannt, aber nicht im Spellbook/als gelernt verfï¿½gbar.|r", 1, 1, 1)
 					else
-						GameTooltip:SetText("|cff9d9d9dPortal nicht verfügbar|r", 1, 1, 1)
-						GameTooltip:AddLine("|cff9d9d9dKein passender Portalzauber für diesen Dungeon gefunden.|r", 1, 1, 1)
+						GameTooltip:SetText("|cff9d9d9dPortal nicht verfï¿½gbar|r", 1, 1, 1)
+						GameTooltip:AddLine("|cff9d9d9dKein passender Portalzauber fï¿½r diesen Dungeon gefunden.|r", 1, 1, 1)
 					end
 					GameTooltip:Show()
 				end)
@@ -3278,7 +3666,7 @@ function CHARINFO:TryRegisterPage()
 					if not GameTooltip or not widget or not widget.frame then return end
 					GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
 					GameTooltip:SetText(tostring(row.name or "-"), 1, 1, 1)
-					GameTooltip:AddLine("|cff03A9F4Klick: Abenteuerführer öffnen|r", 1, 1, 1)
+					GameTooltip:AddLine("|cff03A9F4Klick: Abenteuerfï¿½hrer ï¿½ffnen|r", 1, 1, 1)
 					GameTooltip:Show()
 				end)
 				nameLabel:SetCallback("OnLeave", function()
@@ -3289,26 +3677,69 @@ function CHARINFO:TryRegisterPage()
 				end)
 				rowGroup:AddChild(nameLabel)
 
-				local keyLabel = AceGUI:Create("Label")
-				keyLabel:SetWidth(keyW)
-				keyLabel:SetText("|cffffffff" .. levelText .. "|r")
-				if keyLabel.label then
-					keyLabel.label:SetFontObject(GameFontNormalSmallOutline)
-					keyLabel.label:SetJustifyH("CENTER")
-					keyLabel.label:SetWordWrap(false)
+				local keyVLabel = AceGUI:Create("Label")
+				keyVLabel:SetWidth(keyVW)
+				keyVLabel:SetText("|c" .. fortLevelColor .. fortLevelText .. "|r")
+				if keyVLabel.label then
+					keyVLabel.label:SetFontObject(GameFontNormalSmallOutline)
+					keyVLabel.label:SetJustifyH("CENTER")
+					keyVLabel.label:SetWordWrap(false)
 				end
-				rowGroup:AddChild(keyLabel)
+				rowGroup:AddChild(keyVLabel)
 
-				local scoreLabel = AceGUI:Create("Label")
-				scoreLabel:SetWidth(scoreW)
-				scoreLabel:SetText("|cffffffff" .. scoreText .. "|r")
-				if scoreLabel.label then
-					scoreLabel.label:SetFontObject(GameFontNormalSmallOutline)
-					scoreLabel.label:SetJustifyH("RIGHT")
-					scoreLabel.label:SetWordWrap(false)
+				local scoreVLabel = AceGUI:Create("Label")
+				scoreVLabel:SetWidth(scoreVW)
+				scoreVLabel:SetText("|cffffffff" .. fortScoreText .. "|r")
+				if scoreVLabel.label then
+					scoreVLabel.label:SetFontObject(GameFontNormalSmallOutline)
+					scoreVLabel.label:SetJustifyH("RIGHT")
+					scoreVLabel.label:SetWordWrap(false)
 				end
-				rowGroup:AddChild(scoreLabel)
+				rowGroup:AddChild(scoreVLabel)
+
+				local keyTLabel = AceGUI:Create("Label")
+				keyTLabel:SetWidth(keyTW)
+				keyTLabel:SetText("|c" .. tyrLevelColor .. tyrLevelText .. "|r")
+				if keyTLabel.label then
+					keyTLabel.label:SetFontObject(GameFontNormalSmallOutline)
+					keyTLabel.label:SetJustifyH("CENTER")
+					keyTLabel.label:SetWordWrap(false)
+				end
+				rowGroup:AddChild(keyTLabel)
+
+				local scoreTLabel = AceGUI:Create("Label")
+				scoreTLabel:SetWidth(scoreTW)
+				scoreTLabel:SetText("|cffffffff" .. tyrScoreText .. "|r")
+				if scoreTLabel.label then
+					scoreTLabel.label:SetFontObject(GameFontNormalSmallOutline)
+					scoreTLabel.label:SetJustifyH("RIGHT")
+					scoreTLabel.label:SetWordWrap(false)
+				end
+				rowGroup:AddChild(scoreTLabel)
 			end
+
+			local totalScore = tonumber(details.mythic.score) or SumMythicRowsScore(details.mythic.rows)
+			local totalRow = AceGUI:Create("SimpleGroup")
+			totalRow:SetFullWidth(true)
+			totalRow:SetLayout("Flow")
+			card:AddChild(totalRow)
+
+			local totalSpacer = AceGUI:Create("Label")
+			totalSpacer:SetWidth(nameW + portalW)
+			totalSpacer:SetText("")
+			totalRow:AddChild(totalSpacer)
+
+			local totalLabel = AceGUI:Create("Label")
+			totalLabel:SetWidth(keyVW + scoreVW + keyTW + scoreTW)
+			local totalText = (totalScore and totalScore > 0) and tostring(totalScore) or "-"
+			local totalColor = GetMythicScoreColorHex(totalScore)
+			totalLabel:SetText("|cff9d9d9d" .. LT("CHARINFO_LABEL_TOTAL", "Total") .. ":     |r|c" .. totalColor .. totalText .. "|r")
+			if totalLabel.label then
+				totalLabel.label:SetFontObject(GameFontNormalSmallOutline)
+				totalLabel.label:SetJustifyH("CENTER")
+				totalLabel.label:SetWordWrap(false)
+			end
+			totalRow:AddChild(totalLabel)
 		end
 
 		local function BuildCard_Equipment(parent)
@@ -3584,11 +4015,11 @@ function CHARINFO:TryRegisterPage()
 							end
 							local statusText = bossKilled
 								and ("|c" .. killedColor .. LT("CHARINFO_RAID_TOOLTIP_BOSS_KILLED", "Besiegt") .. "|r")
-								or ("|c" .. availableColor .. LT("CHARINFO_RAID_TOOLTIP_BOSS_AVAILABLE", "Verfügbar") .. "|r")
+								or ("|c" .. availableColor .. LT("CHARINFO_RAID_TOOLTIP_BOSS_AVAILABLE", "Verfï¿½gbar") .. "|r")
 							GameTooltip:AddDoubleLine(ename, statusText, 1, 1, 1, 1, 1, 1)
 						end
 					else
-						GameTooltip:AddLine(LT("CHARINFO_RAID_TOOLTIP_BOSSLIST_MISSING", "Bossliste nicht verfügbar."), 0.75, 0.75, 0.75)
+						GameTooltip:AddLine(LT("CHARINFO_RAID_TOOLTIP_BOSSLIST_MISSING", "Bossliste nicht verfï¿½gbar."), 0.75, 0.75, 0.75)
 					end
 
 					GameTooltip:Show()
@@ -3664,7 +4095,7 @@ function CHARINFO:TryRegisterPage()
 					if desc ~= "" then
 						GameTooltip:AddLine(desc, 0.9, 0.9, 0.9, true)
 					else
-						GameTooltip:AddLine(LT("CHARINFO_RAID_DESC_MISSING", "Keine Raidbeschreibung verfügbar."), 0.75, 0.75, 0.75)
+						GameTooltip:AddLine(LT("CHARINFO_RAID_DESC_MISSING", "Keine Raidbeschreibung verfï¿½gbar."), 0.75, 0.75, 0.75)
 					end
 					GameTooltip:Show()
 				end)
@@ -4044,7 +4475,7 @@ function CHARINFO:InitializeOptions()
 		if not ts then
 			ts = (type(time) == "function" and tonumber(time()) or 0) or 0
 		end
-		GMS:SetCharacterDomainData(sourceGuid, "CHARINFO", {
+		GMS:SetCharacterDomainData(sourceGuid, "CHARINFO_V2", {
 			gmsVersion = version,
 		}, {
 			sourceGuid = sourceGuid,
@@ -4094,4 +4525,9 @@ function CHARINFO:OnDisable()
 	self._ticker = nil
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
+
+
+
+
+
 

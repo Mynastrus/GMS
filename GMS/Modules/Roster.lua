@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.1.29",
+	VERSION      = "1.1.36",
 }
 
 local LibStub = LibStub
@@ -347,6 +347,65 @@ local function ResolveGuidByNameFull(nameFull)
 	return nil
 end
 
+local function ComputeMythicScoreFromSource(src)
+	if type(src) ~= "table" then return nil end
+	local direct = tonumber(src.s or src.score)
+	if direct then return direct end
+
+	local function scoreFromPacked(v)
+		if type(v) ~= "string" then return nil end
+		local fsNoAffix, tsNoAffix = v:match("^(?:%-?%d+):(%-?%d+):[01]:(?:%-?%d+):(%-?%d+):[01]:(?:%-?%d+)$")
+		if tsNoAffix then
+			return (tonumber(fsNoAffix) or 0) + (tonumber(tsNoAffix) or 0)
+		end
+		local _, fs, _, ts = v:match("^(%-?%d+):(%-?%d+):[01]:(%-?%d+):(%-?%d+):[01]:%-?%d+:[^:]*$")
+		if ts then
+			return (tonumber(fs) or 0) + (tonumber(ts) or 0)
+		end
+		local legacy = v:match("^%-?%d+:(%-?%d+):[01]:")
+		return tonumber(legacy or "")
+	end
+	if type(src.d) == "table" then
+		local total, has = 0, false
+		for i = 1, #src.d do
+			local row = src.d[i]
+			if type(row) == "table" then
+				local v = tonumber(row.s or row.score or 0)
+				if not v then
+					v = (tonumber(row.fs or 0) or 0) + (tonumber(row.ts or 0) or 0)
+				end
+				v = tonumber(v or 0) or 0
+				if v > 0 then
+					total = total + v
+					has = true
+				end
+			end
+		end
+		if has then return total end
+	end
+	local total, has = 0, false
+	for _, v in pairs(src) do
+		if type(v) == "string" then
+			local score = tonumber(scoreFromPacked(v) or 0) or 0
+			if score > 0 then
+				total = total + score
+				has = true
+			end
+		elseif type(v) == "table" then
+			local score = tonumber(v.s or v.score or 0)
+			if not score then
+				score = (tonumber(v.fs or 0) or 0) + (tonumber(v.ts or 0) or 0)
+			end
+			score = tonumber(score or 0) or 0
+			if score > 0 then
+				total = total + score
+				has = true
+			end
+		end
+	end
+	if has then return total end
+	return nil
+end
 local function GetStoredCharacterFallbackMeta(guid)
 	local g = tostring(guid or "")
 	if g == "" then return nil end
@@ -365,12 +424,14 @@ local function GetStoredCharacterFallbackMeta(guid)
 	local ilvl = BuildItemLevelFromStoredSnapshot(eqSnap)
 	if ilvl and ilvl > 0 then out.ilvl = ilvl end
 
-	local mp = type(char.MYTHICPLUS) == "table" and char.MYTHICPLUS or nil
-	local mplus = mp and tonumber(mp.score or 0) or nil
+	local mp = type(char.MYTHICPLUS_V2) == "table" and char.MYTHICPLUS_V2 or nil
+	local mpData = (mp and type(mp.data) == "table") and mp.data or mp
+	local mplus = ComputeMythicScoreFromSource(mpData)
 	if mplus and mplus >= 0 then out.mplus = mplus end
 
-	local raids = type(char.RAIDS) == "table" and char.RAIDS or nil
-	local raidRows = raids and type(raids.raids) == "table" and raids.raids or nil
+	local raids = type(char.RAIDS_V2) == "table" and char.RAIDS_V2 or nil
+	local raidsData = (raids and type(raids.data) == "table") and raids.data or raids
+	local raidRows = raidsData and type(raidsData.raids) == "table" and raidsData.raids or nil
 	if type(raidRows) == "table" and type(BuildRaidStatusFromRaidsStore) == "function" then
 		local raid = tostring(BuildRaidStatusFromRaidsStore(raidRows) or "-")
 		if raid ~= "" and raid ~= "-" then
@@ -378,7 +439,8 @@ local function GetStoredCharacterFallbackMeta(guid)
 		end
 	end
 
-	local charInfo = type(char.CHARINFO) == "table" and char.CHARINFO or nil
+	local charInfo = type(char.CHARINFO_V2) == "table" and char.CHARINFO_V2
+		or (type(char.CHARINFO) == "table" and char.CHARINFO or nil)
 	local charInfoData = (charInfo and type(charInfo.data) == "table") and charInfo.data or charInfo
 	local gmsVersion = charInfoData and tostring(charInfoData.gmsVersion or "") or ""
 	if gmsVersion ~= "" then
@@ -395,7 +457,7 @@ local function SaveStoredCharacterVersion(guid, version, seenAt, sourceGuid)
 	local ts = tonumber(seenAt or 0) or 0
 	local src = tostring(sourceGuid or "")
 	if GMS and type(GMS.SetCharacterDomainData) == "function" then
-		return GMS:SetCharacterDomainData(g, "CHARINFO", {
+		return GMS:SetCharacterDomainData(g, "CHARINFO_V2", {
 			gmsVersion = v,
 		}, {
 			sourceGuid = src ~= "" and src or g,
@@ -856,6 +918,91 @@ GetLastOnlineByRosterIndex = function(index, isOnline)
 	return ts, text, totalHours
 end
 
+local function BuildLiveLastOnlineByGuidMap()
+	local out = {}
+	if not IsInGuild or not IsInGuild() then
+		return out
+	end
+
+	local total = 0
+	if C_GuildInfo and type(C_GuildInfo.GetNumGuildMembers) == "function" then
+		total = tonumber(C_GuildInfo.GetNumGuildMembers() or 0) or 0
+	elseif type(GetNumGuildMembers) == "function" then
+		total = tonumber(GetNumGuildMembers() or 0) or 0
+	end
+	if total <= 0 then
+		return out
+	end
+
+	for i = 1, total do
+		local rowGuid = nil
+		local rowOnline = false
+
+		if type(GetGuildRosterInfo) == "function" then
+			local _, _, _, _, _, _, _, _, online, _, _, _, _, _, _, _, guid = GetGuildRosterInfo(i)
+			rowOnline = (online == true)
+			if type(guid) == "string" and guid ~= "" then
+				rowGuid = guid
+			end
+		end
+
+		if not rowGuid and C_GuildInfo and type(C_GuildInfo.GetGuildRosterInfo) == "function" then
+			local ok, info = pcall(C_GuildInfo.GetGuildRosterInfo, i)
+			if ok then
+				if type(info) == "table" then
+					local g = tostring(info.guid or info.GUID or "")
+					if g ~= "" then
+						rowGuid = g
+					end
+					rowOnline = (info.online == true) or rowOnline
+				elseif type(info) == "string" and info ~= "" then
+					rowGuid = info
+				end
+			end
+		end
+
+		if IsUsablePlayerGuid(rowGuid) then
+			local _, txt, hours = GetLastOnlineByRosterIndex(i, rowOnline)
+			out[rowGuid] = {
+				text = tostring(txt or "-"),
+				hours = tonumber(hours) or 0,
+				online = (rowOnline == true),
+			}
+		end
+	end
+
+	return out
+end
+
+local function ResolveLastOnlineFromLiveGuild(member, ctx)
+	if type(member) ~= "table" then
+		return "-", 0
+	end
+	local guid = tostring(member.guid or "")
+	if not IsUsablePlayerGuid(guid) then
+		return tostring(member.lastOnlineText or "-"), tonumber(member.lastOnlineHours) or 0
+	end
+
+	local map = nil
+	if type(ctx) == "table" then
+		if type(ctx._liveLastOnlineByGuid) ~= "table" then
+			ctx._liveLastOnlineByGuid = BuildLiveLastOnlineByGuidMap()
+		end
+		map = ctx._liveLastOnlineByGuid
+	end
+	if type(map) ~= "table" then
+		map = BuildLiveLastOnlineByGuidMap()
+	end
+
+	local node = map and map[guid] or nil
+	if type(node) == "table" then
+		local txt = tostring(node.text or "-")
+		local hrs = tonumber(node.hours) or 0
+		return txt, hrs
+	end
+	return "-", 0
+end
+
 function Roster:GetMemberMetaStore()
 	local opts = self._options
 	if type(opts) == "table" then
@@ -992,9 +1139,6 @@ function Roster:SetMemberMeta(guid, meta, seenAt, opts)
 	if type(guid) ~= "string" or guid == "" then return false end
 	if type(meta) ~= "table" then return false end
 	opts = type(opts) == "table" and opts or {}
-	if GMS and type(GMS.EnsureGlobalCharacterRoot) == "function" then
-		GMS:EnsureGlobalCharacterRoot(guid)
-	end
 
 	local store = self:GetMemberMetaStore()
 	local t = tonumber(seenAt) or (GetTime and GetTime()) or 0
@@ -1284,6 +1428,79 @@ local function GetRaidNameForEntry(key, raidEntry)
 	return ""
 end
 
+local function DecodeRaidV2LineForRoster(instanceID, packed)
+	local function diffTagText(d)
+		local n = tonumber(d) or 0
+		if n == 17 then return "LFR" end
+		if n == 14 then return "N" end
+		if n == 15 then return "H" end
+		if n == 16 then return "M" end
+		return tostring(d or "?")
+	end
+	local entry = {
+		instanceID = tonumber(instanceID) or instanceID,
+		name = tostring(instanceID or ""),
+		total = 0,
+		current = {},
+	}
+	local line = tostring(packed or "")
+	if line == "" then
+		return entry
+	end
+	for part in string.gmatch(line, "([^;]+)") do
+		local key, val = part:match("^([^=]+)=(.*)$")
+		if key and val then
+			if key == "t" then
+				entry.total = tonumber(val) or entry.total
+			elseif key == "b" then
+				local d, k, t = val:match("^(%-?%d+)%/(%-?%d+)%/(%-?%d+)$")
+				d, k, t = tonumber(d), tonumber(k), tonumber(t)
+				if d then
+					entry.best = { diffID = d, killed = k or 0, total = t or 0, short = tostring(diffTagText(d) .. " " .. tostring(k or 0) .. "/" .. tostring(t or 0)) }
+				end
+			elseif key:match("^c%d+$") then
+				local d = tonumber(key:sub(2))
+				local k, t = val:match("^(%-?%d+)%/(%-?%d+)%/")
+				k, t = tonumber(k), tonumber(t)
+				if d then
+					entry.current[d] = {
+						diffID = d,
+						killed = k or 0,
+						total = t or 0,
+						short = tostring(diffTagText(d) .. " " .. tostring(k or 0) .. "/" .. tostring(t or 0)),
+					}
+				end
+			end
+		end
+	end
+	return entry
+end
+
+local function ResolveRaidsStoreFromPayload(payload)
+	if type(payload) ~= "table" then
+		return nil
+	end
+	if type(payload.raids) == "table" then
+		return payload.raids
+	end
+	local data = type(payload.data) == "table" and payload.data or payload
+	if type(data) ~= "table" then
+		return nil
+	end
+	local out = {}
+	local found = false
+	for raidID, node in pairs(data) do
+		if type(node) == "table" and (type(node.current) == "table" or type(node.best) == "table") then
+			out[tonumber(raidID) or raidID] = node
+			found = true
+		elseif type(node) == "string" then
+			out[tonumber(raidID) or raidID] = DecodeRaidV2LineForRoster(raidID, node)
+			found = true
+		end
+	end
+	return found and out or nil
+end
+
 local function BuildRaidStatusDetailsFromRaidsStore(all)
 	if type(all) ~= "table" then
 		return "-", nil, nil
@@ -1409,12 +1626,12 @@ local function CollectLocalMetaPayload()
 
 	local mythic = GMS and GMS:GetModule("MythicPlus", true)
 	if mythic and type(mythic._options) == "table" then
-		mplus = tonumber(mythic._options.score)
+		mplus = ComputeMythicScoreFromSource(mythic._options)
 	end
 	if not mplus and GMS and type(GMS.GetModuleOptions) == "function" then
 		local ok, opts = pcall(GMS.GetModuleOptions, GMS, "MythicPlus")
 		if ok and type(opts) == "table" then
-			mplus = tonumber(opts.score)
+			mplus = ComputeMythicScoreFromSource(opts)
 		end
 	end
 
@@ -1949,7 +2166,7 @@ function Roster:InitCommMetaSync()
 			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
 			local payload = record.payload
 			if type(payload) ~= "table" then return end
-			local mplus = tonumber(payload.score)
+			local mplus = ComputeMythicScoreFromSource(payload)
 			if mplus and Roster:SetMemberMeta(record.originGUID, {
 				mplus = mplus,
 				mythicplus = mplus,
@@ -1966,8 +2183,9 @@ function Roster:InitCommMetaSync()
 		comm:RegisterRecordListener("RAIDS_V2", function(record)
 			if type(record) ~= "table" or type(record.originGUID) ~= "string" then return end
 			local payload = record.payload
-			if type(payload) ~= "table" or type(payload.raids) ~= "table" then return end
-			local raid, raidName, raidPriority = BuildRaidStatusDetailsFromRaidsStore(payload.raids)
+			local raidsStore = ResolveRaidsStoreFromPayload(payload)
+			if type(raidsStore) ~= "table" then return end
+			local raid, raidName, raidPriority = BuildRaidStatusDetailsFromRaidsStore(raidsStore)
 			if raid ~= "" and raid ~= "-" and Roster:SetMemberMeta(record.originGUID, {
 				raid = raid,
 				raid_name = raidName,
@@ -2046,7 +2264,7 @@ function Roster:InitCommMetaSync()
 		hydrateHandlers[#hydrateHandlers + 1] = { domain = "MYTHICPLUS_V2", fn = function(record)
 			local payload = record.payload
 			if type(payload) ~= "table" then return end
-			local mplus = tonumber(payload.score)
+			local mplus = ComputeMythicScoreFromSource(payload)
 			if mplus then
 				Roster:SetMemberMeta(record.originGUID, { mplus = mplus, mythicplus = mplus }, record.updatedAt or ((GetTime and GetTime()) or 0), {
 					domain = "mythicplus",
@@ -2058,8 +2276,9 @@ function Roster:InitCommMetaSync()
 
 		hydrateHandlers[#hydrateHandlers + 1] = { domain = "RAIDS_V2", fn = function(record)
 			local payload = record.payload
-			if type(payload) ~= "table" or type(payload.raids) ~= "table" then return end
-			local raid, raidName, raidPriority = BuildRaidStatusDetailsFromRaidsStore(payload.raids)
+			local raidsStore = ResolveRaidsStoreFromPayload(payload)
+			if type(raidsStore) ~= "table" then return end
+			local raid, raidName, raidPriority = BuildRaidStatusDetailsFromRaidsStore(raidsStore)
 			if raid ~= "" and raid ~= "-" then
 				Roster:SetMemberMeta(record.originGUID, { raid = raid, raid_name = raidName, raid_priority = raidPriority }, record.updatedAt or ((GetTime and GetTime()) or 0), {
 					domain = "raid",
@@ -2440,7 +2659,11 @@ local function BuildCell_Zone(row, member, ctx)
 end
 
 local function BuildCell_LastOnline(row, member, ctx)
-	local txt = tostring((member and member.lastOnlineText) or "-")
+	local txt, hrs = ResolveLastOnlineFromLiveGuild(member, ctx)
+	if type(member) == "table" then
+		member.lastOnlineText = txt
+		member.lastOnlineHours = hrs
+	end
 	local lbl = AceGUI:Create("Label")
 	lbl:SetText(txt)
 	lbl.label:SetFontObject(GameFontNormalSmallOutline)
@@ -3780,6 +4003,9 @@ function Roster:GetMemberByGUID(guid)
 	end
 	return nil
 end
+
+
+
 
 
 
