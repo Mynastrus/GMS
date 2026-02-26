@@ -36,7 +36,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.15",
+	VERSION      = "1.3.16",
 }
 
 -- ###########################################################################
@@ -110,6 +110,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 -- ###########################################################################
 
 local RELEASES = {
+	{
+		version = "2.0.0",
+		date = "2026-02-26",
+		title_en = "Sync V2 rollout, canonical DB cutover, and full locale hardening",
+		title_de = "Sync-V2-Rollout, kanonischer DB-Cutover und vollstaendige Lokalisierungs-Haertung",
+		notes_en = {
+			"Rolled out strict sync protocol V2 with version-gated transport, ANN header contract alignment, and domain allowlisting for safer cross-client compatibility.",
+			"Completed canonical database cutover for character and guild data paths, including normalized guild club-id storage and consistent central upsert/index flows.",
+			"Upgraded module data domains to V2 across roster, character profile, raids, mythic plus, equipment, and account-link pipelines with compact payload handling.",
+			"Hardened UI behavior by disabling protected side-dock operations during combat and resuming deferred dock reflow safely after combat ends.",
+			"Closed localization parity across all shipped locales and repaired UTF-8/native-text issues in ruRU, koKR, zhCN, and zhTW for chat and UI output consistency.",
+		},
+		notes_de = {
+			"Das strikte Sync-Protokoll V2 wurde ausgerollt: versionsgebundener Transport, abgestimmter ANN-Header-Vertrag und Domain-Allowlist fuer sichere Client-Kompatibilitaet.",
+			"Der kanonische Datenbank-Cutover fuer Charakter- und Gildendaten ist abgeschlossen, inklusive normalisierter Guild-Club-ID-Speicherung und konsistenter zentraler Upsert-/Index-Pfade.",
+			"Die Modul-Domaenen wurden durchgaengig auf V2 angehoben (Roster, CharInfo, Raids, MythicPlus, Equipment, Account-Links) mit kompakten Payload-Formaten.",
+			"Das UI-Verhalten wurde gehaertet: geschuetzte Side-Dock-Operationen sind im Kampf deaktiviert und Dock-Reflow wird danach sicher verzugert fortgesetzt.",
+			"Die Lokalisierungsparitaet wurde fuer alle ausgelieferten Sprachen geschlossen; UTF-8-/Nativtext-Probleme in ruRU, koKR, zhCN und zhTW wurden behoben.",
+		},
+	},
 	{
 		version = "1.5.2",
 		date = "2026-02-23",
