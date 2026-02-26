@@ -17,6 +17,7 @@ if type(GMS.RegisterLocale) ~= "function" then return end
 GMS:RegisterLocale("enUS", {
 	CORE_STARTUP_LOADED = "Addon loaded: Guild Management System v%s",
 	CORE_STARTUP_HINT = "Use %s to open the main window and %s for help.",
+	CORE_OPT_DEBUG = "Debug mode",
 
 	NAME_CORE = "GMS Core",
 	NAME_UI = "Guild Management System",
@@ -51,6 +52,7 @@ GMS:RegisterLocale("enUS", {
 	CHANGELOG_SLASH_HELP = "/gms changelog - opens release notes",
 	DB_SLASH_WIPE_HELP = "/gms dbwipe - hard reset all GMS saved variables and reload UI",
 	DB_SLASH_VIEW_HELP = "/gms dbview [all|gms|logging|ui] [full] - open live DB inspector",
+	DB_OPT_RESET = "Reset database",
 	DB_VIEW_TITLE = "GMS Database Inspector",
 	DB_VIEW_TITLE_FMT = "GMS Database Inspector - %s",
 	DB_VIEW_HINT = "Live SavedVariables snapshot. Use Refresh before copying.",
@@ -196,6 +198,7 @@ GMS:RegisterLocale("enUS", {
 	ROSTER_STATUS_FILTERED = "|cffb8b8b8Roster:|r showing %d of %d",
 	ROSTER_STATUS_TOTAL = "|cffb8b8b8Roster:|r %d members",
 	ROSTER_DOCK_TOOLTIP = "Open roster page",
+	ROSTER_SLASH_HELP = "/gms roster - opens roster page",
 	ROSTER_CTX_WHISPER = "Whisper",
 	ROSTER_CTX_COPY_NAME = "Copy name (with realm)",
 	ROSTER_CTX_INVITE = "Invite to group",
@@ -236,6 +239,7 @@ GMS:RegisterLocale("enUS", {
 	RAIDS_SLASH_REBUILD_FAILED = "Raids: catalog rebuild not available.",
 	RAIDS_SLASH_USAGE = "Usage: /gms raids scan",
 	RAIDS_SLASH_HELP = "/gms raids scan - trigger a raid lockout scan now",
+	RAIDS_OPT_REBUILD = "Rebuild catalog",
 
 	CHARINFO_ERROR_FMT = "CharInfo error: %s",
 	CHARINFO_NO_DATA = "No data available.",
@@ -322,6 +326,13 @@ GMS:RegisterLocale("enUS", {
 
 	CHANGELOG_STATUS_LOADED_FMT = "CHANGELOG: %d releases loaded (%s)",
 	CHANGELOG_FALLBACK_NOTICE = "Language fallback: This changelog is currently shown in English. Sorry, but providing release notes in all languages would be too much effort right now, so only English and German are available.",
+	CHANGELOG_OPT_SHOW_ON_LOGIN = "Show new release notes automatically on login",
+	CHANGELOG_DOCK_TOOLTIP = "Shows all release notes",
+
+	CHATLINKS_OPT_CLICKABLE_PREFIX = "Clickable chat prefix",
+	CHATLINKS_DESC = "Clickable chat links with tooltips and actions.",
+	CHATLINKS_TOOLTIP_COMMAND_FMT = "Command: |cFFFFCC00%s|r",
+	CHATLINKS_TITLE_MENU = "GMS [Menu]",
 
 	PERM_ONLY_GM = "Only the guild leader can manage permissions.",
 	PERM_TAB_MEMBERS = "Members",
@@ -392,6 +403,14 @@ GMS:RegisterLocale("enUS", {
 	CHARINFO_DOCK_TOOLTIP = "Opens character info",
 	CHARINFO_LEVEL_SHORT_FMT = "Lv %d",
 	CHARINFO_MYTHIC_ROW_FMT = "%s   key: %s   score: %s",
+	CHARINFO_PORTAL_TITLE_FALLBACK = "Mythic+ Portal",
+	CHARINFO_PORTAL_COOLDOWN_LABEL = "Cooldown:",
+	CHARINFO_PORTAL_CAST_HINT = "Click: Cast dungeon portal",
+	CHARINFO_PORTAL_SPELL_MISSING = "No matching portal spell found",
+	CHARINFO_PORTAL_SPELL_UNAVAILABLE = "Portal spell ID was detected but is not available in spellbook/as learned.",
+	CHARINFO_PORTAL_NOT_AVAILABLE = "Portal not available",
+	CHARINFO_PORTAL_NOT_FOUND_FOR_DUNGEON = "No matching portal spell found for this dungeon.",
+	CHARINFO_OPEN_EJ_HINT = "Click: Open adventure guide",
 	CHARINFO_BOSS_FALLBACK_FMT = "Boss %d",
 	CHARINFO_STATUS_ONLINE = "Online",
 	CHARINFO_STATUS_OFFLINE = "Offline",
@@ -420,4 +439,10 @@ GMS:RegisterLocale("enUS", {
 	ROSTER_TOOLTIP_LINKED_CHARS_NONE = "No linked guild characters",
 	ROSTER_TOOLTIP_BEST_ATTEMPT = "Best attempt",
 	ROSTER_TOOLTIP_UNKNOWN_RAID = "Unknown raid",
+	ROSTER_TOOLTIP_STATUS = "Status",
+	ROSTER_TOOLTIP_LEVEL_CLASS = "Level/Class",
+	ROSTER_TOOLTIP_REALM = "Realm",
+	ROSTER_TOOLTIP_PUBLIC_NOTE = "Public note",
+	ROSTER_TOOLTIP_OFFICER_NOTE = "Officer note",
+	ROSTER_TOOLTIP_LEVEL_FMT = "Lv %d",
 })

@@ -79,7 +79,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.23",
+	VERSION      = "1.2.24",
 }
 
 -- ###########################################################################
@@ -426,7 +426,7 @@ local function EnsureRaidsV2Store(charStore)
 		raids = logicalRaids,
 		meta = meta,
 		scanLegacy = meta.scanLegacy == true,
-		rebuild = { type = "execute", name = "Katalog neu aufbauen" },
+		rebuild = { type = "execute", name = TR("RAIDS_OPT_REBUILD", "Rebuild catalog") },
 		module = METADATA.SHORT_NAME,
 		version = METADATA.VERSION,
 		lastScan = tonumber(meta.lastScan) or 0,

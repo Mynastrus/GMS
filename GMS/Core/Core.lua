@@ -15,7 +15,7 @@ local METADATA = {
 	INTERN_NAME  = "GMS_CORE",
 	SHORT_NAME   = "CORE",
 	DISPLAY_NAME = "GMS Core",
-	VERSION      = "1.0.4",
+	VERSION      = "1.0.5",
 }
 
 -- ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ function GMS:OnInitialize()
 	-- Register Core options
 	if type(self.RegisterModuleOptions) == "function" then
 		self:RegisterModuleOptions("CORE", {
-			debug = { type = "toggle", name = "Debug-Modus", default = false },
+			debug = { type = "toggle", name = ((type(self.T) == "function" and self:T("CORE_OPT_DEBUG", "Debug mode")) or "Debug mode"), default = false },
 		}, "PROFILE")
 	end
 end

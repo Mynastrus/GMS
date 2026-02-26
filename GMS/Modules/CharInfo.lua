@@ -1,7 +1,7 @@
 -- ============================================================================
 --	GMS/Modules/CharInfo.lua
 --	CharInfo MODULE (Ace)
---	- Zugriff auf GMS über AceAddon Registry
+--	- Zugriff auf GMS ueber AceAddon Registry
 --	- UI-Page + RightDock Icon
 --	- Zeigt Player-Snapshot + ctx (optional) + Auswahl-Buttons
 -- ============================================================================
@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.41",
+	VERSION      = "1.1.42",
 }
 
 local LibStub = LibStub
@@ -447,7 +447,7 @@ local function GetTargetSnapshot()
 	local level = UnitLevel("target")
 	local guid = (UnitGUID and UnitGUID("target")) or nil
 
-	-- Spec / ilvl für target sind ohne Inspect nicht zuverlässig -> bewusst "-"
+	-- Spec / ilvl fuer target sind ohne Inspect nicht zuverlaessig -> bewusst "-"
 	return {
 		name         = name,
 		realm        = realm,
@@ -1199,7 +1199,10 @@ end
 
 local function NormalizeSearchText(raw)
 	local s = tostring(raw or ""):lower()
-	s = s:gsub("[����]", "a"):gsub("[����]", "o"):gsub("[����]", "u"):gsub("�", "ss")
+	s = s:gsub("\195\164", "a"):gsub("\195\160", "a")
+	s = s:gsub("\195\182", "o"):gsub("\195\178", "o")
+	s = s:gsub("\195\188", "u"):gsub("\195\185", "u")
+	s = s:gsub("\195\159", "ss")
 	s = s:gsub("[^%w%s]", " "):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
 	return s
 end
@@ -1963,11 +1966,11 @@ local function BuildSelfRaidWaitingText(details)
 		return LT("CHARINFO_RAID_WAIT_SCAN_REASON", "Warte auf Raidscan (%s)...", reason)
 	end
 	if raids._statsDeferredScheduled == true then
-		return LT("CHARINFO_RAID_WAIT_DEFERRED_SCAN", "Warte auf verz�gerten Raid-Statistikscan...")
+		return LT("CHARINFO_RAID_WAIT_DEFERRED_SCAN", "Warte auf verzoegerten Raid-Statistikscan...")
 	end
 	local cursor = tonumber(raids._statsCategoryCursor or 1) or 1
 	if cursor > 1 then
-		return LT("CHARINFO_RAID_WAIT_STATS_RUNNING", "Raid-Statistikscan l�uft...")
+		return LT("CHARINFO_RAID_WAIT_STATS_RUNNING", "Raid-Statistikscan laeuft...")
 	end
 	if raids._ejUnsupported == true then
 		return LT("CHARINFO_RAID_WAIT_SAVEDINSTANCES", "Warte auf SavedInstances-Raiddaten...")
@@ -3679,15 +3682,15 @@ function CHARINFO:TryRegisterPage()
 					GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
 					if portalSpellID and hasPortalSpell then
 						local remain = select(1, GetSpellCooldownRemaining(portalSpellID))
-						GameTooltip:SetText(tostring(portalSpellName or "Mythic+ Portal"), 1, 1, 1)
-						GameTooltip:AddLine(string.format("|cff9d9d9dCooldown:|r %s", FormatCooldownShort(remain)), 1, 1, 1)
-						GameTooltip:AddLine("|cff03A9F4Klick: Instanzportal zaubern|r", 1, 1, 1)
+						GameTooltip:SetText(tostring(portalSpellName or LT("CHARINFO_PORTAL_TITLE_FALLBACK", "Mythic+ Portal")), 1, 1, 1)
+						GameTooltip:AddLine(string.format("|cff9d9d9d%s|r %s", LT("CHARINFO_PORTAL_COOLDOWN_LABEL", "Cooldown:"), FormatCooldownShort(remain)), 1, 1, 1)
+						GameTooltip:AddLine("|cff03A9F4" .. LT("CHARINFO_PORTAL_CAST_HINT", "Click: Cast dungeon portal") .. "|r", 1, 1, 1)
 					elseif portalSpellID then
-						GameTooltip:SetText("|cffffcc00Kein passender Portalzauber gefunden|r", 1, 1, 1)
-						GameTooltip:AddLine("|cff9d9d9dPortalzauber-ID erkannt, aber nicht im Spellbook/als gelernt verf�gbar.|r", 1, 1, 1)
+						GameTooltip:SetText("|cffffcc00" .. LT("CHARINFO_PORTAL_SPELL_MISSING", "No matching portal spell found") .. "|r", 1, 1, 1)
+						GameTooltip:AddLine("|cff9d9d9d" .. LT("CHARINFO_PORTAL_SPELL_UNAVAILABLE", "Portal spell ID was detected but is not available in spellbook/as learned.") .. "|r", 1, 1, 1)
 					else
-						GameTooltip:SetText("|cff9d9d9dPortal nicht verf�gbar|r", 1, 1, 1)
-						GameTooltip:AddLine("|cff9d9d9dKein passender Portalzauber f�r diesen Dungeon gefunden.|r", 1, 1, 1)
+						GameTooltip:SetText("|cff9d9d9d" .. LT("CHARINFO_PORTAL_NOT_AVAILABLE", "Portal not available") .. "|r", 1, 1, 1)
+						GameTooltip:AddLine("|cff9d9d9d" .. LT("CHARINFO_PORTAL_NOT_FOUND_FOR_DUNGEON", "No matching portal spell found for this dungeon.") .. "|r", 1, 1, 1)
 					end
 					GameTooltip:Show()
 				end)
@@ -3713,7 +3716,7 @@ function CHARINFO:TryRegisterPage()
 					if not GameTooltip or not widget or not widget.frame then return end
 					GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
 					GameTooltip:SetText(tostring(row.name or "-"), 1, 1, 1)
-					GameTooltip:AddLine("|cff03A9F4Klick: Abenteuerf�hrer �ffnen|r", 1, 1, 1)
+					GameTooltip:AddLine("|cff03A9F4" .. LT("CHARINFO_OPEN_EJ_HINT", "Click: Open adventure guide") .. "|r", 1, 1, 1)
 					GameTooltip:Show()
 				end)
 				nameLabel:SetCallback("OnLeave", function()
@@ -4062,11 +4065,11 @@ function CHARINFO:TryRegisterPage()
 							end
 							local statusText = bossKilled
 								and ("|c" .. killedColor .. LT("CHARINFO_RAID_TOOLTIP_BOSS_KILLED", "Besiegt") .. "|r")
-								or ("|c" .. availableColor .. LT("CHARINFO_RAID_TOOLTIP_BOSS_AVAILABLE", "Verf�gbar") .. "|r")
+								or ("|c" .. availableColor .. LT("CHARINFO_RAID_TOOLTIP_BOSS_AVAILABLE", "Verfuegbar") .. "|r")
 							GameTooltip:AddDoubleLine(ename, statusText, 1, 1, 1, 1, 1, 1)
 						end
 					else
-						GameTooltip:AddLine(LT("CHARINFO_RAID_TOOLTIP_BOSSLIST_MISSING", "Bossliste nicht verf�gbar."), 0.75, 0.75, 0.75)
+						GameTooltip:AddLine(LT("CHARINFO_RAID_TOOLTIP_BOSSLIST_MISSING", "Bossliste nicht verfuegbar."), 0.75, 0.75, 0.75)
 					end
 
 					GameTooltip:Show()
@@ -4142,7 +4145,7 @@ function CHARINFO:TryRegisterPage()
 					if desc ~= "" then
 						GameTooltip:AddLine(desc, 0.9, 0.9, 0.9, true)
 					else
-						GameTooltip:AddLine(LT("CHARINFO_RAID_DESC_MISSING", "Keine Raidbeschreibung verf�gbar."), 0.75, 0.75, 0.75)
+						GameTooltip:AddLine(LT("CHARINFO_RAID_DESC_MISSING", "Keine Raidbeschreibung verfuegbar."), 0.75, 0.75, 0.75)
 					end
 					GameTooltip:Show()
 				end)
@@ -4572,9 +4575,3 @@ function CHARINFO:OnDisable()
 	self._ticker = nil
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
-
-
-
-
-
-

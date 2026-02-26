@@ -17,6 +17,7 @@ if type(GMS.RegisterLocale) ~= "function" then return end
 GMS:RegisterLocale("deDE", {
 	CORE_STARTUP_LOADED = "Addon geladen: Guild Management System v%s",
 	CORE_STARTUP_HINT = "Mit %s kannst du das Hauptfenster aufrufen und mit %s die Hilfe.",
+	CORE_OPT_DEBUG = "Debug-Modus",
 
 	NAME_CORE = "GMS Kern",
 	NAME_UI = "Guild Management System",
@@ -51,6 +52,7 @@ GMS:RegisterLocale("deDE", {
 	CHANGELOG_SLASH_HELP = "/gms changelog - oeffnet Release Notes",
 	DB_SLASH_WIPE_HELP = "/gms dbwipe - setzt alle GMS SavedVariables zurueck und laedt die UI neu",
 	DB_SLASH_VIEW_HELP = "/gms dbview [all|gms|logging|ui] [full] - oeffnet den Live-DB-Inspector",
+	DB_OPT_RESET = "Datenbank zuruecksetzen",
 	DB_VIEW_TITLE = "GMS Datenbank-Inspector",
 	DB_VIEW_TITLE_FMT = "GMS Datenbank-Inspector - %s",
 	DB_VIEW_HINT = "Live-Snapshot der SavedVariables. Vor dem Kopieren auf Aktualisieren klicken.",
@@ -195,6 +197,7 @@ GMS:RegisterLocale("deDE", {
 	ROSTER_STATUS_FILTERED = "|cffb8b8b8Roster:|r angezeigt %d von %d",
 	ROSTER_STATUS_TOTAL = "|cffb8b8b8Roster:|r %d Mitglieder",
 	ROSTER_DOCK_TOOLTIP = "Oeffnet die Roster-Page",
+	ROSTER_SLASH_HELP = "/gms roster - oeffnet die Roster-Page",
 	ROSTER_CTX_WHISPER = "Anfluestern",
 	ROSTER_CTX_COPY_NAME = "Name kopieren (inkl. Realm)",
 	ROSTER_CTX_INVITE = "In Gruppe einladen",
@@ -235,6 +238,7 @@ GMS:RegisterLocale("deDE", {
 	RAIDS_SLASH_REBUILD_FAILED = "Raids: Katalog-Neuaufbau nicht verfuegbar.",
 	RAIDS_SLASH_USAGE = "Verwendung: /gms raids scan",
 	RAIDS_SLASH_HELP = "/gms raids scan - startet jetzt einen Raid-Lockout-Scan",
+	RAIDS_OPT_REBUILD = "Katalog neu aufbauen",
 
 	CHARINFO_ERROR_FMT = "CharInfo Fehler: %s",
 	CHARINFO_NO_DATA = "Keine Daten verfuegbar.",
@@ -321,6 +325,13 @@ GMS:RegisterLocale("deDE", {
 
 	CHANGELOG_STATUS_LOADED_FMT = "CHANGELOG: %d Releases geladen (%s)",
 	CHANGELOG_FALLBACK_NOTICE = "Sprach-Fallback: Dieser Changelog wird aktuell auf Englisch angezeigt. Entschuldigung, aber Release Notes in allen Sprachen zu pflegen waere derzeit zu aufwendig, daher gibt es sie nur auf Englisch und Deutsch.",
+	CHANGELOG_OPT_SHOW_ON_LOGIN = "Neue Release Notes beim Login automatisch anzeigen",
+	CHANGELOG_DOCK_TOOLTIP = "Zeigt alle Release Notes",
+
+	CHATLINKS_OPT_CLICKABLE_PREFIX = "Klickbares Chat-Praefix",
+	CHATLINKS_DESC = "Klickbare Chat-Links mit Tooltips und Aktionen.",
+	CHATLINKS_TOOLTIP_COMMAND_FMT = "Befehl: |cFFFFCC00%s|r",
+	CHATLINKS_TITLE_MENU = "GMS [Menue]",
 
 	PERM_ONLY_GM = "Nur der Gildenleiter kann Berechtigungen verwalten.",
 	PERM_TAB_MEMBERS = "Mitglieder",
@@ -391,6 +402,14 @@ GMS:RegisterLocale("deDE", {
 	CHARINFO_DOCK_TOOLTIP = "Oeffnet die Charakterinfo",
 	CHARINFO_LEVEL_SHORT_FMT = "Lv %d",
 	CHARINFO_MYTHIC_ROW_FMT = "%s   Schluessel: %s   Wertung: %s",
+	CHARINFO_PORTAL_TITLE_FALLBACK = "Mythic+ Portal",
+	CHARINFO_PORTAL_COOLDOWN_LABEL = "Abklingzeit:",
+	CHARINFO_PORTAL_CAST_HINT = "Klick: Instanzportal zaubern",
+	CHARINFO_PORTAL_SPELL_MISSING = "Kein passender Portalzauber gefunden",
+	CHARINFO_PORTAL_SPELL_UNAVAILABLE = "Portalzauber-ID erkannt, aber nicht im Zauberbuch/als gelernt verfuegbar.",
+	CHARINFO_PORTAL_NOT_AVAILABLE = "Portal nicht verfuegbar",
+	CHARINFO_PORTAL_NOT_FOUND_FOR_DUNGEON = "Kein passender Portalzauber fuer diesen Dungeon gefunden.",
+	CHARINFO_OPEN_EJ_HINT = "Klick: Abenteuerfuehrer oeffnen",
 	CHARINFO_BOSS_FALLBACK_FMT = "Boss %d",
 	CHARINFO_STATUS_ONLINE = "Online",
 	CHARINFO_STATUS_OFFLINE = "Offline",
@@ -419,4 +438,12 @@ GMS:RegisterLocale("deDE", {
 	ROSTER_TOOLTIP_LINKED_CHARS_NONE = "Keine verknüpften Gildencharaktere",
 	ROSTER_TOOLTIP_BEST_ATTEMPT = "Bester Versuch",
 	ROSTER_TOOLTIP_UNKNOWN_RAID = "Unbekannter Raid",
+	ROSTER_TOOLTIP_STATUS = "Status",
+	ROSTER_TOOLTIP_LEVEL_CLASS = "Stufe/Klasse",
+	ROSTER_TOOLTIP_REALM = "Realm",
+	ROSTER_TOOLTIP_PUBLIC_NOTE = "Oeffentliche Notiz",
+	ROSTER_TOOLTIP_OFFICER_NOTE = "Offiziersnotiz",
+	ROSTER_TOOLTIP_LEVEL_FMT = "Lv %d",
+
+	LOGS_SUFFIX_DETAILS_LABEL = "details",
 })

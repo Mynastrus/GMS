@@ -35,6 +35,9 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - Canonical schema updated in `GMS_DB_SCHEMA.md`: equipment domain key is `EQUIPMENT_V2` only; legacy `EQUIPMENT` is explicitly removed.
 - `GMS/Modules/Equipment.lua` options scope moved from `CHAR` to `PROFILE` and now purges legacy `global.characters[guid].EQUIPMENT` nodes to prevent old option payload reappearing after DB reset.
 - Canonical naming aligned with runtime intent: `global.chars` renamed to `global.accountChars` (local account GUIDs only), and guild member table renamed from `global.guilds[guildClubId].players` to `global.guilds[guildClubId].roster` (hard cut, no migration).
+- UI/Dock behavior updated: `GUILDLOG` and `PERMISSIONS` sidedock icons are now hidden by default; RightDock reflow/hide calls are deferred during combat lockdown and resumed on `PLAYER_REGEN_ENABLED` to prevent blocked Blizzard actions.
+- Roster UX updated: added slash subcommand `/gms roster` (alias `/gms ro`) to open the roster page directly.
+- Localization coverage expanded across all locale files (`enUS`, `deDE`, `frFR`, `esES`, `itIT`, `ptBR`, `ruRU`, `koKR`, `zhCN`, `zhTW`) for newly introduced UI/chat strings (ChatLinks, Changelog, Core/DB/Raids options, CharInfo portal tooltips, Roster tooltip labels/formatting) with full key parity against `enUS`.
 
 ### Fixed`r`n- Lua syntax error in `GMS/Modules/MythicPlus.lua` fixed: replaced invalid `}` with `end` in `_PublishMythicToGuild` payload loop; module `METADATA.VERSION` bumped to `1.1.8`.`r`n- DB wipe/reset in `GMS/Core/Database.lua` now performs a hard reset of `GMS_DB`, `GMS_Logging_DB`, and `GMS_UIDB` roots and clears runtime DB handles to avoid stale AceDB proxy data after reset.
 - CHARINFO local bootstrap in `GMS/Modules/CharInfo.lua` now persists local version metadata through canonical `global.characters[guid].CHARINFO = { data, meta }`.
@@ -48,6 +51,7 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - RAIDS_V2 sync payload in `GMS/Modules/Raids.lua` now publishes compact one-line `data[raidId]` entries consistently, while `GMS/Modules/Roster.lua` accepts both legacy and compact RAIDS_V2 payload formats.
 - RAIDS lockout timing now uses absolute server time in `GMS/Modules/Raids.lua` (`resetAt = GetServerTime() + resetSeconds`) with legacy-safe cleanup logic for older runtime-time entries.
 - CharInfo raid lockout rendering in `GMS/Modules/CharInfo.lua` now filters expired lockouts reliably and supports both compact `c<diff>=k/t/l/e/r` and extended `c<diff>=k/t/l/e/r/bossCsv` RAIDS_V2 formats.
+- Mojibake/encoding corruption in `ruRU.lua`, `koKR.lua`, `zhCN.lua`, and `zhTW.lua` was repaired to valid UTF-8 readable native text; all locale files now validate as UTF-8 and expose complete key sets.
 
 ### Rules/Infra
 - DB schema policy hardened in `GMS_DB_SCHEMA.md`: hard cutover only, no migration layer, and mandatory sync block for older GMS versions.

@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "PERMISSIONS",
 	SHORT_NAME   = "Permissions",
 	DISPLAY_NAME = "Berechtigungen",
-	VERSION      = "1.3.9",
+	VERSION      = "1.3.10",
 }
 
 -- Blizzard Globals
@@ -273,39 +273,15 @@ end
 -- ###########################################################################
 
 function Permissions:TryRegisterUI()
-	if not GMS.UI or type(GMS.UI.RegisterPage) ~= "function" or type(GMS.UI.AddRightDockIconTop) ~= "function" then
+	if not GMS.UI or type(GMS.UI.RegisterPage) ~= "function" then
 		return false
 	end
 
-	-- 1. Register Page
+	-- Register page, but keep sidedock icon hidden.
 	GMS.UI:RegisterPage("PERMISSIONS", 100, METADATA.DISPLAY_NAME, function(...) self:BuildUI(...) end)
 
-	local canManage = self:IsAuthorized()
-	if not canManage then
-		if type(GMS.UI.SetRightDockIconHidden) == "function" then
-			GMS.UI:SetRightDockIconHidden("PERMISSIONS", true)
-		end
-		return true
-	end
-
-	-- 2. Register/Show Dock Icon (authorized only)
-	GMS.UI:AddRightDockIconTop({
-		id              = "PERMISSIONS",
-		order           = 90, -- Kurz vor Settings
-		selectable      = true,
-		icon            = "Interface\\Icons\\INV_Misc_Key_04",
-		tooltipTitle    = METADATA.DISPLAY_NAME,
-		tooltipTitleKey = "NAME_PERMISSIONS",
-		tooltipText     = PT("PERM_DOCK_TOOLTIP", "Manage groups and permissions"),
-		tooltipTextKey  = "PERM_DOCK_TOOLTIP",
-		onClick         = function()
-			if GMS.UI and type(GMS.UI.Navigate) == "function" then
-				GMS.UI:Navigate("PERMISSIONS")
-			end
-		end,
-	})
 	if type(GMS.UI.SetRightDockIconHidden) == "function" then
-		GMS.UI:SetRightDockIconHidden("PERMISSIONS", false)
+		GMS.UI:SetRightDockIconHidden("PERMISSIONS", true)
 	end
 	return true
 end

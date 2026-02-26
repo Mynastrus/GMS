@@ -24,6 +24,7 @@ local CreateFrame           = CreateFrame
 local Mixin                 = Mixin
 local BackdropTemplateMixin = BackdropTemplateMixin
 local GameTooltip           = GameTooltip
+local InCombatLockdown      = InCombatLockdown
 ---@diagnostic enable: undefined-global
 
 -- ###########################################################################
@@ -35,7 +36,7 @@ local METADATA = {
 	INTERN_NAME  = "UI_DOCKS",
 	SHORT_NAME   = "UI_Docks",
 	DISPLAY_NAME = "UI Sidedocks",
-	VERSION      = "1.0.0",
+	VERSION      = "1.0.1",
 }
 
 -- ###########################################################################
@@ -136,6 +137,9 @@ UI._rightDock = UI._rightDock or {
 	bottom = { order = {}, entries = {} },
 	all = {},
 }
+UI._rightDockPendingHidden = UI._rightDockPendingHidden or {}
+UI._rightDockNeedsReflow = UI._rightDockNeedsReflow or false
+UI._rightDockCombatQueue = UI._rightDockCombatQueue or nil
 
 -- ###########################################################################
 -- #	DOCK LOGIC
@@ -191,11 +195,51 @@ function UI:SetRightDockSelected(id, selected, exclusive)
 	self:RightDockSetSelected(entry, selected)
 end
 
+function UI:RightDockEnsureCombatQueue()
+	if self._rightDockCombatQueue then return end
+	local frame = CreateFrame("Frame")
+	frame:SetScript("OnEvent", function(f)
+		if type(InCombatLockdown) == "function" and InCombatLockdown() then
+			return
+		end
+
+		local pending = self._rightDockPendingHidden or {}
+		self._rightDockPendingHidden = pending
+		for dockId, hidden in pairs(pending) do
+			pending[dockId] = nil
+			self:SetRightDockIconHidden(dockId, hidden)
+		end
+
+		if self._rightDockNeedsReflow then
+			self._rightDockNeedsReflow = false
+			self:ReflowRightDock()
+		end
+
+		local hasPending = false
+		for _ in pairs(pending) do
+			hasPending = true
+			break
+		end
+		if not hasPending and not self._rightDockNeedsReflow then
+			f:UnregisterEvent("PLAYER_REGEN_ENABLED")
+		end
+	end)
+	self._rightDockCombatQueue = frame
+end
+
 function UI:SetRightDockIconHidden(id, hidden)
 	self:RightDockEnsure()
+	local isHidden = hidden and true or false
+	if type(InCombatLockdown) == "function" and InCombatLockdown() then
+		self._rightDockPendingHidden = self._rightDockPendingHidden or {}
+		self._rightDockPendingHidden[id] = isHidden
+		self:RightDockEnsureCombatQueue()
+		self._rightDockCombatQueue:RegisterEvent("PLAYER_REGEN_ENABLED")
+		return true
+	end
+
 	local entry = self._rightDock and self._rightDock.all and self._rightDock.all[id] or nil
 	if not entry then return false end
-	local isHidden = hidden and true or false
 	entry.hidden = isHidden
 	if entry.slot and entry.slot.SetShown then
 		entry.slot:SetShown(not isHidden)
@@ -209,6 +253,12 @@ end
 
 function UI:ReflowRightDock()
 	if not self._frame then return end
+	if type(InCombatLockdown) == "function" and InCombatLockdown() then
+		self._rightDockNeedsReflow = true
+		self:RightDockEnsureCombatQueue()
+		self._rightDockCombatQueue:RegisterEvent("PLAYER_REGEN_ENABLED")
+		return false
+	end
 
 	self:RightDockEnsure(self._frame)
 	local cfg = self.RightDockConfig
@@ -273,6 +323,11 @@ function UI:AddRightDockIcon(lane, opts)
 	local cfg = self.RightDockConfig
 	local id = tostring(opts.id or "")
 	if id == "" then return nil end
+	local pendingHidden = self._rightDockPendingHidden and self._rightDockPendingHidden[id]
+	if type(pendingHidden) == "boolean" then
+		opts.hidden = pendingHidden
+		self._rightDockPendingHidden[id] = nil
+	end
 
 	if self._rightDock.all[id] then
 		local existing = self._rightDock.all[id]

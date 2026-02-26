@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "GUILDLOG",
 	SHORT_NAME   = "GuildLog",
 	DISPLAY_NAME = "Guild Log",
-	VERSION      = "1.1.18",
+	VERSION      = "1.1.19",
 }
 
 local LibStub = LibStub
@@ -1420,24 +1420,12 @@ end
 
 local function RegisterDock()
 	local ui = GMS and GMS.UI
-	if not ui or type(ui.AddRightDockIconTop) ~= "function" then return false end
+	if not ui then return false end
 	if GuildLog._dockRegistered then return true end
 
-	ui:AddRightDockIconTop({
-		id = MODULE_NAME,
-		order = 70,
-		selectable = true,
-		icon = "Interface\\Icons\\INV_Misc_Book_09",
-		tooltipTitle = T("GA_PAGE_TITLE", "Guild Activity"),
-		tooltipTitleKey = "GA_PAGE_TITLE",
-		tooltipText = T("GA_DOCK_TOOLTIP", "Open guild activity log"),
-		tooltipTextKey = "GA_DOCK_TOOLTIP",
-		onClick = function()
-			if GMS.UI and type(GMS.UI.Open) == "function" then
-				GMS.UI:Open(MODULE_NAME)
-			end
-		end,
-	})
+	if type(ui.SetRightDockIconHidden) == "function" then
+		ui:SetRightDockIconHidden(MODULE_NAME, true)
+	end
 
 	GuildLog._dockRegistered = true
 	return true
@@ -1460,8 +1448,8 @@ end
 
 function GuildLog:TryIntegrateUI()
 	local okPage = RegisterPage()
-	local okDock = RegisterDock()
-	return okPage and okDock
+	RegisterDock()
+	return okPage
 end
 
 function GuildLog:InitializeOptions()

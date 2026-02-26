@@ -9,7 +9,7 @@ local METADATA = {
 	INTERN_NAME  = "DB",
 	SHORT_NAME   = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION      = "1.1.26",
+	VERSION      = "1.1.27",
 }
 
 -- Blizzard Globals
@@ -1337,7 +1337,7 @@ end
 -- ###########################################################################
 
 GMS:RegisterModuleOptions("DB", {
-	reset = { type = "execute", func = function() GMS:Database_ResetAll() end, name = "Datenbank zurücksetzen" }
+	reset = { type = "execute", func = function() GMS:Database_ResetAll() end, name = DT("DB_OPT_RESET", "Reset database") }
 }, "PROFILE")
 
 if type(GMS.OnReady) == "function" then

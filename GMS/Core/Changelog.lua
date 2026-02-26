@@ -36,7 +36,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.14",
+	VERSION      = "1.3.15",
 }
 
 -- ###########################################################################
@@ -728,7 +728,7 @@ local RELEASES = {
 local CHANGELOG_OPTIONS_DEFAULTS = {
 	showOnNewVersion = {
 		type = "toggle",
-		name = "Neue Release Notes beim Login automatisch anzeigen",
+		name = CT("CHANGELOG_OPT_SHOW_ON_LOGIN", "Show new release notes automatically on login"),
 		default = true,
 	},
 }
@@ -1176,7 +1176,8 @@ local function RegisterInUI()
 			selectable = true,
 			icon = "Interface\\Icons\\INV_Scroll_03",
 			tooltipTitle = METADATA.DISPLAY_NAME,
-			tooltipText = "Shows all release notes",
+			tooltipText = CT("CHANGELOG_DOCK_TOOLTIP", "Shows all release notes"),
+			tooltipTextKey = "CHANGELOG_DOCK_TOOLTIP",
 			onClick = function()
 				if GMS.UI and type(GMS.UI.Open) == "function" then
 					GMS.UI:Open(METADATA.INTERN_NAME)

@@ -35,7 +35,7 @@ local METADATA = {
 	INTERN_NAME = "ChatLinks",
 	SHORT_NAME = "ChatLinks",
 	DISPLAY_NAME = "ChatLinks",
-	VERSION = "1.2.1",
+	VERSION = "1.2.2",
 }
 
 -- ###########################################################################
@@ -74,13 +74,26 @@ local function LOCAL_LOG(level, msg, ...)
 	end
 end
 
+local function CLT(key, fallback, ...)
+	if type(GMS.T) == "function" then
+		local ok, txt = pcall(GMS.T, GMS, key, ...)
+		if ok and type(txt) == "string" and txt ~= "" and txt ~= key then
+			return txt
+		end
+	end
+	if select("#", ...) > 0 then
+		return string.format(tostring(fallback or key), ...)
+	end
+	return tostring(fallback or key)
+end
+
 -- ###########################################################################
 -- #	MODULESTATES REGISTRATION
 -- ###########################################################################
 
 -- Registry Defaults (zentral verwaltet via GMS:RegisterModuleOptions)
 local REG_DEFAULTS = {
-	clickablePrefix = { type = "toggle", name = "Klickbares Präfix im Chat", default = true },
+	clickablePrefix = { type = "toggle", name = CLT("CHATLINKS_OPT_CLICKABLE_PREFIX", "Clickable chat prefix"), default = true },
 }
 
 local COLORS = {
@@ -97,7 +110,7 @@ if type(GMS.RegisterExtension) == "function" then
 		name = METADATA.SHORT_NAME,
 		displayName = METADATA.DISPLAY_NAME,
 		version = METADATA.VERSION,
-		desc = "Klickbare Chat-Links mit Tooltips und Aktionen.",
+		desc = CLT("CHATLINKS_DESC", "Clickable chat links with tooltips and actions."),
 	})
 end
 
@@ -215,7 +228,7 @@ local function Tooltip_Show(frame, link)
 	if entry then
 		if flags.showLabel and entry.label ~= "" then Tooltip_AddLine(GameTooltip, entry.label) end
 		if flags.showHint and entry.hint ~= "" then
-			Tooltip_AddLine(GameTooltip, "Befehl: |cFFFFCC00" .. entry.hint .. "|r")
+			Tooltip_AddLine(GameTooltip, CLT("CHATLINKS_TOOLTIP_COMMAND_FMT", "Command: |cFFFFCC00%s|r", entry.hint))
 		end
 	end
 
@@ -288,7 +301,7 @@ if not ChatLinks._defaultsLoaded then
 
 	-- Define GMS standard link
 	GMS:ChatLink_Define("GMS", {
-		title = "|cff03A9F4GMS [Menü]|r",
+		title = "|cff03A9F4" .. CLT("CHATLINKS_TITLE_MENU", "GMS [Menu]") .. "|r",
 		label = "|cff03A9F4[GMS]|r",
 		hint = "/gms",
 		flags = {

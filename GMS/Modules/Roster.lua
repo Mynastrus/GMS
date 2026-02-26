@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.1.36",
+	VERSION      = "1.1.38",
 }
 
 local LibStub = LibStub
@@ -120,6 +120,7 @@ GMS[MODULE_NAME] = Roster
 
 Roster._pageRegistered = Roster._pageRegistered or false
 Roster._dockRegistered = Roster._dockRegistered or false
+Roster._slashRegistered = Roster._slashRegistered or false
 
 Roster._columns = Roster._columns or nil
 Roster._augmenters = Roster._augmenters or nil
@@ -3081,13 +3082,13 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 						hover:Show()
 						if GameTooltip then
 							local _, _, _, classHex = GetClassColor(rowClassFile)
-							local statusText = "Offline"
+							local statusText = (type(GMS.T) == "function" and GMS:T("ROSTER_STATUS_OFFLINE")) or "Offline"
 							if rowStatus == "ONLINE" then
-								statusText = "Online"
+								statusText = (type(GMS.T) == "function" and GMS:T("ROSTER_STATUS_ONLINE")) or "Online"
 							elseif rowStatus == "AFK" then
-								statusText = "Away"
+								statusText = (type(GMS.T) == "function" and GMS:T("ROSTER_STATUS_AWAY")) or "Away"
 							elseif rowStatus == "DND" then
-								statusText = "Busy"
+								statusText = (type(GMS.T) == "function" and GMS:T("ROSTER_STATUS_BUSY")) or "Busy"
 							end
 
 							local displayRealm = tostring(rowRealm or "-")
@@ -3114,9 +3115,9 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 							GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
 							GameTooltip:SetText(string.format("|cff%s%s|r", classColor, tostring(rowName)))
 							GameTooltip:AddLine(" ")
-							TT_Row("Status", statusText)
-							TT_Row("Level/Class", string.format("%s %s", tostring(rowLevel), tostring(rowClass)))
-							TT_Row("Realm", displayRealm)
+							TT_Row((type(GMS.T) == "function" and GMS:T("ROSTER_TOOLTIP_STATUS")) or "Status", statusText)
+							TT_Row((type(GMS.T) == "function" and GMS:T("ROSTER_TOOLTIP_LEVEL_CLASS")) or "Level/Class", string.format("%s %s", tostring(rowLevel), tostring(rowClass)))
+							TT_Row((type(GMS.T) == "function" and GMS:T("ROSTER_TOOLTIP_REALM")) or "Realm", displayRealm)
 							local raidCellText = rowRaid
 							if rowRaid ~= "-" and rowRaidPriority > 1 then
 								raidCellText = "|cff8a8a8a" .. tostring(rowRaid) .. "|r"
@@ -3127,9 +3128,9 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 								local raidName = (rowRaidName ~= "" and rowRaidName) or ((type(GMS.T) == "function" and GMS:T("ROSTER_TOOLTIP_UNKNOWN_RAID", "Unknown raid")) or "Unknown raid")
 								TT_Row(raidAttemptLabel, string.format("%s (%s)", tostring(rowRaid), tostring(raidName)))
 							end
-							TT_Row("Öffentliche Notiz", (rowPublicNote ~= "" and rowPublicNote) or "-")
+							TT_Row((type(GMS.T) == "function" and GMS:T("ROSTER_TOOLTIP_PUBLIC_NOTE")) or "Public note", (rowPublicNote ~= "" and rowPublicNote) or "-")
 							if rowOfficerNote ~= "" then
-								TT_Row("Offiziersnotiz", rowOfficerNote)
+								TT_Row((type(GMS.T) == "function" and GMS:T("ROSTER_TOOLTIP_OFFICER_NOTE")) or "Officer note", rowOfficerNote)
 							end
 							local linkedChars = Roster:GetLinkedAccountGuildCharactersForGuid(rowGuid)
 							GameTooltip:AddLine(" ")
@@ -3151,7 +3152,7 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 										local levelNum = tonumber(c.level or 0) or 0
 										local onlineMarker = ""
 										if c.online == true then
-											onlineMarker = "|cff00ff00●|r "
+											onlineMarker = "|cff00ff00*|r "
 										end
 										local lineName = tostring(c.name_full or c.name or c.guid or "-")
 										lineName = lineName:gsub("^%s+", ""):gsub("%s+$", "")
@@ -3160,7 +3161,7 @@ local function BuildGuildRosterLabelsAsync(parent, perFrame, delay)
 										end
 										local levelSuffix = ""
 										if levelNum > 0 then
-											levelSuffix = string.format(" |cff9d9d9d(Lv %d)|r", levelNum)
+											levelSuffix = string.format(" |cff9d9d9d(%s)|r", (type(GMS.T) == "function" and GMS:T("ROSTER_TOOLTIP_LEVEL_FMT", "Lv %d", levelNum)) or string.format("Lv %d", levelNum))
 										end
 										GameTooltip:AddLine(string.format(
 											"%s|cff%s%s|r%s",
@@ -3766,6 +3767,31 @@ function Roster:TryIntegrateWithUIIfAvailable()
 	end
 end
 
+function Roster:TryRegisterSlashCommand()
+	if self._slashRegistered then
+		return true
+	end
+
+	if type(GMS.Slash_RegisterSubCommand) ~= "function" then
+		return false
+	end
+
+	GMS:Slash_RegisterSubCommand("roster", function()
+		if GMS.UI and type(GMS.UI.Open) == "function" then
+			GMS.UI:Open(METADATA.INTERN_NAME)
+		end
+	end, {
+		helpKey = "ROSTER_SLASH_HELP",
+		helpFallback = "/gms roster - opens roster page",
+		alias = { "ro" },
+		owner = METADATA.INTERN_NAME,
+	})
+
+	self._slashRegistered = true
+	LOCAL_LOG("INFO", "Slash subcommand registered", { key = "roster" })
+	return true
+end
+
 -- ###########################################################################
 -- #	ACE LIFECYCLE
 -- ###########################################################################
@@ -3833,8 +3859,15 @@ end
 function Roster:OnEnable()
 	self:InitializeOptions()
 	self:TryIntegrateWithUIIfAvailable()
+	self:TryRegisterSlashCommand()
 	self:InitCommMetaSync()
 	self:TrackLocalAccountCharacter("enable")
+
+	if type(GMS.OnReady) == "function" then
+		GMS:OnReady("EXT:SLASH", function()
+			Roster:TryRegisterSlashCommand()
+		end)
+	end
 
 	if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
 		C_Timer.After(2.0, function()
@@ -4003,9 +4036,3 @@ function Roster:GetMemberByGUID(guid)
 	end
 	return nil
 end
-
-
-
-
-
-
