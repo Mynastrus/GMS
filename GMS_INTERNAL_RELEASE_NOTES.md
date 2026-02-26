@@ -18,7 +18,7 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - (none)
 
 ### Changed
-- (none)
+- `CURSEFORGE_STARTPAGE.md` komplett neu ausgearbeitet: detaillierte DE/EN-Startseite mit strukturierten Abschnitten, Moduluebersichten, Quick-Start, Command-Tabelle und verbesserten Formatierungen fuer CurseForge.
 
 ### Fixed
 - (none)
