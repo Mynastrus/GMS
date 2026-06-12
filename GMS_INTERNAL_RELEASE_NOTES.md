@@ -19,12 +19,14 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 
 ### Changed
 - `CURSEFORGE_STARTPAGE.md` komplett neu ausgearbeitet: detaillierte DE/EN-Startseite mit strukturierten Abschnitten, Moduluebersichten, Quick-Start, Command-Tabelle und verbesserten Formatierungen fuer CurseForge.
+- `GMS/Core/RaidIds.lua` an den aktuellen Live-Stand angepasst: Midnight-Raids in Journal-/Map-/Boss-Mappings aufgenommen und Retail-Raid-Aliase erweitert.
 
 ### Fixed
-- (none)
+- `GMS/Core/Changelog.lua`: Auto-Open der Release Notes auf einen einmaligen Session-Start begrenzt, damit sich das Hauptfenster nach `PLAYER_ENTERING_WORLD`-Folgen wie Ladescreens nicht erneut selbst oeffnet.
+- `GMS/Modules/CharInfo.lua`: Dungeon-Portal-Handling auf Retail-First-Spellbook-Erkennung und `SecureActionButtonTemplate` umgestellt, damit Mythic+-Teleports auf Live wieder klickbar/castbar sind.
 
 ### Rules/Infra
-- (none)
+- `GMS_PROJECT_RULES.md` um eine verbindliche Vor-Release-Regel erweitert: Vor jedem echten Release muessen alle Locale-Dateien auf Vollstaendigkeit geprueft und fehlende Keys in der jeweiligen Sprache ergaenzt werden.
 
 ## Last Release Snapshot
 

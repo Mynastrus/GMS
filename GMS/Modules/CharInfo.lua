@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.42",
+	VERSION      = "1.1.43",
 }
 
 local LibStub = LibStub
@@ -53,6 +53,7 @@ local UnitExists                 = UnitExists
 local UnitIsPlayer               = UnitIsPlayer
 local C_Timer                    = C_Timer
 local C_Spell                    = C_Spell
+local C_SpellBook                = C_SpellBook
 local C_ClassTalents             = C_ClassTalents
 local C_Traits                   = C_Traits
 local C_PvP                      = C_PvP
@@ -62,12 +63,14 @@ local HandleModifiedItemClick    = HandleModifiedItemClick
 local GameFontNormalSmallOutline = GameFontNormalSmallOutline
 local RAID_CLASS_COLORS          = RAID_CLASS_COLORS
 local LoadAddOn                  = LoadAddOn
-local CastSpellByID              = CastSpellByID
 local GetSpellTexture            = GetSpellTexture
 local GetSpellCooldown           = GetSpellCooldown
 local FindSpellBookSlotBySpellID = FindSpellBookSlotBySpellID
 local IsPlayerSpell              = IsPlayerSpell
 local IsSpellKnownOrOverridesKnown = IsSpellKnownOrOverridesKnown
+local GetNumSpellTabs            = GetNumSpellTabs
+local GetSpellTabInfo            = GetSpellTabInfo
+local GetSpellBookItemInfo       = GetSpellBookItemInfo
 local EJ_SelectInstance          = EJ_SelectInstance
 local EJ_GetNumTiers             = EJ_GetNumTiers
 local EJ_SelectTier              = EJ_SelectTier
@@ -79,6 +82,7 @@ local ShowUIPanel                = ShowUIPanel
 local EasyMenu                   = EasyMenu
 local CreateFrame                = CreateFrame
 local UIParent                   = UIParent
+local InCombatLockdown           = InCombatLockdown
 local UIDropDownMenu_Initialize  = UIDropDownMenu_Initialize
 local UIDropDownMenu_AddButton   = UIDropDownMenu_AddButton
 local ToggleDropDownMenu         = ToggleDropDownMenu
@@ -86,6 +90,7 @@ local ChatEdit_ChooseBoxForSend  = ChatEdit_ChooseBoxForSend
 local ChatEdit_ActivateChat      = ChatEdit_ActivateChat
 local C_PartyInfo                = C_PartyInfo
 local InviteUnit                 = InviteUnit
+local Enum                       = Enum
 ---@diagnostic enable: undefined-global
 
 local AceGUI = LibStub("AceGUI-3.0", true)
@@ -1229,6 +1234,94 @@ local function GetSpellCooldownRemaining(spellID)
 	return remain, start, duration
 end
 
+local function GetSpellDisplayName(spellID)
+	local sid = tonumber(spellID or 0) or 0
+	if sid <= 0 then return "" end
+	if C_Spell and type(C_Spell.GetSpellName) == "function" then
+		local name = C_Spell.GetSpellName(sid)
+		if type(name) == "string" and name ~= "" then
+			return name
+		end
+	end
+	if C_Spell and type(C_Spell.GetSpellInfo) == "function" then
+		local info = C_Spell.GetSpellInfo(sid)
+		if type(info) == "table" and type(info.name) == "string" and info.name ~= "" then
+			return info.name
+		end
+	end
+	return ""
+end
+
+local function BuildKnownSpellNameIndex()
+	local out = {}
+	local seen = {}
+
+	local function addSpell(spellID)
+		local sid = tonumber(spellID or 0) or 0
+		if sid <= 0 or seen[sid] then return end
+		local name = GetSpellDisplayName(sid)
+		if name == "" then return end
+		seen[sid] = true
+		out[#out + 1] = {
+			spellID = sid,
+			name = name,
+			search = NormalizeSearchText(name),
+		}
+	end
+
+	if type(C_SpellBook) == "table"
+		and type(C_SpellBook.GetNumSpellBookSkillLines) == "function"
+		and type(C_SpellBook.GetSpellBookSkillLineInfo) == "function"
+		and type(C_SpellBook.GetSpellBookItemInfo) == "function"
+		and type(Enum) == "table"
+		and type(Enum.SpellBookSpellBank) == "table"
+		and Enum.SpellBookSpellBank.Player
+	then
+		local lines = tonumber(C_SpellBook.GetNumSpellBookSkillLines() or 0) or 0
+		for line = 1, lines do
+			local info = C_SpellBook.GetSpellBookSkillLineInfo(line)
+			local offset = tonumber(info and info.itemIndexOffset or 0) or 0
+			local count = tonumber(info and info.numSpellBookItems or 0) or 0
+			for idx = (offset + 1), (offset + count) do
+				local itemInfo = C_SpellBook.GetSpellBookItemInfo(idx, Enum.SpellBookSpellBank.Player)
+				addSpell(itemInfo and itemInfo.spellID)
+			end
+		end
+		return out
+	end
+
+	if type(GetNumSpellTabs) == "function" and type(GetSpellTabInfo) == "function" and type(GetSpellBookItemInfo) == "function" then
+		local tabs = tonumber(GetNumSpellTabs() or 0) or 0
+		for tab = 1, tabs do
+			local _, _, offset, count = GetSpellTabInfo(tab)
+			offset = tonumber(offset or 0) or 0
+			count = tonumber(count or 0) or 0
+			for idx = (offset + 1), (offset + count) do
+				local _, spellID = GetSpellBookItemInfo(idx, "spell")
+				addSpell(spellID)
+			end
+		end
+	end
+
+	return out
+end
+
+local function FindPortalSpellByDungeonName(dungeonName)
+	local dnorm = NormalizeSearchText(dungeonName)
+	if dnorm == "" then return nil, nil, false end
+
+	local spells = BuildKnownSpellNameIndex()
+	for i = 1, #spells do
+		local row = spells[i]
+		local snorm = tostring(row.search or "")
+		if snorm ~= "" and snorm:find(dnorm, 1, true) then
+			return row.spellID, row.name, true
+		end
+	end
+
+	return nil, nil, false
+end
+
 local function FormatCooldownShort(seconds)
 	local s = math.floor(tonumber(seconds or 0) or 0)
 	if s <= 0 then return "Ready" end
@@ -1327,6 +1420,12 @@ local IsPortalSpellKnown
 IsPortalSpellKnown = function(spellID)
 	local sid = tonumber(spellID or 0) or 0
 	if sid <= 0 then return false end
+	if type(C_SpellBook) == "table" and type(C_SpellBook.FindSpellBookSlotForSpell) == "function" then
+		local slot = C_SpellBook.FindSpellBookSlotForSpell(sid)
+		if type(slot) == "number" and slot > 0 then
+			return true
+		end
+	end
 	if type(FindSpellBookSlotBySpellID) == "function" then
 		local slot = FindSpellBookSlotBySpellID(sid)
 		if type(slot) == "number" and slot > 0 then
@@ -1342,7 +1441,7 @@ IsPortalSpellKnown = function(spellID)
 	return false
 end
 
-local function ResolvePortalSpellForDungeon(mapId)
+local function ResolvePortalSpellForDungeon(mapId, dungeonName)
 	local mid = tonumber(mapId or 0) or 0
 	local candidates = KNOWN_PORTAL_BY_MAPID[mid]
 	if type(candidates) == "table" and #candidates > 0 then
@@ -1352,17 +1451,52 @@ local function ResolvePortalSpellForDungeon(mapId)
 			if sid > 0 then
 				firstValid = firstValid or sid
 				if IsPortalSpellKnown(sid) then
-					local sname = C_Spell and type(C_Spell.GetSpellName) == "function" and C_Spell.GetSpellName(sid) or ""
+					local sname = GetSpellDisplayName(sid)
 					return sid, tostring(sname or ""), true
 				end
 			end
 		end
 		if firstValid then
-			local sname = C_Spell and type(C_Spell.GetSpellName) == "function" and C_Spell.GetSpellName(firstValid) or ""
+			local sname = GetSpellDisplayName(firstValid)
 			return firstValid, tostring(sname or ""), false
 		end
 	end
+	local spellID, spellName, known = FindPortalSpellByDungeonName(dungeonName)
+	if spellID and known then
+		return spellID, tostring(spellName or ""), true
+	end
 	return nil, nil, false
+end
+
+local function ConfigurePortalSecureButton(hostFrame, spellID, enabled)
+	if not hostFrame or type(CreateFrame) ~= "function" then return nil end
+	local button = hostFrame._gmsSecurePortalButton
+	local inCombat = type(InCombatLockdown) == "function" and InCombatLockdown()
+	if not button then
+		if inCombat then
+			return nil
+		end
+		button = CreateFrame("Button", nil, hostFrame, "SecureActionButtonTemplate")
+		if not button then return nil end
+		button:SetAllPoints(hostFrame)
+		button:RegisterForClicks("LeftButtonUp")
+		button:SetFrameStrata(hostFrame:GetFrameStrata())
+		button:SetFrameLevel(hostFrame:GetFrameLevel() + 5)
+		hostFrame._gmsSecurePortalButton = button
+	end
+	if inCombat then
+		return button
+	end
+	if enabled and tonumber(spellID or 0) and tonumber(spellID or 0) > 0 then
+		button:SetAttribute("type", "spell")
+		button:SetAttribute("spell", tonumber(spellID))
+		button:EnableMouse(true)
+	else
+		button:SetAttribute("type", nil)
+		button:SetAttribute("spell", nil)
+		button:EnableMouse(false)
+	end
+	return button
 end
 
 local function BuildEJDungeonNameIndex()
@@ -3649,7 +3783,7 @@ function CHARINFO:TryRegisterPage()
 				rowGroup:SetLayout("Flow")
 				card:AddChild(rowGroup)
 
-				local portalSpellID, portalSpellName, hasPortalSpell = ResolvePortalSpellForDungeon(row.mapId)
+				local portalSpellID, portalSpellName, hasPortalSpell = ResolvePortalSpellForDungeon(row.mapId, row.name)
 
 				local portalIcon = AceGUI:Create("Icon")
 				portalIcon:SetWidth(portalW)
@@ -3697,11 +3831,7 @@ function CHARINFO:TryRegisterPage()
 				portalIcon:SetCallback("OnLeave", function()
 					if GameTooltip then GameTooltip:Hide() end
 				end)
-				portalIcon:SetCallback("OnClick", function()
-					if portalSpellID and hasPortalSpell and type(CastSpellByID) == "function" then
-						pcall(CastSpellByID, portalSpellID)
-					end
-				end)
+				ConfigurePortalSecureButton(portalIcon.frame, portalSpellID, hasPortalSpell)
 				rowGroup:AddChild(portalIcon)
 
 				local nameLabel = AceGUI:Create("InteractiveLabel")

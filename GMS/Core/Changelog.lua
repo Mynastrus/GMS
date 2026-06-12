@@ -36,7 +36,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.16",
+	VERSION      = "1.3.17",
 }
 
 -- ###########################################################################
@@ -110,6 +110,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 -- ###########################################################################
 
 local RELEASES = {
+	{
+		version = "2.0.1",
+		date = "2026-06-12",
+		title_en = "Midnight live compatibility, portal recovery, and release hygiene hardening",
+		title_de = "Midnight-Live-Kompatibilitaet, Teleport-Reparaturen und gehaertete Release-Hygiene",
+		notes_en = {
+			"Updated live-raid coverage with Midnight raid journal/map mappings and broader alias handling for current retail raid names.",
+			"Fixed release-notes auto-open so the main window only opens once per session instead of reopening after load screens or repeated world-entry events.",
+			"Reworked CharInfo Mythic+ portal actions for current retail with Retail-first spellbook detection, secure spell buttons, and dungeon-name fallback matching for live season changes.",
+			"Expanded the bilingual CurseForge project/start page for a clearer public presentation and onboarding flow.",
+			"Added a mandatory pre-release locale completeness audit so every shipped locale must be checked and completed before future releases.",
+		},
+		notes_de = {
+			"Die Live-Raid-Abdeckung wurde mit Midnight-Raid-Journal-/Map-Mappings sowie breiterer Alias-Behandlung fuer aktuelle Retail-Raidnamen erweitert.",
+			"Das Auto-Open der Release Notes wurde korrigiert: Das Hauptfenster oeffnet sich pro Session nur noch einmal statt nach Ladescreens oder wiederholten World-Entry-Events erneut aufzuspringen.",
+			"Die CharInfo-Mythic+-Teleport-Aktionen wurden fuer aktuelles Retail ueberarbeitet: Retail-First-Spellbook-Erkennung, sichere Spell-Buttons und Dungeonnamen-Fallback fuer Season-Wechsel auf Live.",
+			"Die zweisprachige CurseForge-Projekt-/Startseite wurde fuer eine klarere oeffentliche Darstellung und ein besseres Onboarding erweitert.",
+			"Eine verpflichtende Vor-Release-Pruefung auf vollstaendige Locales wurde ergaenzt, damit kuenftige Releases jede ausgelieferte Sprache vorab vollstaendig absichern.",
+		},
+	},
 	{
 		version = "2.0.0",
 		date = "2026-02-26",
@@ -1254,6 +1274,11 @@ if not Changelog._loginFrame and CreateFrame then
 	Changelog._loginFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 	Changelog._loginFrame:SetScript("OnEvent", function(_, event)
 		if event ~= "PLAYER_LOGIN" and event ~= "PLAYER_ENTERING_WORLD" then return end
+		if Changelog._autoOpenInitStarted then
+			return
+		end
+		Changelog._autoOpenInitStarted = true
+		Changelog._loginFrame:UnregisterAllEvents()
 		if C_Timer and C_Timer.After then
 			C_Timer.After(1.0, function()
 				TryAutoOpenOnLogin()

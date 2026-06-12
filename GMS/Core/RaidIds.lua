@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDIDS",
 	SHORT_NAME   = "RaidIds",
 	DISPLAY_NAME = "Raid IDs",
-	VERSION      = "1.0.0",
+	VERSION      = "1.0.3",
 }
 
 -- Blizzard Globals
@@ -58,6 +58,9 @@ RAID_IDS.JOURNAL_TO_MAP = RAID_IDS.JOURNAL_TO_MAP or {
 	[1273] = 2657, -- Palast der Nerub'ar
 	[1296] = 2769, -- Befreiung von Lorenhall
 	[1302] = 2810, -- Manaschmiede Omega
+	[2912] = 2912, -- The Voidspire (Midnight)
+	[2939] = 2939, -- The Dreamrift (Midnight)
+	[2913] = 2913, -- March on Quel'Danas (Midnight)
 }
 
 RAID_IDS.MAP_TO_JOURNAL = RAID_IDS.MAP_TO_JOURNAL or {}
@@ -70,7 +73,9 @@ RAID_IDS.MAP_TO_BOSS_STATS = RAID_IDS.MAP_TO_BOSS_STATS or {
 	[2657] = {
 		aliases = {
 			"palastvonnerubar",
+			"palastdernerubar",
 			"palaceofnerubar",
+			"nerubarpalace",
 		},
 		bosses = {
 			{ 40267, 40268, 40269, 40270 },
@@ -86,6 +91,8 @@ RAID_IDS.MAP_TO_BOSS_STATS = RAID_IDS.MAP_TO_BOSS_STATS or {
 	[2769] = {
 		aliases = {
 			"befreiungvonlorenhall",
+			"befreiungvonundermine",
+			"liberationoflorenhall",
 			"liberationofundermine",
 		},
 		bosses = {
@@ -102,6 +109,7 @@ RAID_IDS.MAP_TO_BOSS_STATS = RAID_IDS.MAP_TO_BOSS_STATS or {
 	[2810] = {
 		aliases = {
 			"manaschmiedeomega",
+			"omegamanaschmiede",
 			"manaforgeomega",
 		},
 		bosses = {
@@ -113,6 +121,44 @@ RAID_IDS.MAP_TO_BOSS_STATS = RAID_IDS.MAP_TO_BOSS_STATS or {
 			{ 41653, 41654, 41655, 41656 },
 			{ 41657, 41658, 41659, 41660 },
 			{ 41661, 41662, 41663, 41664 },
+		},
+	},
+	[2912] = {
+		aliases = {
+			"thevoidspire",
+			"voidspire",
+			"dieleerenspitze",
+			"leerenspitze",
+		},
+		bosses = {
+			{ 61276, 61277, 61278, 61279 }, -- Imperator Averzian
+			{ 61280, 61281, 61282, 61283 }, -- Vorasius
+			{ 61284, 61285, 61286, 61287 }, -- Fallen-King Salhadaar
+			{ 61288, 61289, 61290, 61291 }, -- Vaelgor & Ezzorak
+			{ 61292, 61293, 61294, 61295 }, -- Lightblinded Vanguard
+			{ 61296, 61297, 61298, 61299 }, -- Crown of the Cosmos
+		},
+	},
+	[2939] = {
+		aliases = {
+			"thedreamrift",
+			"dreamrift",
+			"dertraumriss",
+			"traumriss",
+		},
+		bosses = {
+			{ 61474, 61475, 61476, 61477 }, -- Chimaerus, the Undreamt God
+		},
+	},
+	[2913] = {
+		aliases = {
+			"marchonqueldanas",
+			"queldanasmarch",
+			"marschaufqueldanas",
+		},
+		bosses = {
+			{ 61300, 61301, 61302, 61303 }, -- Belo'ren, Child of Al'ar
+			{ 61304, 61305, 61306, 61307 }, -- Midnight Falls
 		},
 	},
 }

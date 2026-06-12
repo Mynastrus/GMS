@@ -1,7 +1,7 @@
-# GMS – Project Ruleset
+# GMS â€“ Project Ruleset
 
-Dieses Dokument definiert **alle verbindlichen Regeln** für das Projekt **GMS**.
-Diese Regeln gelten dauerhaft für **Code, Versionierung, Logging, Commits und Tooling**.
+Dieses Dokument definiert **alle verbindlichen Regeln** fÃ¼r das Projekt **GMS**.
+Diese Regeln gelten dauerhaft fÃ¼r **Code, Versionierung, Logging, Commits und Tooling**.
 
 ---
 
@@ -9,8 +9,8 @@ Diese Regeln gelten dauerhaft für **Code, Versionierung, Logging, Commits und T
 
 * Projektname: **GMS**
 * Repository: [https://github.com/Mynastrus/GMS](https://github.com/Mynastrus/GMS)
-* Das Repository ist **öffentlich**
-* Bei allen Änderungen, Analysen oder Erweiterungen ist **dieses Repo die einzige Referenz**
+* Das Repository ist **Ã¶ffentlich**
+* Bei allen Ã„nderungen, Analysen oder Erweiterungen ist **dieses Repo die einzige Referenz**
 * Zusaetzlich verbindlich zu beachten: `GMS_INTERNAL_RELEASE_NOTES.md` und `GMS_PLAYER_SYNC_BASELINE.md`
 
 ---
@@ -35,25 +35,25 @@ local METADATA = {
 
 * Kein Feld darf fehlen
 * `TYPE` **MUSS** einer der folgenden Werte sein:
-  * `"CORE"` für die Addon-Basis (Core.lua)
-  * `"MOD"` für Module
-  * `"EXT"` für Extensions (Core-Erweiterungen)
+  * `"CORE"` fÃ¼r die Addon-Basis (Core.lua)
+  * `"MOD"` fÃ¼r Module
+  * `"EXT"` fÃ¼r Extensions (Core-Erweiterungen)
 * `VERSION` **immer als String**
 * Versionsformat **exakt**: `"1.0.0"`
 
 ---
 
-## 3. Versionierung (SemVer – verpflichtend)
+## 3. Versionierung (SemVer â€“ verpflichtend)
 
-Bei **jeder Dateiänderung** wird die `METADATA.VERSION` angepasst.
+Bei **jeder DateiÃ¤nderung** wird die `METADATA.VERSION` angepasst.
 
-### 3.1 Automatische Erhöhung
+### 3.1 Automatische ErhÃ¶hung
 
 * **PATCH** (`1.0.x`)
 
   * Bugfixes
   * Refactorings
-  * interne Logikänderungen
+  * interne LogikÃ¤nderungen
 
 * **MINOR** (`1.x.0`)
 
@@ -66,20 +66,20 @@ Bei **jeder Dateiänderung** wird die `METADATA.VERSION` angepasst.
   * Breaking Changes
   * **nur nach expliziter Freigabe**
 
-> Wenn nichts angegeben wird, erfolgt die Erhöhung **automatisch und korrekt**.
+> Wenn nichts angegeben wird, erfolgt die ErhÃ¶hung **automatisch und korrekt**.
 
 ### 3.2 Synchronisation mit GMS.toc
 
-* Eine Änderung an der Version einer einzelnen Lua-Datei **MUSS NICHT** automatisch eine Erhöhung der Version in der `GMS.toc` auslösen.
-* Die `## Version`-Angabe in der `GMS.toc` ist die **Source of Truth** für die globale Anzeige.
-* Die Versionen der einzelnen Dateien bleiben unabhängig und werden **nicht** zwangsweise angeglichen.
-* Die `GMS.toc`-Version wird nur im **Release-Modus** erhöht (siehe 3.4 und 11.4).
+* Eine Ã„nderung an der Version einer einzelnen Lua-Datei **MUSS NICHT** automatisch eine ErhÃ¶hung der Version in der `GMS.toc` auslÃ¶sen.
+* Die `## Version`-Angabe in der `GMS.toc` ist die **Source of Truth** fÃ¼r die globale Anzeige.
+* Die Versionen der einzelnen Dateien bleiben unabhÃ¤ngig und werden **nicht** zwangsweise angeglichen.
+* Die `GMS.toc`-Version wird nur im **Release-Modus** erhÃ¶ht (siehe 3.4 und 11.4).
 
 ### 3.4 TOC Versionierung nach Tasks
 
-* Nach einem **echten Release-Task** (gebündelte Auslieferung) **MUSS** die globale Version in der `GMS.toc` erhöht werden.
-* Normale Entwicklungs-/Update-Commits in einer laufenden Batch-Reihe erhöhen die `GMS.toc`-Version **nicht**.
-* Dies stellt sicher, dass Nutzer nur bei tatsächlichen Releases eine neue Addon-Version sehen.
+* Nach einem **echten Release-Task** (gebÃ¼ndelte Auslieferung) **MUSS** die globale Version in der `GMS.toc` erhÃ¶ht werden.
+* Normale Entwicklungs-/Update-Commits in einer laufenden Batch-Reihe erhÃ¶hen die `GMS.toc`-Version **nicht**.
+* Dies stellt sicher, dass Nutzer nur bei tatsÃ¤chlichen Releases eine neue Addon-Version sehen.
 
 ---
 
@@ -128,7 +128,7 @@ end
 
 ### 4.4 Verbotene Inhalte
 
-❌ Folgende Kommentare sind **nicht erlaubt**:
+âŒ Folgende Kommentare sind **nicht erlaubt**:
 
 * `Buffer is Source of Truth`
 * `Notify is only a signal`
@@ -139,8 +139,8 @@ end
 
 ### 5.1 Allgemein
 
-* Commits sind **immer vollständig kopierbar**
-* Keine gekürzten oder fragmentierten Commit-Nachrichten
+* Commits sind **immer vollstÃ¤ndig kopierbar**
+* Keine gekÃ¼rzten oder fragmentierten Commit-Nachrichten
 
 ---
 
@@ -167,16 +167,16 @@ end
 
 **Pflichtregeln:**
 
-* Prägnanter Titel in Zeile 1
+* PrÃ¤gnanter Titel in Zeile 1
 * Trennlinie unter Titel
 * Trennlinie unter jedem Sprachblock
-* Format gemäß **GMS Commit Style Guide**
+* Format gemÃ¤ÃŸ **GMS Commit Style Guide**
 
-* Format gemäß **GMS Commit Style Guide**
+* Format gemÃ¤ÃŸ **GMS Commit Style Guide**
 
 ### 5.3 Validierung
 
-Commits, die gegen das Schema in 5.2 verstoßen, sind **ungültig** und müssen korrigiert werden, bevor sie in das Repository aufgenommen werden. Ein Commit **MUSS** alle oben genannten Strukturelemente enthalten.
+Commits, die gegen das Schema in 5.2 verstoÃŸen, sind **ungÃ¼ltig** und mÃ¼ssen korrigiert werden, bevor sie in das Repository aufgenommen werden. Ein Commit **MUSS** alle oben genannten Strukturelemente enthalten.
 
 ---
 
@@ -184,7 +184,7 @@ Commits, die gegen das Schema in 5.2 verstoßen, sind **ungültig** und müssen 
 
 ### 6.1 Tooltips
 
-* Tooltips **immer** über:
+* Tooltips **immer** Ã¼ber:
 
 ```lua
 SetHyperlink(originalLink)
@@ -194,7 +194,7 @@ SetHyperlink(originalLink)
 
 ### 6.2 Lokalisierung von Itemlinks
 
-Ziel: **Lokalisierung ohne Veränderung der Spezifikationen**.
+Ziel: **Lokalisierung ohne VerÃ¤nderung der Spezifikationen**.
 
 **Verbindliches Muster:**
 
@@ -209,7 +209,7 @@ end)
 
 **Regeln:**
 
-* Bonus-IDs, Upgrade-Tracks und Stats bleiben **unverändert**
+* Bonus-IDs, Upgrade-Tracks und Stats bleiben **unverÃ¤ndert**
 * Nur der Anzeigename wird ersetzt
 
 ---
@@ -217,7 +217,7 @@ end)
 ## 7. Modul-Status & Lifecycle (Pflicht)
 
 Jede Erweiterung (Extension) und jedes Modul **MUSS** sich beim Core registrieren, wenn es bereit ist.
-Dies geschieht über die Funktion `GMS:SetReady(key)`.
+Dies geschieht Ã¼ber die Funktion `GMS:SetReady(key)`.
 
 ### 7.1 Extensions (Core-Erweiterungen)
 
@@ -247,12 +247,12 @@ end
 
 ---
 
-## 8. Arbeits- & Antwortregeln für GMS
+## 8. Arbeits- & Antwortregeln fÃ¼r GMS
 
-* Keine stillen Änderungen
-* Jede strukturelle Entscheidung wird begründet
+* Keine stillen Ã„nderungen
+* Jede strukturelle Entscheidung wird begrÃ¼ndet
 * Auf Anfrage werden **immer komplette Dateien** geliefert
-* Commit- und Versionsänderungen werden **transparent erklärt**
+* Commit- und VersionsÃ¤nderungen werden **transparent erklÃ¤rt**
 
 ---
 
@@ -260,14 +260,14 @@ end
 
 * Alle gelieferten `/run`-Befehle:
 
-  * **Gesamtlänge < 250 Zeichen**
+  * **GesamtlÃ¤nge < 250 Zeichen**
 
 ---
 
-## 10. Gültigkeit
+## 10. GÃ¼ltigkeit
 
-Dieses Regelwerk ist **verbindlich und dauerhaft gültig** für das Projekt GMS.
-Änderungen am Regelwerk erfolgen **nur explizit** und werden versioniert dokumentiert.
+Dieses Regelwerk ist **verbindlich und dauerhaft gÃ¼ltig** fÃ¼r das Projekt GMS.
+Ã„nderungen am Regelwerk erfolgen **nur explizit** und werden versioniert dokumentiert.
 
 ---
 
@@ -277,11 +277,11 @@ Dieses Regelwerk ist **verbindlich und dauerhaft gültig** für das Projekt GMS.
 
 * Es gibt eine dedizierte Extension `Core/Changelog.lua` mit `TYPE = "EXT"` und eigenem `METADATA`.
 * Die Extension **MUSS** eine UI-Seite `CHANGELOG` registrieren.
-* Die Seite **MUSS alle Release-Einträge vollständig anzeigen** (kein hartes Limit wie "nur letzte 5").
+* Die Seite **MUSS alle Release-EintrÃ¤ge vollstÃ¤ndig anzeigen** (kein hartes Limit wie "nur letzte 5").
 
 ### 11.2 Datenstruktur (verbindlich)
 
-* Release-Einträge werden zentral in einer Tabelle `RELEASES` gepflegt.
+* Release-EintrÃ¤ge werden zentral in einer Tabelle `RELEASES` gepflegt.
 * Jeder Eintrag **MUSS** folgende Felder enthalten:
   * `version`
   * `date`
@@ -293,42 +293,42 @@ Dieses Regelwerk ist **verbindlich und dauerhaft gültig** für das Projekt GMS.
 
 ### 11.3 Pflege bei Releases
 
-* Bei jeder Erhöhung von `## Version` in `GMS.toc` **MUSS** ein passender Eintrag in `RELEASES` ergänzt werden.
+* Bei jeder ErhÃ¶hung von `## Version` in `GMS.toc` **MUSS** ein passender Eintrag in `RELEASES` ergÃ¤nzt werden.
 * Inhalt der Release Notes ist immer **zweisprachig (EN + DE)**.
-* Changelog-Einträge müssen den tatsächlich ausgelieferten Änderungen entsprechen.
+* Changelog-EintrÃ¤ge mÃ¼ssen den tatsÃ¤chlich ausgelieferten Ã„nderungen entsprechen.
 
 ### 11.4 Unreleased-Staging (Pflicht)
 
-* Laufende Änderungen werden **nicht direkt** in `Core/Changelog.lua` gesammelt.
+* Laufende Ã„nderungen werden **nicht direkt** in `Core/Changelog.lua` gesammelt.
 * Stattdessen werden sie in `GMS_INTERNAL_RELEASE_NOTES.md` unter `## Unreleased` gepflegt.
 * Struktur unter `Unreleased` ist verbindlich:
   * `Added`
   * `Changed`
   * `Fixed`
   * `Rules/Infra`
-* Erst bei einem **echten Release** werden die kuratierten Punkte aus `GMS_INTERNAL_RELEASE_NOTES.md` in `RELEASES` (EN + DE) übernommen.
+* Erst bei einem **echten Release** werden die kuratierten Punkte aus `GMS_INTERNAL_RELEASE_NOTES.md` in `RELEASES` (EN + DE) Ã¼bernommen.
 * Ein echter Release umfasst mindestens:
   * kuratierter `RELEASES`-Eintrag in `Core/Changelog.lua`
-  * Erhöhung von `## Version` in `GMS.toc`
+  * ErhÃ¶hung von `## Version` in `GMS.toc`
   * optionales Git-Tag `vX.Y.Z`
-* Nach erfolgreichem Release wird `Unreleased` zurückgesetzt (leeren/neu starten), damit die nächste Iteration sauber beginnt.
+* Nach erfolgreichem Release wird `Unreleased` zurÃ¼ckgesetzt (leeren/neu starten), damit die nÃ¤chste Iteration sauber beginnt.
 
 ### 11.5 Commit-Abdeckung im Unreleased-Log (Pflicht)
 
-* **Jeder Commit** mit Code-/Config-/Dokumentationsänderungen **MUSS** in `GMS_INTERNAL_RELEASE_NOTES.md` unter `## Unreleased` erfasst werden.
+* **Jeder Commit** mit Code-/Config-/DokumentationsÃ¤nderungen **MUSS** in `GMS_INTERNAL_RELEASE_NOTES.md` unter `## Unreleased` erfasst werden.
 * Falls ein Commit mehrere Kategorien betrifft, werden die Punkte auf `Added`, `Changed`, `Fixed` und/oder `Rules/Infra` verteilt.
-* Einträge müssen mindestens enthalten:
-  * kurze Änderungsbeschreibung
+* EintrÃ¤ge mÃ¼ssen mindestens enthalten:
+  * kurze Ã„nderungsbeschreibung
   * betroffene Datei(en)
-  * optional Commit-Hash zur Rückverfolgung
-* Vor einem Release ist `Unreleased` auf Vollständigkeit gegen `git log` seit dem letzten Tag zu prüfen.
+  * optional Commit-Hash zur RÃ¼ckverfolgung
+* Vor einem Release ist `Unreleased` auf VollstÃ¤ndigkeit gegen `git log` seit dem letzten Tag zu prÃ¼fen.
 
 ### 11.6 CurseForge-Releasepflicht (Pflicht)
 
-* Bei **jedem echten Release** müssen die Addon-Dateien auf CurseForge veröffentlicht/aktualisiert werden.
-* Die Release-Baseline für die Zielversion basiert verbindlich auf der **aktuellen Interface-Version** aus `GMS/GMS.toc`.
-* Das Release-Changelog für die Veröffentlichung ist immer **zweisprachig (EN + DE)** und inhaltlich ansprechend/kuratierend zu formulieren.
-* Der automatisierte GitHub-Workflow für CurseForge-Uploads ist Teil des Standard-Release-Prozesses und soll bei Tag-Releases bzw. manuellen Release-Runs genutzt werden.
+* Bei **jedem echten Release** mÃ¼ssen die Addon-Dateien auf CurseForge verÃ¶ffentlicht/aktualisiert werden.
+* Die Release-Baseline fÃ¼r die Zielversion basiert verbindlich auf der **aktuellen Interface-Version** aus `GMS/GMS.toc`.
+* Das Release-Changelog fÃ¼r die VerÃ¶ffentlichung ist immer **zweisprachig (EN + DE)** und inhaltlich ansprechend/kuratierend zu formulieren.
+* Der automatisierte GitHub-Workflow fÃ¼r CurseForge-Uploads ist Teil des Standard-Release-Prozesses und soll bei Tag-Releases bzw. manuellen Release-Runs genutzt werden.
 ### 11.7 Discord-Release-Post (Pflicht)
 
 * Bei **jedem echten Release** sind zusaetzlich zwei Discord-Posts zu veroeffentlichen.
@@ -348,11 +348,11 @@ The following rules apply to the AI assistant's interaction with artifacts:
 
 ## 12. Globals-Lokalisierung (Pflicht)
 
-Um "Undefined field"-Warnungen des Linters zu vermeiden und die Performance zu optimieren, **MÜSSEN** alle verwendeten Blizzard-Globals (APIs, Mixins, UI-Frames, Constants) lokalisiert werden.
+Um "Undefined field"-Warnungen des Linters zu vermeiden und die Performance zu optimieren, **MÃœSSEN** alle verwendeten Blizzard-Globals (APIs, Mixins, UI-Frames, Constants) lokalisiert werden.
 
 ### 12.1 Lokalisierungs-Block
 
-Die Lokalisierung erfolgt am Anfang der Datei (nach `METADATA` und den ersten Guards). Der Block **MUSS** durch Diagnose-Kommentare für den Linter abgesichert werden.
+Die Lokalisierung erfolgt am Anfang der Datei (nach `METADATA` und den ersten Guards). Der Block **MUSS** durch Diagnose-Kommentare fÃ¼r den Linter abgesichert werden.
 
 **Verbindliches Muster:**
 
@@ -394,11 +394,11 @@ GMS wird **erstrangig fuer WoW Retail** entwickelt.
 
 ## 13. Text-Lokalisierung (Pflicht)
 
-Alle angezeigten Texte **MÜSSEN** lokalisierbar sein, sofern es sich nicht um Eigennamen handelt.
+Alle angezeigten Texte **MÃœSSEN** lokalisierbar sein, sofern es sich nicht um Eigennamen handelt.
 
 ### 13.1 Geltungsbereich
 
-Die Regel gilt für:
+Die Regel gilt fÃ¼r:
 
 * Chat-Ausgaben
 * UI-Texte
@@ -416,29 +416,43 @@ Die Lokalisierungsdateien befinden sich im Ordner:
 
 * `GMS/Locales/`
 
-### 13.4 Vor-Commit-Prüfung (Pflicht)
+### 13.4 Vor-Commit-PrÃ¼fung (Pflicht)
 
-Vor **jedem Commit** muss auf fehlende Lokalisierungen geprüft werden.
+Vor **jedem Commit** muss auf fehlende Lokalisierungen geprÃ¼ft werden.
 
-**Verbindliche Mindestprüfung:**
+**Verbindliche MindestprÃ¼fung:**
 
-* Suche nach neu eingeführten, direkt ausgegebenen String-Literalen in Chat/UI/Tooltip-Code.
-* Prüfe, ob jeder neue Text über Locale-Keys (`GMS:T(...)` bzw. modulare Wrapper wie `LT/TR/ST/...`) aufgelöst wird.
-* Prüfe, ob neue Keys mindestens in `GMS/Locales/enUS.lua` und `GMS/Locales/deDE.lua` vorhanden sind.
+* Suche nach neu eingefÃ¼hrten, direkt ausgegebenen String-Literalen in Chat/UI/Tooltip-Code.
+* PrÃ¼fe, ob jeder neue Text Ã¼ber Locale-Keys (`GMS:T(...)` bzw. modulare Wrapper wie `LT/TR/ST/...`) aufgelÃ¶st wird.
+* PrÃ¼fe, ob neue Keys mindestens in `GMS/Locales/enUS.lua` und `GMS/Locales/deDE.lua` vorhanden sind.
 * Wenn Keys in anderen Locale-Dateien fehlen, ist ein valider Fallback auf `enUS` sicherzustellen.
 
-Ein Commit ohne diese Prüfung gilt als **regelwidrig**.
+Ein Commit ohne diese PrÃ¼fung gilt als **regelwidrig**.
+
+### 13.4.1 Vor-Release-Locale-Vollstaendigkeitspruefung (Pflicht)
+
+Vor **jedem echten Release** sind **alle** Locale-Dateien auf Vollstaendigkeit zu pruefen.
+
+**Verbindliche Regeln:**
+
+* Jeder in `enUS` oder der aktuellen Referenz vorhandene Locale-Key **MUSS** vor Release in **jeder** ausgelieferten Locale-Datei vorhanden sein.
+* Fehlende Keys duerfen vor einem Release **nicht** nur ueber Fallback stillschweigend offenbleiben.
+* Fehlende Eintraege **MUESSEN** vor dem Release in der **jeweiligen Zielsprache** ergaenzt werden.
+* Maschinennahe Platzhaltertexte oder bewusst englische Kopien in fremdsprachigen Locale-Dateien sind nur zulaessig, wenn der Nutzer dies explizit freigibt.
+* Die Vor-Release-Pruefung umfasst mindestens alle gepflegten Dateien unter `GMS/Locales/`.
+
+Ein Release ohne diese Vollstaendigkeitspruefung und sprachspezifische Ergaenzung gilt als **regelwidrig**.
 
 ### 13.5 deDE-Umlaute (Pflicht)
 
-In `GMS/Locales/deDE.lua` duerfen und sollen echte deutsche Umlaute verwendet werden (`�`, `�`, `�`, `�`, `�`, `�`, `�`), sofern Encoding/Toolchain dies korrekt unterstuetzt.
+In `GMS/Locales/deDE.lua` duerfen und sollen echte deutsche Umlaute verwendet werden (`ä`, `ö`, `ü`, `Ä`, `Ö`, `Ü`, `ß`), sofern Encoding/Toolchain dies korrekt unterstuetzt.
 
 * ASCII-Umschreibungen wie `ae`, `oe`, `ue` sind in `deDE` nur noch Fallback-Ausnahme, wenn technische Inkompatibilitaeten nachweisbar sind.
 * Neue oder geaenderte `deDE`-Texte sollen standardmaessig mit korrekter deutscher Rechtschreibung inkl. Umlauten gepflegt werden.
 
 ### 13.6 Log-Lokalisierung & menschliche Lesbarkeit (Pflicht)
 
-Alle im Addon angezeigten Logs **M�SSEN** fuer Endnutzer menschlich lesbar und lokalisiert sein.
+Alle im Addon angezeigten Logs **MÜSSEN** fuer Endnutzer menschlich lesbar und lokalisiert sein.
 
 **Verbindliche Regeln:**
 
