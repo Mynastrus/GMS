@@ -16,7 +16,7 @@ local METADATA = {
 	INTERN_NAME  = "ROSTER",
 	SHORT_NAME   = "Roster",
 	DISPLAY_NAME = "Roster",
-	VERSION      = "1.1.38",
+	VERSION      = "1.1.39",
 }
 
 local LibStub = LibStub
@@ -1371,15 +1371,15 @@ function Roster:SetMemberGmsVersion(guid, version, seenAt)
 end
 
 local GetBestRaidProgressFromEntry
-local ACTIVE_RAID_PRIORITY = { 2810, 2769, 2657 } -- newest -> older
+-- The roster's single Raid column represents the current tier only. Do not
+-- fall back to an older raid, otherwise the overview shows misleading data.
+local ACTIVE_RAID_PRIORITY = { 3004 } -- The Venomous Abyss
 local ACTIVE_RAID_PRIORITY_INDEX = {}
 for i = 1, #ACTIVE_RAID_PRIORITY do
 	ACTIVE_RAID_PRIORITY_INDEX[ACTIVE_RAID_PRIORITY[i]] = i
 end
 local ACTIVE_RAID_INFO_BY_INSTANCE = {
-	[2810] = { name = "Manaschmiede Omega" },
-	[2769] = { name = "Befreiung von Lorenhall" },
-	[2657] = { name = "Palast der Nerub'ar" },
+	[3004] = { name = "Der Giftige Abgrund" },
 }
 
 local function NormalizeRaidPriorityName(name)
@@ -1388,13 +1388,8 @@ local function NormalizeRaidPriorityName(name)
 end
 
 local ACTIVE_RAID_PRIORITY_BY_NAME = {
-	[NormalizeRaidPriorityName("Manaschmiede Omega")] = 1,
-	[NormalizeRaidPriorityName("Manaforge Omega")] = 1,
-	[NormalizeRaidPriorityName("Befreiung von Lorenhall")] = 2,
-	[NormalizeRaidPriorityName("Liberation of Lorenhall")] = 2,
-	[NormalizeRaidPriorityName("Palast der Nerub'ar")] = 3,
-	[NormalizeRaidPriorityName("Palace of Nerub'ar")] = 3,
-	[NormalizeRaidPriorityName("Nerub'ar Palace")] = 3,
+	[NormalizeRaidPriorityName("Der Giftige Abgrund")] = 1,
+	[NormalizeRaidPriorityName("The Venomous Abyss")] = 1,
 }
 
 local function GetRaidPriorityForEntry(key, raidEntry)

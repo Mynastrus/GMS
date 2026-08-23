@@ -79,7 +79,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.24",
+	VERSION      = "1.2.27",
 }
 
 -- ###########################################################################
@@ -1774,11 +1774,14 @@ local function buildExpansionRaidCatalog()
 		end
 	end
 
+	-- Retail may temporarily return stale Journal rows while its data is loading.
+	-- Keep the catalog pass bounded so a UI request can never lock up the client.
+	local MAX_EJ_INSTANCES_PER_TIER = 100
 	for _, tierID in ipairs(tiersToScan) do
 		EJ_SelectTier(tierID)
 
 		local idx = 1
-		while true do
+		while idx <= MAX_EJ_INSTANCES_PER_TIER do
 			local instanceID = EJ_GetInstanceByIndex(idx, true)
 			if not instanceID then break end
 
@@ -1803,7 +1806,7 @@ local function buildExpansionRaidCatalog()
 					instanceID = instanceID,
 					name       = raidName,
 					description = tostring(raidDescription or ""),
-					icon       = tonumber(buttonImage2 or buttonImage1 or bgImage or 0) or 0,
+					icon       = buttonImage2 or buttonImage1 or bgImage or 0,
 					total      = total,
 					encounters = encounters,
 				}
@@ -1821,6 +1824,9 @@ local function buildExpansionRaidCatalog()
 			end
 
 			idx = idx + 1
+		end
+		if idx > MAX_EJ_INSTANCES_PER_TIER then
+			LOCAL_LOG("WARN", "Encounter Journal tier scan reached safety limit", tierID, MAX_EJ_INSTANCES_PER_TIER)
 		end
 	end
 
@@ -1944,11 +1950,62 @@ function RAIDS:OnEJReady()
 
 	-- Force rebuild (now safe)
 	self:RebuildCatalog()
+	self:_ScheduleActiveRaidVisualRefresh()
 
 	-- Resume deferred scan
 	if self._scanWantedAfterCatalog then
 		self._scanWantedAfterCatalog = nil
 		self:_ScheduleScan("ej_ready_final", 0.5)
+	end
+end
+
+-- Resolve only the four active Midnight raid textures, one per UI frame. This
+-- avoids the broad Journal enumeration that can stall Retail during login.
+function RAIDS:_ScheduleActiveRaidVisualRefresh()
+	if self._activeRaidVisualsScheduled then return end
+	self._activeRaidVisualsScheduled = true
+	self._activeRaidVisuals = type(self._activeRaidVisuals) == "table" and self._activeRaidVisuals or {}
+
+	local instanceIDs = { 3004, 2912, 2913, 2939 }
+	local index, retries = 1, 0
+	local function Step()
+		if self._ejUnsupported then
+			self._activeRaidVisualsScheduled = nil
+			return
+		end
+		if not self._ejReady or type(EJ_SelectInstance) ~= "function" or type(EJ_GetInstanceInfo) ~= "function" then
+			retries = retries + 1
+			if retries < 12 and C_Timer and type(C_Timer.After) == "function" then
+				C_Timer.After(1, Step)
+			else
+				self._activeRaidVisualsScheduled = nil
+			end
+			return
+		end
+
+		local instanceID = instanceIDs[index]
+		if not instanceID then
+			self._activeRaidVisualsScheduled = nil
+			return
+		end
+		pcall(EJ_SelectInstance, instanceID)
+		local ok, _, _, background, button1, _, button2 = pcall(EJ_GetInstanceInfo)
+		local texture = ok and (button1 or button2 or background) or nil
+		if (type(texture) == "number" and texture > 0) or (type(texture) == "string" and texture ~= "") then
+			self._activeRaidVisuals[instanceID] = texture
+		end
+		index = index + 1
+		if C_Timer and type(C_Timer.After) == "function" then
+			C_Timer.After(0.05, Step)
+		else
+			Step()
+		end
+	end
+
+	if C_Timer and type(C_Timer.After) == "function" then
+		C_Timer.After(0.5, Step)
+	else
+		Step()
 	end
 end
 
@@ -2168,6 +2225,7 @@ function RAIDS:OnEnable()
 
 	-- Try to build EJ catalog early (gated until EJ is ready)
 	self:_EnsureCatalogReady()
+	self:_ScheduleActiveRaidVisualRefresh()
 
 	-- PLAYER_LOGIN / PLAYER_ENTERING_WORLD may already have fired.
 	-- Ensure at least one initial scan after reload/late enable.
@@ -2290,7 +2348,9 @@ function RAIDS:GetAllRaids()
 end
 
 function RAIDS:GetCatalog()
-	self:_EnsureCatalogReady()
+	-- Read-only consumers such as CharInfo must not synchronously initialize
+	-- the Encounter Journal. Catalog construction stays in the scheduled scan
+	-- lifecycle, where it cannot freeze a panel-open action.
 	return RAIDS._catalog or {}
 end
 

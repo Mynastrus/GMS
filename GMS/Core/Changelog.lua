@@ -36,7 +36,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.18",
+	VERSION      = "1.3.19",
 }
 
 -- ###########################################################################
@@ -110,6 +110,24 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 -- ###########################################################################
 
 local RELEASES = {
+	{
+		version = "2.0.3",
+		date = "2026-08-23",
+		title_en = "Stable Character Info for Midnight Season 2",
+		title_de = "Stabile Charakterinformationen für Midnight Saison 2",
+		notes_en = {
+			"Fixed the Retail client freeze when opening Character Info by removing synchronous Journal, spellbook, protected-frame, and resize-rebuild work from the panel path.",
+			"Updated Character Info with Midnight Season 2 raid names, boss totals, current-lockout Best progress, and safe Mythic+ and raid artwork loading.",
+			"Updated the Roster Raid column to report progress for the current raid, The Venomous Abyss, instead of a previous raid tier.",
+			"Fixed external character rendering when the Mythic+ API returns multiple texture values and added a safe profile fallback while sync data arrives.",
+		},
+		notes_de = {
+			"Der Retail-Client-Freeze beim Öffnen der Charakterinformationen wurde behoben: Encounter-Journal, Zauberbuch, geschützte Frames und Resize-Rebuilds werden nicht mehr synchron im Panelpfad verarbeitet.",
+			"Die Charakterinformationen enthalten aktuelle Midnight-Saison-2-Raidnamen, Bossanzahlen, den Bestwert des aktiven Lockouts sowie sicher geladene Mythic+- und Raidgrafiken.",
+			"Die Raidspalte im Roster zeigt nun den Fortschritt im aktuellen Raid Der Giftige Abgrund statt eines früheren Raidtiers.",
+			"Die Anzeige externer Charaktere wurde für mehrwertige Mythic+-Textur-APIs korrigiert und erhält einen sicheren Fallback, während Synchronisationsdaten eintreffen.",
+		},
+	},
 	{
 		version = "2.0.2",
 		date = "2026-08-23",

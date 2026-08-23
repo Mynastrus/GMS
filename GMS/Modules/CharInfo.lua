@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.44",
+	VERSION      = "1.1.56",
 }
 
 local LibStub = LibStub
@@ -178,9 +178,11 @@ local OPTIONS_DEFAULTS = {
 	cardOrder = { "MYTHIC", "EQUIPMENT", "RAIDS", "OVERVIEW", "ACCOUNT", "TALENTS", "PVP" },
 }
 
-local CHARINFO_UI_RENDER_DELAY = 0
-local CHARINFO_UI_RENDER_BATCH = 999
-local CHARINFO_UI_RENDER_DEFERRED = false
+-- Building every card in the click handler can exceed Retail's watchdog budget.
+-- Keep opening responsive by spreading the work over regular UI frames.
+local CHARINFO_UI_RENDER_DELAY = 0.02
+local CHARINFO_UI_RENDER_BATCH = 1
+local CHARINFO_UI_RENDER_DEFERRED = true
 
 -- Icon: nimm einen, der bei dir existiert (du kannst ihn per /run testen)
 local ICON = "Interface\\Icons\\Achievement_character_human_male"
@@ -946,15 +948,16 @@ local function BuildMythicRows(dungeons, includeDefaults)
 			tyrannicalScore = tonumber(extra.ts) or 0,
 			tyrannicalCompleted = (extra.tc == true),
 			isPlaceholder = false,
+			icon = tonumber(extra.t or extra.texture) or 0,
 		}
 		byKey[key] = true
 	end
 
 	local function decodePacked(raw)
 		local v = tostring(raw or "")
-		local fl, fs, fc, tl, ts, tc = v:match("^(%-?%d+):(%-?%d+):([01]):(%-?%d+):(%-?%d+):([01]):%-?%d+$")
+		local fl, fs, fc, tl, ts, tc, texture = v:match("^(%-?%d+):(%-?%d+):([01]):(%-?%d+):(%-?%d+):([01]):(%-?%d+)$")
 		if not fl then
-            fl, fs, fc, tl, ts, tc = v:match("^(%-?%d+):(%-?%d+):([01]):(%-?%d+):(%-?%d+):([01]):%-?%d+:[^:]*$")
+			fl, fs, fc, tl, ts, tc, texture = v:match("^(%-?%d+):(%-?%d+):([01]):(%-?%d+):(%-?%d+):([01]):(%-?%d+):[^:]*$")
 		end
 		if fl then
 			local nfs = tonumber(fs) or 0
@@ -972,6 +975,7 @@ local function BuildMythicRows(dungeons, includeDefaults)
 				tl = ntl,
 				ts = nts,
 				tc = (tc == "1"),
+				t = tonumber(texture) or 0,
 			}
 		end
 
@@ -1037,7 +1041,10 @@ local function BuildMythicRows(dungeons, includeDefaults)
 					level = (fl > tl) and fl or tl
 				end
 				local completed = (d.c == true) or (d.completed == true) or fc or tc
-				addRow(mapId, name, level, score, completed, { fl = fl, fs = fs, fc = fc, tl = tl, ts = ts, tc = tc })
+				addRow(mapId, name, level, score, completed, {
+					fl = fl, fs = fs, fc = fc, tl = tl, ts = ts, tc = tc,
+					t = tonumber(d.t or d.texture) or 0,
+				})
 			elseif type(d) == "string" then
 				local mapId = tonumber(k or 0) or 0
 				local unpacked = decodePacked(d)
@@ -1073,6 +1080,9 @@ local function BuildMythicRows(dungeons, includeDefaults)
 							tyrannicalScore = 0,
 							tyrannicalCompleted = false,
 							isPlaceholder = true,
+							-- Parenthesize select so tonumber receives only the texture ID;
+							-- Retail returns additional values after it.
+							icon = tonumber((select(4, C_ChallengeMode.GetMapUIInfo(mapId)))) or 0,
 						}
 						byKey[key] = true
 					end
@@ -1461,10 +1471,10 @@ local function ResolvePortalSpellForDungeon(mapId, dungeonName)
 			return firstValid, tostring(sname or ""), false
 		end
 	end
-	local spellID, spellName, known = FindPortalSpellByDungeonName(dungeonName)
-	if spellID and known then
-		return spellID, tostring(spellName or ""), true
-	end
+	-- Do not fall back to a full spellbook scan while a card is being rendered.
+	-- On current Retail that scan may synchronously load protected spell data and
+	-- trip the client watchdog. Unknown portals remain unavailable until they
+	-- have an explicit map-to-spell entry above.
 	return nil, nil, false
 end
 
@@ -1668,11 +1678,13 @@ end
 
 local function BuildRaidCatalogLookup()
 	local raids = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true)) or nil
-	if type(raids) ~= "table" or type(raids.GetCatalog) ~= "function" then
+	if type(raids) ~= "table" then
 		return nil
 	end
-	local ok, cat = pcall(raids.GetCatalog, raids)
-	if not ok or type(cat) ~= "table" or type(cat.byInstanceID) ~= "table" then
+	-- Opening CharInfo must only consume an already prepared catalog. Triggering
+	-- Encounter Journal initialization here can block the Retail client.
+	local cat = raids._catalog
+	if type(cat) ~= "table" or type(cat.byInstanceID) ~= "table" then
 		return nil
 	end
 	return cat
@@ -1730,6 +1742,26 @@ local function BuildRaidRows(all, catalog)
 	end
 
 	local STATIC_RAID_META_BY_INSTANCE = {
+		[3004] = {
+			name = LT("CHARINFO_RAID_NAME_VENOMOUS_ABYSS", "The Venomous Abyss"),
+			description = LT("CHARINFO_RAID_DESC_VENOMOUS_ABYSS", "The eight-boss Midnight Season 2 raid on the Coiled Isle."),
+			total = 8,
+		},
+		[2912] = {
+			name = LT("CHARINFO_RAID_NAME_VOIDSPIRE", "The Voidspire"),
+			description = LT("CHARINFO_RAID_DESC_VOIDSPIRE", "The six-boss Midnight raid in Voidstorm."),
+			total = 6,
+		},
+		[2913] = {
+			name = LT("CHARINFO_RAID_NAME_QUELDANAS", "March on Quel'Danas"),
+			description = LT("CHARINFO_RAID_DESC_QUELDANAS", "The two-boss Midnight raid in Eversong Woods."),
+			total = 2,
+		},
+		[2939] = {
+			name = LT("CHARINFO_RAID_NAME_DREAMRIFT", "The Dreamrift"),
+			description = LT("CHARINFO_RAID_DESC_DREAMRIFT", "The single-boss Midnight raid in Harandar."),
+			total = 1,
+		},
 		[2657] = {
 			name = LT("CHARINFO_RAID_NAME_NERUBAR", "Palast der Nerub'ar"),
 			description = LT("CHARINFO_RAID_DESC_NERUBAR", "Ein unterirdischer Neruber-Palast mit den Streitkraeften der Neruber."),
@@ -1759,20 +1791,28 @@ local function BuildRaidRows(all, catalog)
 		ACTIVE_RAID_SET[ACTIVE_RAID_ORDER[i]] = i
 	end
 	local KNOWN_RAID_INSTANCE_IDS = {}
+	local knownRaidInstanceSet = {}
+	local function AddKnownRaidInstance(instanceID)
+		local iid = tonumber(instanceID)
+		if iid and ACTIVE_RAID_SET[iid] and not knownRaidInstanceSet[iid] then
+			knownRaidInstanceSet[iid] = true
+			KNOWN_RAID_INSTANCE_IDS[#KNOWN_RAID_INSTANCE_IDS + 1] = iid
+		end
+	end
 	local raidIdsLib = _G and _G.GMS_RAIDIDS or nil
 	if type(raidIdsLib) == "table" and type(raidIdsLib.MAP_TO_BOSS_STATS) == "table" then
 		for mapID in pairs(raidIdsLib.MAP_TO_BOSS_STATS) do
-			local iid = tonumber(mapID)
-			if iid and ACTIVE_RAID_SET[iid] then
-				KNOWN_RAID_INSTANCE_IDS[#KNOWN_RAID_INSTANCE_IDS + 1] = iid
-			end
+			AddKnownRaidInstance(mapID)
 		end
-		table.sort(KNOWN_RAID_INSTANCE_IDS, function(a, b)
-			return (ACTIVE_RAID_SET[tonumber(a)] or 999) < (ACTIVE_RAID_SET[tonumber(b)] or 999)
-		end)
-	else
-		KNOWN_RAID_INSTANCE_IDS = { 2810, 2769, 2657 }
 	end
+	-- Keep all current Midnight raids visible even when the Journal catalog or
+	-- detailed boss-ID tables have not populated yet.
+	for i = 1, #ACTIVE_RAID_ORDER do
+		AddKnownRaidInstance(ACTIVE_RAID_ORDER[i])
+	end
+	table.sort(KNOWN_RAID_INSTANCE_IDS, function(a, b)
+		return (ACTIVE_RAID_SET[tonumber(a)] or 999) < (ACTIVE_RAID_SET[tonumber(b)] or 999)
+	end)
 
 	local function IsNumericOnlyText(v)
 		local s = tostring(v or "")
@@ -1814,7 +1854,7 @@ local function BuildRaidRows(all, catalog)
 			instanceID = tonumber(instanceID) or nil,
 			name = tostring(raidName or ("Raid " .. key)),
 			description = tostring(description or ""),
-			icon = tonumber(icon) or 0,
+			icon = (type(icon) == "number" or type(icon) == "string") and icon or 0,
 			total = tonumber(total) or 0,
 			encounters = (type(encounters) == "table") and encounters or {},
 			current = {},
@@ -1842,7 +1882,7 @@ local function BuildRaidRows(all, catalog)
 				if iid and ACTIVE_RAID_SET[iid] then
 					local row = ensureRow(iid, meta.name, meta.total, meta.encounters, meta.description, meta.icon)
 					row.description = tostring(meta.description or row.description or "")
-					row.icon = tonumber(meta.icon or row.icon or 0) or 0
+					row.icon = meta.icon or row.icon or 0
 				end
 			end
 		end
@@ -1855,7 +1895,7 @@ local function BuildRaidRows(all, catalog)
 		ensureRow(
 			iid,
 			type(staticMeta) == "table" and staticMeta.name or nil,
-			0,
+			type(staticMeta) == "table" and staticMeta.total or 0,
 			nil,
 			type(staticMeta) == "table" and staticMeta.description or "",
 			0
@@ -1911,8 +1951,8 @@ local function BuildRaidRows(all, catalog)
 					if tostring(catEntry.description or "") ~= "" then
 						row.description = tostring(catEntry.description or "")
 					end
-					local catIcon = tonumber(catEntry.icon or 0) or 0
-					if catIcon > 0 then
+					local catIcon = catEntry.icon
+					if (type(catIcon) == "number" and catIcon > 0) or (type(catIcon) == "string" and catIcon ~= "") then
 						row.icon = catIcon
 					end
 				end
@@ -1954,6 +1994,20 @@ local function BuildRaidRows(all, catalog)
 					bestNode = entry.bestStats
 				elseif tostring(entry.bestSource or "") == "stats" and type(entry.best) == "table" then
 					bestNode = entry.best
+				end
+				-- The live lockout is authoritative when statistics have not been
+				-- indexed yet (notably for a newly opened raid tier).
+				if type(bestNode) ~= "table" then
+					for i = #RAID_DIFF_ORDER, 1, -1 do
+						local diffID = RAID_DIFF_ORDER[i]
+						local current = row.current[diffID]
+						local killed = tonumber(current and current.killed) or 0
+						local total = tonumber(current and current.total) or 0
+						if killed > 0 and total > 0 then
+							bestNode = { diffID = diffID, killed = killed, total = total }
+							break
+						end
+					end
 				end
 				row.best = FormatBestShort(bestNode)
 				if type(bestNode) == "table" then
@@ -2079,6 +2133,20 @@ local function BuildRaidRows(all, catalog)
 		if br then return false end
 		return tostring(a and a.name or "") < tostring(b and b.name or "")
 	end)
+
+	-- Raid art is resolved independently and asynchronously by RAIDS. Applying
+	-- its completed textures here never touches the Encounter Journal on click.
+	local raidsModule = GMS and (GMS:GetModule("RAIDS", true) or GMS:GetModule("Raids", true)) or nil
+	local raidVisuals = type(raidsModule) == "table" and raidsModule._activeRaidVisuals or nil
+	if type(raidVisuals) == "table" then
+		for i = 1, #rows do
+			local row = rows[i]
+			local texture = row and raidVisuals[tonumber(row.instanceID)] or nil
+			if (type(texture) == "number" and texture > 0) or (type(texture) == "string" and texture ~= "") then
+				row.icon = texture
+			end
+		end
+	end
 	return rows
 end
 
@@ -3350,6 +3418,7 @@ local function BuildDetailsSignature(details)
 		local r = raidRows[i]
 		out[#out + 1] = tostring(r.name or "")
 		out[#out + 1] = tostring(r.best or "")
+		out[#out + 1] = tostring(r.icon or "")
 		local cur = type(r.current) == "table" and r.current or {}
 		for j = 1, #RAID_DIFF_ORDER do
 			local diffID = RAID_DIFF_ORDER[j]
@@ -3382,6 +3451,8 @@ local function BuildDetailsSignature(details)
 
 	return table.concat(out, "|")
 end
+
+local BuildContextFallbackDetails
 
 local function StopUIDataTicker()
 	local t = CHARINFO._uiDataTicker
@@ -3521,7 +3592,11 @@ function CHARINFO:StartUIDataTicker(ctxState)
 	local ctxName = state and state.name_full or nil
 
 	local initialPlayer = GetPlayerSnapshot()
-	local initialDetails = BuildCharData(initialPlayer, ctxGuid, ctxName)
+	local okInitial, initialDetails = pcall(BuildCharData, initialPlayer, ctxGuid, ctxName)
+	if not okInitial or type(initialDetails) ~= "table" then
+		LOCAL_LOG("ERROR", "Character Info initial refresh data failed: " .. tostring(initialDetails or "unknown"))
+		initialDetails = BuildContextFallbackDetails(ctxGuid, ctxName)
+	end
 	self._uiDataLastSig = BuildDetailsSignature(initialDetails)
 
 	self._uiDataTicker = C_Timer.NewTicker(1.5, function()
@@ -3532,7 +3607,11 @@ function CHARINFO:StartUIDataTicker(ctxState)
 		end
 
 		local playerNow = GetPlayerSnapshot()
-		local detailsNow = BuildCharData(playerNow, ctxGuid, ctxName)
+		local okNow, detailsNow = pcall(BuildCharData, playerNow, ctxGuid, ctxName)
+		if not okNow or type(detailsNow) ~= "table" then
+			LOCAL_LOG("ERROR", "Character Info refresh data failed: " .. tostring(detailsNow or "unknown"))
+			return
+		end
 		local sigNow = BuildDetailsSignature(detailsNow)
 		if sigNow == self._uiDataLastSig then
 			return
@@ -3546,38 +3625,40 @@ function CHARINFO:StartUIDataTicker(ctxState)
 	end)
 end
 
-local function EnsureResizeHook(root)
-	if not root or not root.frame or type(root.frame.HookScript) ~= "function" then
-		return
-	end
-	if root.frame._gmsCharInfoResizeHooked then
-		return
-	end
+local function EnsureResizeHook(_root)
+	-- AceGUI emits OnSizeChanged while cards are added and laid out. Reopening
+	-- the page from that event starts an unbounded render/rebuild cycle on
+	-- Retail. The current layout already adapts naturally on the next open.
+end
 
-	root.frame._gmsCharInfoResizeHooked = true
-	root.frame:HookScript("OnSizeChanged", function()
-		if CHARINFO._resizeRefreshPending then
-			return
-		end
-		CHARINFO._resizeRefreshPending = true
-
-		if C_Timer and type(C_Timer.After) == "function" then
-			C_Timer.After(0.12, function()
-				CHARINFO._resizeRefreshPending = false
-				local ui = UIRef()
-				if not ui or ui._page ~= "CHARINFO" then
-					return
-				end
-				OpenSelf()
-			end)
-		else
-			CHARINFO._resizeRefreshPending = false
-			local ui = UIRef()
-			if ui and ui._page == "CHARINFO" then
-				OpenSelf()
-			end
-		end
-	end)
+BuildContextFallbackDetails = function(ctxGuid, ctxName)
+	local selectedGuid = tostring(ctxGuid or "")
+	local selectedName = tostring(ctxName or "")
+	if selectedName == "" then selectedName = selectedGuid ~= "" and selectedGuid or "-" end
+	local member = GetRosterMemberByGuid(selectedGuid)
+	local memberName = type(member) == "table" and tostring(member.name_full or member.name or "") or ""
+	if memberName ~= "" then selectedName = memberName end
+	local memberClassFile = type(member) == "table" and tostring(member.classFile or member.classFileName or "") or ""
+	return {
+		isContext = true,
+		selectedGuid = selectedGuid,
+		selectedName = selectedName,
+		gmsVersion = "-",
+		general = {
+			name = selectedName, guid = selectedGuid ~= "" and selectedGuid or "-",
+			class = type(member) == "table" and tostring(member.class or "-") or "-",
+			classFile = memberClassFile, race = "-", faction = "-",
+			level = type(member) == "table" and ((tonumber(member.level) or 0) > 0 and tostring(tonumber(member.level)) or "-") or "-",
+			spec = "-", guild = "-",
+		},
+		mythic = { score = nil, rows = {}, hasData = false, source = "-" },
+		raids = { summary = "-", rows = {}, hasData = false, source = "-" },
+		equipment = { ilvl = nil, slots = 0, rows = {}, hasData = false, source = "-" },
+		pvp = { summary = "-", hasData = false, source = "-" },
+		talents = { summary = "-", hasData = false, source = "-" },
+		accountChars = { rows = {}, hasData = false, source = "-" },
+		hasAnyExternalData = false,
+	}
 end
 
 -- ###########################################################################
@@ -3605,10 +3686,17 @@ function CHARINFO:TryRegisterPage()
 			root:ReleaseChildren()
 		end
 
-		local details = BuildCharData(player, ctxGuid, ctxName)
+		local okDetails, details = pcall(BuildCharData, player, ctxGuid, ctxName)
+		if not okDetails or type(details) ~= "table" then
+			LOCAL_LOG("ERROR", "Context data build failed; rendering safe fallback: " .. tostring(details or "unknown"))
+			details = BuildContextFallbackDetails(ctxGuid, ctxName)
+		end
 		EnsureResizeHook(root)
 
-		BuildCharInfoUIHeader(ui2, details, details.isContext and (ctxFrom or "external") or "local")
+		local okHeader, headerErr = pcall(BuildCharInfoUIHeader, ui2, details, details.isContext and (ctxFrom or "external") or "local")
+		if not okHeader then
+			LOCAL_LOG("ERROR", "Character Info header build failed", tostring(headerErr or "unknown"))
+		end
 		if ui2 and type(ui2.SetStatusText) == "function" then
 			ui2:SetStatusText(details.isContext
 				and LT("CHARINFO_STATUS_CONTEXT", "CHARINFO: context active")
@@ -3785,56 +3873,18 @@ function CHARINFO:TryRegisterPage()
 				rowGroup:SetLayout("Flow")
 				card:AddChild(rowGroup)
 
-				local portalSpellID, portalSpellName, hasPortalSpell = ResolvePortalSpellForDungeon(row.mapId, row.name)
-
-				local portalIcon = AceGUI:Create("Icon")
-				portalIcon:SetWidth(portalW)
-				portalIcon:SetHeight(12)
-				portalIcon:SetImageSize(12, 12)
-				if portalSpellID and type(GetSpellTexture) == "function" then
-					portalIcon:SetImage(GetSpellTexture(portalSpellID))
-				else
-					portalIcon:SetImage("Interface\\PetBattles\\PetBattle-LockIcon")
+				-- Display the stored dungeon texture only. No secure portal button or
+				-- cooldown frame is created during panel rendering.
+				local dungeonIcon = AceGUI:Create("Icon")
+				dungeonIcon:SetWidth(portalW)
+				dungeonIcon:SetHeight(12)
+				local dungeonTexture = tonumber(row.icon or 0) or 0
+				if dungeonTexture <= 0 then
+					dungeonTexture = "Interface\\Icons\\INV_Misc_QuestionMark"
 				end
-				if portalIcon.image and type(portalIcon.image.SetDesaturated) == "function" then
-					portalIcon.image:SetDesaturated(not hasPortalSpell)
-				end
-				if portalIcon.frame then
-					local cd = portalIcon.frame._gmsCd
-					if not cd and type(CreateFrame) == "function" then
-						cd = CreateFrame("Cooldown", nil, portalIcon.frame, "CooldownFrameTemplate")
-						if cd then
-							cd:SetAllPoints(portalIcon.frame)
-							portalIcon.frame._gmsCd = cd
-						end
-					end
-					if cd and type(cd.SetCooldown) == "function" and hasPortalSpell and portalSpellID then
-						local _, start, duration = GetSpellCooldownRemaining(portalSpellID)
-						cd:SetCooldown(tonumber(start or 0) or 0, tonumber(duration or 0) or 0)
-					end
-				end
-				portalIcon:SetCallback("OnEnter", function(widget)
-					if not GameTooltip or not widget or not widget.frame then return end
-					GameTooltip:SetOwner(widget.frame, "ANCHOR_RIGHT")
-					if portalSpellID and hasPortalSpell then
-						local remain = select(1, GetSpellCooldownRemaining(portalSpellID))
-						GameTooltip:SetText(tostring(portalSpellName or LT("CHARINFO_PORTAL_TITLE_FALLBACK", "Mythic+ Portal")), 1, 1, 1)
-						GameTooltip:AddLine(string.format("|cff9d9d9d%s|r %s", LT("CHARINFO_PORTAL_COOLDOWN_LABEL", "Cooldown:"), FormatCooldownShort(remain)), 1, 1, 1)
-						GameTooltip:AddLine("|cff03A9F4" .. LT("CHARINFO_PORTAL_CAST_HINT", "Click: Cast dungeon portal") .. "|r", 1, 1, 1)
-					elseif portalSpellID then
-						GameTooltip:SetText("|cffffcc00" .. LT("CHARINFO_PORTAL_SPELL_MISSING", "No matching portal spell found") .. "|r", 1, 1, 1)
-						GameTooltip:AddLine("|cff9d9d9d" .. LT("CHARINFO_PORTAL_SPELL_UNAVAILABLE", "Portal spell ID was detected but is not available in spellbook/as learned.") .. "|r", 1, 1, 1)
-					else
-						GameTooltip:SetText("|cff9d9d9d" .. LT("CHARINFO_PORTAL_NOT_AVAILABLE", "Portal not available") .. "|r", 1, 1, 1)
-						GameTooltip:AddLine("|cff9d9d9d" .. LT("CHARINFO_PORTAL_NOT_FOUND_FOR_DUNGEON", "No matching portal spell found for this dungeon.") .. "|r", 1, 1, 1)
-					end
-					GameTooltip:Show()
-				end)
-				portalIcon:SetCallback("OnLeave", function()
-					if GameTooltip then GameTooltip:Hide() end
-				end)
-				ConfigurePortalSecureButton(portalIcon.frame, portalSpellID, hasPortalSpell)
-				rowGroup:AddChild(portalIcon)
+				dungeonIcon:SetImage(dungeonTexture)
+				dungeonIcon:SetImageSize(12, 12)
+				rowGroup:AddChild(dungeonIcon)
 
 				local nameLabel = AceGUI:Create("InteractiveLabel")
 				nameLabel:SetWidth(nameW)
@@ -4253,11 +4303,13 @@ function CHARINFO:TryRegisterPage()
 				local icon = AceGUI:Create("Icon")
 				icon:SetWidth(iconW)
 				icon:SetHeight(14)
-				local iconTexture = tonumber(rowData.icon or 0) or 0
-				if iconTexture > 0 then
+				local iconTexture = rowData.icon
+				if (type(iconTexture) == "number" and iconTexture > 0) or (type(iconTexture) == "string" and iconTexture ~= "") then
 					icon:SetImage(iconTexture)
 				else
-					icon:SetImage("Interface\\EncounterJournal\\UI-EJ-LOOTTRAP-ICON")
+					-- Catalog art is loaded asynchronously; use a valid, safe fallback
+					-- texture until the current Raid Journal texture is available.
+					icon:SetImage("Interface\\Icons\\INV_Misc_QuestionMark")
 				end
 				icon:SetImageSize(14, 14)
 				row:AddChild(icon)
@@ -4527,13 +4579,15 @@ function CHARINFO:TryRegisterPage()
 			end
 		end
 
-		StartUIBuildQueue(renderQueue, scroller, outer)
-
 		CHARINFO:StartUIDataTicker({
 			from = ctxFrom or "charinfo",
 			guid = ctxGuid,
 			name_full = ctxName,
 		})
+
+		-- StartUIDataTicker invalidates any previous render token. It therefore
+		-- must run before creating this page's deferred render queue.
+		StartUIBuildQueue(renderQueue, scroller, outer)
 	end)
 
 	self._pageRegistered = true
