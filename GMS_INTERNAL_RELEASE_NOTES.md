@@ -23,6 +23,7 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - Made the Roster Raid column report only each player's best progress in the current Midnight Season 2 raid, Der Giftige Abgrund / The Venomous Abyss (`GMS/Modules/Roster.lua`).
 
 ### Fixed
+- Force CurseForge uploads to the explicit Retail game-version type (`Retail:12.1.0`) so releases cannot be misclassified as Titan Reforged Classic (`.github/workflows/upload-to-curseforge.yml`).
 - Restored guild member counts, online counts, MOTD, and guild-info text on the current Retail `C_GuildInfo` API (`GMS/Modules/GuildInfo.lua`).
 - Prevented the Character Info panel from synchronously initializing the Encounter Journal, scanning the full spellbook for portal names, constructing protected Mythic+ portal/cooldown frames, or building all cards in the click handler; Journal tier scans and UI rendering are now bounded to avoid Retail client soft locks (`GMS/Modules/CharInfo.lua`, `GMS/Modules/Raids.lua`).
 - Restored the complete deferred Character Info layout: the data-refresh ticker no longer cancels the newly created card-render queue (`GMS/Modules/CharInfo.lua`).

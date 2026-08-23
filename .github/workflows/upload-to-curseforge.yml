@@ -282,6 +282,11 @@ jobs:
           token: ${{ secrets.CF_API_TOKEN }}
           project_id: ${{ secrets.CF_PROJECT_ID }}
           game_endpoint: ${{ vars.CF_GAME_ENDPOINT || 'wow' }}
+          # CurseForge does not reliably infer the Retail flavor from a modern
+          # WoW TOC interface number.  Constrain the match to the Retail
+          # version type so it cannot select a similarly numbered Classic
+          # flavor (for example Titan Reforged).
+          game_versions: ${{ vars.CF_GAME_VERSIONS || 'Retail:12.1.0' }}
           file_path: RELEASE/GMS_${{ steps.version.outputs.version }}.zip
           release_type: ${{ github.event.inputs.release_type || 'release' }}
           display_name: GMS ${{ steps.version.outputs.version }}
