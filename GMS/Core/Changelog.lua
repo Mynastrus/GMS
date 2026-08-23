@@ -36,7 +36,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.17",
+	VERSION      = "1.3.18",
 }
 
 -- ###########################################################################
@@ -110,6 +110,24 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 -- ###########################################################################
 
 local RELEASES = {
+	{
+		version = "2.0.2",
+		date = "2026-08-23",
+		title_en = "Retail 12.1 compatibility and current Midnight guild data",
+		title_de = "Retail-12.1-Kompatibilität und aktuelle Midnight-Gildendaten",
+		notes_en = {
+			"Updated the addon TOC for WoW Retail 12.1 / Curse of Ula'tek.",
+			"Updated addon enumeration to use the current C_AddOns Retail API first, with a legacy fallback where needed.",
+			"Restored guild member counts, online counts, MOTD, and guild-information snapshots with the current C_GuildInfo API.",
+			"Updated the character raid view for the current Midnight lineup, including Season 2's Venomous Abyss.",
+		},
+		notes_de = {
+			"Die Addon-TOC wurde für WoW Retail 12.1 / Curse of Ula'tek aktualisiert.",
+			"Die Addon-Erkennung nutzt nun vorrangig die aktuelle C_AddOns-Retail-API und bei Bedarf einen Legacy-Fallback.",
+			"Mitgliederzahl, Onlinezahl, Gilden-MOTD und Gildeninfos funktionieren wieder über die aktuelle C_GuildInfo-API.",
+			"Die Raidansicht der Charakterinformationen wurde für die aktuelle Midnight-Auswahl einschließlich Season 2 und Venomous Abyss aktualisiert.",
+		},
+	},
 	{
 		version = "2.0.1",
 		date = "2026-06-12",
