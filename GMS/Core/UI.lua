@@ -63,7 +63,7 @@ local METADATA = {
 	INTERN_NAME  = "UI",
 	SHORT_NAME   = "UI",
 	DISPLAY_NAME = "Guild Management System",
-	VERSION      = "1.0.30",
+	VERSION      = "1.0.31",
 }
 
 -- ###########################################################################
@@ -227,30 +227,40 @@ local function IsGMSAddon(name, title)
 end
 
 local function ResolveGMSAddonIndex()
-	if type(GetNumAddOns) ~= "function" or type(GetAddOnInfo) ~= "function" then
-		return nil
+	local function GetAddOnCount()
+		if type(C_AddOns) == "table" and type(C_AddOns.GetNumAddOns) == "function" then
+			local ok, count = pcall(C_AddOns.GetNumAddOns)
+			if ok then return tonumber(count) or 0 end
+		end
+		if type(GetNumAddOns) == "function" then return tonumber(GetNumAddOns()) or 0 end
+		return 0
 	end
 
 	local function GetNameAndTitleByIndex(i)
 		if type(C_AddOns) == "table" and type(C_AddOns.GetAddOnInfo) == "function" then
-			local ok, info = pcall(C_AddOns.GetAddOnInfo, i)
-			if ok and type(info) == "table" then
-				return tostring(info.name or ""), tostring(info.title or info.Title or "")
+			local ok, name, title = pcall(C_AddOns.GetAddOnInfo, i)
+			if ok and type(name) == "string" then
+				return name, tostring(title or "")
 			end
 		end
-		local name, title = GetAddOnInfo(i)
-		return tostring(name or ""), tostring(title or "")
+		if type(GetAddOnInfo) == "function" then
+			local name, title = GetAddOnInfo(i)
+			return tostring(name or ""), tostring(title or "")
+		end
+		return "", ""
 	end
 
+	local count = GetAddOnCount()
+	if count <= 0 then return nil end
 	local cached = tonumber(UI._gmsAddonIndex or 0) or 0
-	if cached > 0 and cached <= GetNumAddOns() then
+	if cached > 0 and cached <= count then
 		local cn, ct = GetNameAndTitleByIndex(cached)
 		if IsGMSAddon(cn, ct) then
 			return cached
 		end
 	end
 
-	for i = 1, GetNumAddOns() do
+	for i = 1, count do
 		local name, title = GetNameAndTitleByIndex(i)
 		if IsGMSAddon(name, title) then
 			UI._gmsAddonIndex = i

@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.43",
+	VERSION      = "1.1.44",
 }
 
 local LibStub = LibStub
@@ -1751,7 +1751,9 @@ local function BuildRaidRows(all, catalog)
 			STATIC_NAME_NORM_TO_INSTANCE[nn] = tonumber(iid) or iid
 		end
 	end
-	local ACTIVE_RAID_ORDER = { 2810, 2769, 2657 } -- newest -> oldest (current retail season set)
+	-- Midnight Season 2: Venomous Abyss (instance 3004) is current; keep the
+	-- three Season 1 raids visible for the complete current-expansion history.
+	local ACTIVE_RAID_ORDER = { 3004, 2912, 2913, 2939 }
 	local ACTIVE_RAID_SET = {}
 	for i = 1, #ACTIVE_RAID_ORDER do
 		ACTIVE_RAID_SET[ACTIVE_RAID_ORDER[i]] = i

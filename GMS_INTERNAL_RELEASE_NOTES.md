@@ -18,10 +18,10 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - (none)
 
 ### Changed
-- (none)
+- Updated Retail compatibility for Midnight 12.1 / Curse of Ula'tek: TOC interface version, Retail-first addon enumeration, and current Midnight raid selection (`GMS/GMS.toc`, `GMS/Core/UI.lua`, `GMS/Modules/CharInfo.lua`).
 
 ### Fixed
-- (none)
+- Restored guild member counts, online counts, MOTD, and guild-info text on the current Retail `C_GuildInfo` API (`GMS/Modules/GuildInfo.lua`).
 
 ### Rules/Infra
 - Post-release baseline reset after `2.0.1`; next iteration starts here.

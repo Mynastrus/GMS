@@ -18,6 +18,8 @@ if not GMS then return end
 local GetTime          = GetTime
 local IsInGuild        = IsInGuild
 local GetGuildInfo     = GetGuildInfo
+local GetNumGuildMembers = GetNumGuildMembers
+local GetGuildRosterInfo = GetGuildRosterInfo
 local GetRealmName     = GetRealmName
 local UnitFactionGroup = UnitFactionGroup
 local C_GuildInfo      = C_GuildInfo
@@ -28,7 +30,7 @@ local METADATA = {
 	INTERN_NAME  = "GuildInfo",
 	SHORT_NAME   = "GUILDINFO",
 	DISPLAY_NAME = "Guild Info",
-	VERSION      = "1.0.0",
+	VERSION      = "1.0.1",
 }
 
 GMS._LOG_BUFFER = GMS._LOG_BUFFER or {}
@@ -97,6 +99,8 @@ local function _readGuildMemberCounts()
 	local total = 0
 	local online = 0
 
+	-- Retail does not expose roster rows through C_GuildInfo. Use its
+	-- namespace where available, then retain the established roster API fallback.
 	if type(C_GuildInfo) == "table" and type(C_GuildInfo.GetNumGuildMembers) == "function" then
 		local ok, n = pcall(C_GuildInfo.GetNumGuildMembers)
 		if ok and type(n) == "number" and n > 0 then
@@ -104,14 +108,18 @@ local function _readGuildMemberCounts()
 		end
 	end
 
-	if total > 0 and type(C_GuildInfo) == "table" then
-		local infoFn = C_GuildInfo.GetGuildRosterInfo
-		if type(infoFn) == "function" then
-			for i = 1, total do
-				local ok, info = pcall(infoFn, i)
-				if ok and type(info) == "table" and info.online == true then
-					online = online + 1
-				end
+	if total <= 0 and type(GetNumGuildMembers) == "function" then
+		local ok, n = pcall(GetNumGuildMembers)
+		if ok then
+			total = tonumber(n) or 0
+		end
+	end
+
+	if total > 0 and type(GetGuildRosterInfo) == "function" then
+		for i = 1, total do
+			local ok, _, _, _, _, _, _, _, isOnline = pcall(GetGuildRosterInfo, i)
+			if ok and isOnline == true then
+				online = online + 1
 			end
 		end
 	end
@@ -157,15 +165,15 @@ function GuildInfo:RefreshSnapshot(reason)
 	snap.rankIndex = tonumber(guildRankIndex) or -1
 	snap.guid = tostring(guildGUID or "")
 
-	if type(C_GuildInfo) == "table" and type(C_GuildInfo.GetGuildRosterMOTD) == "function" then
-		local ok, motd = pcall(C_GuildInfo.GetGuildRosterMOTD)
+	if type(C_GuildInfo) == "table" and type(C_GuildInfo.GetMOTD) == "function" then
+		local ok, motd = pcall(C_GuildInfo.GetMOTD)
 		if ok and type(motd) == "string" then
 			snap.motd = motd
 		end
 	end
 
-	if type(C_GuildInfo) == "table" and type(C_GuildInfo.GetGuildInfoText) == "function" then
-		local ok, infoText = pcall(C_GuildInfo.GetGuildInfoText)
+	if type(C_GuildInfo) == "table" and type(C_GuildInfo.GetInfoText) == "function" then
+		local ok, infoText = pcall(C_GuildInfo.GetInfoText)
 		if ok and type(infoText) == "string" then
 			snap.info = infoText
 		end
@@ -198,4 +206,3 @@ end
 function GuildInfo:OnDisable()
 	GMS:SetNotReady("MOD:" .. METADATA.INTERN_NAME)
 end
-
