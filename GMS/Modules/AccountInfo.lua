@@ -35,10 +35,10 @@ local METADATA = {
 	INTERN_NAME  = "ACCOUNTINFO",
 	SHORT_NAME   = "AccountInfo",
 	DISPLAY_NAME = "Account Information",
-	VERSION      = "1.0.12",
+	VERSION      = "1.1.0",
 }
 
-local ACCOUNT_CHARS_SYNC_DOMAIN = "ACCOUNT_CHARS_V2"
+local ACCOUNT_CHARS_SYNC_DOMAIN = "account"
 local ACCOUNT_CHARS_PUBLISH_MIN_INTERVAL = 20
 
 local function AT(key, fallback, ...)
@@ -119,6 +119,19 @@ local OPTIONS_DEFAULTS = {
 			return AccountInfo:GetMainCharacterChoiceMap()
 		end,
 	},
+	cleanupAfterDays = {
+		type = "select",
+		name = AT("ACCOUNTINFO_OPT_CLEANUP_DAYS", "Automatic data cleanup"),
+		desc = AT("ACCOUNTINFO_OPT_CLEANUP_DAYS_DESC", "Remove former guild members after this period."),
+		default = 180,
+		values = {
+			[0] = AT("ACCOUNTINFO_CLEANUP_NEVER", "Never"),
+			[30] = AT("ACCOUNTINFO_CLEANUP_30", "30 days"),
+			[90] = AT("ACCOUNTINFO_CLEANUP_90", "90 days"),
+			[180] = AT("ACCOUNTINFO_CLEANUP_180", "180 days"),
+			[365] = AT("ACCOUNTINFO_CLEANUP_365", "365 days"),
+		},
+	},
 	publishProfileNow = {
 		type = "execute",
 		name = AT("ACCOUNTINFO_OPT_PUBLISH_NOW", "Publish Account Info"),
@@ -195,6 +208,12 @@ function AccountInfo:PersistProfileSettings()
 		end
 	end
 	opts.mainCharacterGUID = validatedMainGuid
+	if GMS and type(GMS.SetAccountMainCharacter) == "function" and validatedMainGuid ~= "" then
+		GMS:SetAccountMainCharacter(validatedMainGuid, true)
+	end
+	if type(links._account) == "table" then
+		links._account.cleanupAfterDays = tonumber(opts.cleanupAfterDays) or 180
+	end
 
 	local payload = {
 		profileName = tostring(opts.profileName or ""),
@@ -280,6 +299,9 @@ function AccountInfo:RestoreProfileSettings()
 
 	if storedMainGuid ~= "" or tostring(opts.mainCharacterGUID or "") == "" then
 		opts.mainCharacterGUID = storedMainGuid
+	end
+	if type(links) == "table" and type(links._account) == "table" then
+		opts.cleanupAfterDays = tonumber(links._account.cleanupAfterDays) or 180
 	end
 
 	if storedGender ~= "unknown" or NormalizeGenderValue(opts.profileGender) == "unknown" then
@@ -381,19 +403,23 @@ function AccountInfo:GetAccountLinkStore()
 	if GMS and type(GMS.InitializeStandardDatabases) == "function" then
 		GMS:InitializeStandardDatabases(false)
 	end
-	if not GMS or type(GMS.GetCurrentCharRoot) ~= "function" then
+	if not GMS or type(GMS.GetAccountStore) ~= "function" then
 		return nil
 	end
-	local charRoot = GMS:GetCurrentCharRoot()
-	if type(charRoot) ~= "table" then
-		return nil
+	local account = GMS:GetAccountStore()
+	if type(account) ~= "table" then return nil end
+	account.profile = type(account.profile) == "table" and account.profile or {}
+	account.profileSettings = type(account.profileSettings) == "table" and account.profileSettings or {}
+	account.synced = type(account.synced) == "table" and account.synced or {}
+	local links = { chars = {}, profile = account.profile, profileSettings = account.profileSettings, synced = account.synced, _account = account }
+	local guids = type(GMS.GetAccountCharacterGuids) == "function" and GMS:GetAccountCharacterGuids() or {}
+	for i = 1, #guids do
+		local guid = tostring(guids[i] or "")
+		local node = type(GMS.GetCharacterDomainData) == "function" and GMS:GetCharacterDomainData(guid, "identity") or nil
+		if type(node) == "table" and type(node.data) == "table" then
+			links.chars[guid] = node.data
+		end
 	end
-	charRoot.links = type(charRoot.links) == "table" and charRoot.links or {}
-	local links = charRoot.links
-	links.chars = type(links.chars) == "table" and links.chars or {}
-	links.synced = type(links.synced) == "table" and links.synced or {}
-	links.twinks = type(links.twinks) == "table" and links.twinks or {}
-	links.twinkMeta = type(links.twinkMeta) == "table" and links.twinkMeta or {}
 	return links
 end
 
@@ -419,85 +445,115 @@ end
 
 local function BuildAccountCharsListForGuild(links, guildKey)
 	local out = {}
+	local seen = {}
 	local key = tostring(guildKey or "")
-	if type(links) ~= "table" or type(links.chars) ~= "table" then return out end
 	local keyGuild = ExtractGuildNameFromGuildKey(key)
-	for guid, entry in pairs(links.chars) do
+	local currentGuildName = tostring(select(2, GetCurrentGuildStorageKeySafe()) or "")
+	local function AddEntry(guid, entry)
+		local guidStr = tostring(guid or "")
+		if guidStr == "" or seen[guidStr] or type(entry) ~= "table" then return end
 		local include = false
-		if type(entry) == "table" then
-			if key ~= "" then
-				include = AreGuildContextsCompatible(tostring(entry.guildKey or ""), key, entry.guild, nil)
-			else
-				include = true
-				if keyGuild ~= "" then
-					include = NormalizeGuildToken(entry.guild) == keyGuild
+		if key ~= "" then
+			include = AreGuildContextsCompatible(tostring(entry.guildKey or ""), key, entry.guild, currentGuildName)
+		else
+			include = true
+			if keyGuild ~= "" then
+				include = NormalizeGuildToken(entry.guild) == keyGuild
+			end
+		end
+		if not include then return end
+		local nameFull = tostring(entry.name_full or entry.name or guidStr or "-")
+		nameFull = nameFull:gsub("^%s+", ""):gsub("%s+$", "")
+		if nameFull == "" then nameFull = guidStr end
+		local entryGuildKey = tostring(entry.guildKey or "")
+		if entryGuildKey == "" then entryGuildKey = key end
+		seen[guidStr] = true
+		out[#out + 1] = {
+			guid = guidStr,
+			name_full = nameFull,
+			name = tostring(entry.name or ""),
+			realm = tostring(entry.realm or ""),
+			level = tonumber(entry.level or 0) or 0,
+			class = tostring(entry.class or "-"),
+			classFile = tostring(entry.classFile or ""),
+			guild = tostring(entry.guild or ""),
+			guildKey = entryGuildKey,
+			lastSeenAt = tonumber(entry.lastSeenAt or 0) or 0,
+		}
+	end
+
+	-- Current-character links are retained for backwards compatibility.
+	if type(links) == "table" and type(links.chars) == "table" then
+		for guid, entry in pairs(links.chars) do
+			AddEntry(guid, entry)
+		end
+	end
+
+	-- Account character identity is persisted per GUID in the global character
+	-- store. This survives character switches, unlike the current char root.
+	local global = GMS and GMS.db and GMS.db.global
+	local account = type(global) == "table" and global.account or nil
+	local knownGuids = type(account) == "table" and account.characterOrder or nil
+	local characterStore = type(global) == "table" and global.characters or nil
+	if type(knownGuids) == "table" and type(characterStore) == "table" then
+		for i = 1, #knownGuids do
+			local guid = tostring(knownGuids[i] or "")
+			local character = type(characterStore[guid]) == "table" and characterStore[guid] or nil
+			local domain = character and character.ACCOUNTINFO_V1 or nil
+			local entry = type(domain) == "table" and (type(domain.data) == "table" and domain.data or domain) or nil
+			AddEntry(guid, entry)
+
+			-- Older clients only persisted ACCOUNT_CHARS_V2. Its `chars` list
+			-- remains an authoritative local account record until that character
+			-- has logged in once with ACCOUNTINFO_V1 enabled.
+			local legacyDomain = character and character.ACCOUNT_CHARS_V2 or nil
+			local legacyPayload = type(legacyDomain) == "table"
+				and (type(legacyDomain.data) == "table" and legacyDomain.data or legacyDomain)
+				or nil
+			local legacyChars = type(legacyPayload) == "table" and legacyPayload.chars or nil
+			if type(legacyChars) == "table" then
+				for _, legacyEntry in pairs(legacyChars) do
+					if type(legacyEntry) == "table" then
+						AddEntry(legacyEntry.guid or guid, legacyEntry)
+					end
 				end
 			end
 		end
-		if include then
-			local guidStr = tostring(guid or "")
-			local nameFull = tostring(entry.name_full or entry.name or guidStr or "-")
-			nameFull = nameFull:gsub("^%s+", ""):gsub("%s+$", "")
-			if nameFull == "" then nameFull = (guidStr ~= "" and guidStr) or "-" end
-			local entryGuildKey = tostring(entry.guildKey or "")
-			if entryGuildKey == "" then
-				entryGuildKey = key
-			end
-			out[#out + 1] = {
-				guid = guidStr,
-				name_full = nameFull,
-				name = tostring(entry.name or ""),
-				realm = tostring(entry.realm or ""),
-				level = tonumber(entry.level or 0) or 0,
-				class = tostring(entry.class or "-"),
-				classFile = tostring(entry.classFile or ""),
-				guild = tostring(entry.guild or ""),
-				guildKey = entryGuildKey,
-				lastSeenAt = tonumber(entry.lastSeenAt or 0) or 0,
-			}
-		end
 	end
+
 	table.sort(out, function(a, b)
 		return tostring(a.name_full or "") < tostring(b.name_full or "")
 	end)
 	return out
 end
 
+local function FilterRowsToGuildRoster(chars)
+	local roster = GetRosterModule()
+	if type(roster) ~= "table" or type(roster.GetMemberByGUID) ~= "function" then
+		return {}, false
+	end
+	local out = {}
+	for i = 1, #(chars or {}) do
+		local row = chars[i]
+		if type(row) == "table" and tostring(row.guid or "") ~= "" then
+			if type(roster:GetMemberByGUID(tostring(row.guid))) == "table" then
+				out[#out + 1] = row
+			end
+		end
+	end
+	return out, #out > 0
+end
+
 local function BuildRowsFromGlobalTwinks(global, selectedGuid)
 	local out = {}
 	local links = (AccountInfo and type(AccountInfo.GetAccountLinkStore) == "function") and AccountInfo:GetAccountLinkStore() or nil
 	if type(links) ~= "table" then return out end
-	local twinks = type(links.twinks) == "table" and links.twinks or nil
-	if type(twinks) ~= "table" or #twinks <= 0 then return out end
 	local selected = tostring(selectedGuid or "")
-	local metaByGuid = type(links.twinkMeta) == "table" and links.twinkMeta or {}
-	local selectedGuildKey = ""
-	if selected ~= "" and type(metaByGuid[selected]) == "table" then
-		selectedGuildKey = tostring(metaByGuid[selected].guildKey or "")
-	end
-	if selectedGuildKey == "" then
-		selectedGuildKey = tostring(select(1, GetCurrentGuildStorageKeySafe()) or "")
-	end
-	for i = 1, #twinks do
-		local guid = tostring(twinks[i] or "")
-		if guid ~= "" then
-			local meta = type(metaByGuid[guid]) == "table" and metaByGuid[guid] or {}
-			local rowGuildKey = tostring(meta.guildKey or selectedGuildKey)
-			if rowGuildKey ~= "" and AreGuildContextsCompatible(rowGuildKey, selectedGuildKey, meta.guild, nil) then
-				out[#out + 1] = {
-					guid = guid,
-					name_full = tostring(meta.name_full or meta.name or guid),
-					name = tostring(meta.name or ""),
-					realm = tostring(meta.realm or ""),
-					level = tonumber(meta.level or 0) or 0,
-					class = tostring(meta.class or "-"),
-					classFile = tostring(meta.classFile or ""),
-					guild = tostring(meta.guild or ""),
-					guildKey = rowGuildKey,
-					lastSeenAt = tonumber(meta.lastSeenAt or 0) or 0,
-				}
-			end
-		end
+	local base = type(links.chars) == "table" and links.chars[selected] or nil
+	local guildKey = type(base) == "table" and tostring(base.guildKey or "") or tostring(select(1, GetCurrentGuildStorageKeySafe()) or "")
+	local chars = BuildAccountCharsListForGuild(links, guildKey)
+	for i = 1, #chars do
+		if tostring(chars[i].guid or "") ~= selected then out[#out + 1] = chars[i] end
 	end
 	table.sort(out, function(a, b)
 		return tostring(a.name_full or "") < tostring(b.name_full or "")
@@ -742,8 +798,9 @@ function AccountInfo:PublishLocalAccountLinks(reason, force)
 
 	local guildKey = tostring(base.guildKey or "")
 	if guildKey == "" then return false, "no-guild" end
-	local chars = BuildAccountCharsListForGuild(links, guildKey)
-	if #chars <= 0 then return false, "no-same-guild-chars" end
+	local allChars = BuildAccountCharsListForGuild(links, guildKey)
+	local chars, hasGuildChars = FilterRowsToGuildRoster(allChars)
+	if not hasGuildChars then return false, "no-guild-roster-chars" end
 
 	local digest = BuildAccountCharsDigest(guildKey, chars)
 	local nowTs = (type(GetTime) == "function" and GetTime()) or 0
@@ -896,8 +953,7 @@ end
 function AccountInfo:TrackLocalAccountCharacter(reason)
 	local guid = (type(UnitGUID) == "function") and tostring(UnitGUID("player") or "") or ""
 	if guid == "" then return false end
-	local links = self:GetAccountLinkStore()
-	if type(links) ~= "table" or type(links.chars) ~= "table" then return false end
+	if not GMS or type(GMS.RegisterKnownGuid) ~= "function" or type(GMS.SetCharacterDomainData) ~= "function" then return false end
 
 	local nameFull, name, realm = BuildLocalPlayerNameData()
 	if nameFull == "" then nameFull = guid end
@@ -908,77 +964,38 @@ function AccountInfo:TrackLocalAccountCharacter(reason)
 	guildKey = tostring(guildKey or "")
 	guildName = tostring(guildName or "")
 
-	links.chars[guid] = links.chars[guid] or {}
-	local row = links.chars[guid]
-	if GMS and type(GMS.RegisterKnownGuid) == "function" then
-		GMS:RegisterKnownGuid(guid)
-	end
-	local changed = false
-
-	local function SetTextField(key, value, countAsChange)
-		local v = tostring(value or "")
-		if tostring(row[key] or "") ~= v then
-			row[key] = v
-			if countAsChange ~= false then changed = true end
-		end
-	end
-	local function SetNumberField(key, value)
-		local v = tonumber(value) or 0
-		if tonumber(row[key] or -1) ~= v then
-			row[key] = v
-			changed = true
-		end
-	end
-
-	SetTextField("guid", guid)
-	SetTextField("name", name)
-	SetTextField("realm", realm)
-	SetTextField("name_full", nameFull)
-	SetTextField("class", className)
-	SetTextField("classFile", classFile)
-	SetNumberField("level", level)
-	SetTextField("guild", guildName)
-	SetTextField("guildKey", guildKey)
-	SetTextField("lastSeenReason", tostring(reason or "unknown"), false)
-
-	local nowTs = (type(time) == "function" and time()) or 0
-	local oldSeenAt = tonumber(row.lastSeenAt or 0) or 0
-	if changed or (tonumber(nowTs) or 0) - oldSeenAt >= 60 then
-		row.lastSeenAt = tonumber(nowTs) or 0
-	end
-
-	if changed then
-		LOCAL_LOG("INFO", "Local account character tracked", guid, nameFull, guildKey ~= "" and guildKey or "no-guild")
-	end
-
-	local linksStore = self:GetAccountLinkStore()
-	if type(linksStore) == "table" then
-		linksStore.twinks = type(linksStore.twinks) == "table" and linksStore.twinks or {}
-		linksStore.twinkMeta = type(linksStore.twinkMeta) == "table" and linksStore.twinkMeta or {}
-		local exists = false
-		for i = 1, #linksStore.twinks do
-			if tostring(linksStore.twinks[i] or "") == guid then exists = true break end
-		end
-		if not exists then linksStore.twinks[#linksStore.twinks + 1] = guid end
-
-		local meta = type(linksStore.twinkMeta[guid]) == "table" and linksStore.twinkMeta[guid] or {}
-		linksStore.twinkMeta[guid] = meta
-		meta.guid = guid
-		meta.name = tostring(name or "")
-		meta.realm = tostring(realm or "")
-		meta.name_full = tostring(nameFull or guid)
-		meta.class = tostring(className or "")
-		meta.classFile = tostring(classFile or "")
-		meta.level = tonumber(level or 0) or 0
-		meta.guild = tostring(guildName or "")
-		meta.guildKey = tostring(guildKey or "")
-		meta.lastSeenAt = tonumber(nowTs) or 0
-	end
+	GMS:RegisterKnownGuid(guid)
+	local previous = type(GMS.GetCharacterDomainData) == "function" and GMS:GetCharacterDomainData(guid, "identity") or nil
+	local previousData = type(previous) == "table" and previous.data or {}
+	local nowTs = (type(GMS.GetServerTimestamp) == "function" and GMS:GetServerTimestamp()) or ((type(time) == "function" and time()) or 0)
+	local firstSeenAt = tonumber(previousData.firstSeenAt or 0) or tonumber(nowTs) or 0
+	local changed = tostring(previousData.name_full or "") ~= tostring(nameFull or "")
+		or tostring(previousData.guildKey or "") ~= guildKey
+		or tonumber(previousData.level or 0) ~= level
+	local ok = GMS:SetCharacterDomainData(guid, "identity", {
+			guid = guid,
+			name = tostring(name or ""),
+			realm = tostring(realm or ""),
+			name_full = tostring(nameFull or guid),
+			class = tostring(className or ""),
+			classFile = tostring(classFile or ""),
+			level = tonumber(level or 0) or 0,
+			guild = guildName,
+			guildKey = guildKey,
+			firstSeenAt = firstSeenAt,
+			lastSeenAt = tonumber(nowTs) or 0,
+			lastSeenReason = tostring(reason or "unknown"),
+		}, {
+			sourceGuid = guid,
+			updatedAtTs = tonumber(nowTs) or 0,
+			schema = 1,
+		})
+	if changed then LOCAL_LOG("INFO", "Local account character tracked", guid, nameFull, guildKey ~= "" and guildKey or "no-guild") end
 
 	if tostring(reason or "") ~= "query" then
 		self:PublishLocalAccountLinks(reason, changed)
 	end
-	return true
+	return ok == true
 end
 
 local function DoesSyncedRecordMatchGuid(record, guid)
@@ -1309,7 +1326,7 @@ function AccountInfo:OnEnable()
 	self:RegisterMessage("GMS_CONFIG_CHANGED", function(_, targetKey, key)
 		if tostring(targetKey or "") ~= MODULE_NAME then return end
 		AccountInfo:PersistProfileSettings()
-		if key == "profileName" or key == "profileBirthday" or key == "profileGender" or key == "mainCharacterGUID" then
+		if key == "profileName" or key == "profileBirthday" or key == "profileGender" or key == "mainCharacterGUID" or key == "cleanupAfterDays" then
 			AccountInfo:PublishLocalAccountLinks("profile-update-" .. tostring(key), true)
 		end
 	end)

@@ -17,7 +17,7 @@ local METADATA = {
 	INTERN_NAME  = "CHARINFO",
 	SHORT_NAME   = "CharInfo",
 	DISPLAY_NAME = "Charakterinformationen",
-	VERSION      = "1.1.56",
+	VERSION      = "1.2.0",
 }
 
 local LibStub = LibStub
@@ -161,6 +161,7 @@ CHARINFO._uiDataTicker   = CHARINFO._uiDataTicker or nil
 CHARINFO._uiDataLastSig  = CHARINFO._uiDataLastSig or nil
 CHARINFO._uiBuildToken   = CHARINFO._uiBuildToken or 0
 CHARINFO._resizeRefreshPending = CHARINFO._resizeRefreshPending or false
+CHARINFO._resizeRefreshToken = CHARINFO._resizeRefreshToken or 0
 CHARINFO._raidWaitAnimTicker = CHARINFO._raidWaitAnimTicker or nil
 CHARINFO._raidWaitAnimStep = CHARINFO._raidWaitAnimStep or 0
 CHARINFO._syncListenersRegistered = CHARINFO._syncListenersRegistered or false
@@ -2294,6 +2295,8 @@ local function GetCharScopedModuleBucket(guid, moduleKey)
 	if g == "" then
 		return nil
 	end
+	local canonicalKey = (GMS and type(GMS.NormalizeCharacterDomain) == "function")
+		and GMS:NormalizeCharacterDomain(moduleKey) or tostring(moduleKey or "")
 	local function pick(global)
 		if type(global) ~= "table" then
 			return nil
@@ -2306,7 +2309,7 @@ local function GetCharScopedModuleBucket(guid, moduleKey)
 		if type(c) ~= "table" then
 			return nil
 		end
-		local mod = c[tostring(moduleKey or "")]
+		local mod = c[canonicalKey]
 		if type(mod) ~= "table" then
 			return nil
 		end
@@ -2336,9 +2339,6 @@ local function GetStoredAccountIdentityByGuid(guid)
 	local links = accountInfo:GetAccountLinkStore()
 	if type(links) ~= "table" then return nil end
 	local row = (type(links.chars) == "table" and type(links.chars[g]) == "table") and links.chars[g] or nil
-	if type(row) ~= "table" then
-		row = (type(links.twinkMeta) == "table" and type(links.twinkMeta[g]) == "table") and links.twinkMeta[g] or nil
-	end
 	if type(row) ~= "table" then return nil end
 	return {
 		name_full = tostring(row.name_full or row.name or g),
@@ -3482,7 +3482,7 @@ local function StopRaidWaitAnimTicker()
 	CHARINFO._raidWaitAnimStep = 0
 end
 
-local function StartUIBuildQueue(tasks, scroller, outer)
+local function StartUIBuildQueue(tasks, scroller, outer, root)
 	CHARINFO._uiBuildToken = (tonumber(CHARINFO._uiBuildToken or 0) or 0) + 1
 	local token = CHARINFO._uiBuildToken
 	local queue = type(tasks) == "table" and tasks or {}
@@ -3499,6 +3499,9 @@ local function StartUIBuildQueue(tasks, scroller, outer)
 		end
 		if outer and type(outer.DoLayout) == "function" then
 			pcall(function() outer:DoLayout() end)
+		end
+		if root and type(root.DoLayout) == "function" then
+			pcall(function() root:DoLayout() end)
 		end
 	end
 
@@ -3625,10 +3628,53 @@ function CHARINFO:StartUIDataTicker(ctxState)
 	end)
 end
 
-local function EnsureResizeHook(_root)
-	-- AceGUI emits OnSizeChanged while cards are added and laid out. Reopening
-	-- the page from that event starts an unbounded render/rebuild cycle on
-	-- Retail. The current layout already adapts naturally on the next open.
+local function EnsureResizeHook(root)
+	if type(root) ~= "table" or type(root.frame) ~= "table" then return end
+	if root._gmsCharInfoResizeHooked then return end
+	if type(root.frame.HookScript) ~= "function" then return end
+
+	local function QueueRefresh(_frame, width, height)
+		width = math.floor((tonumber(width) or 0) + 0.5)
+		height = math.floor((tonumber(height) or 0) + 0.5)
+		if width <= 0 or height <= 0 then return end
+
+		local sizeKey = tostring(width) .. "x" .. tostring(height)
+		if root._gmsCharInfoLayoutSize == sizeKey then return end
+		root._gmsCharInfoLayoutSize = sizeKey
+
+		-- The card layout selects one or two columns from the available width.
+		-- Wait past UI:Navigate's throttle and coalesce resize events, so a live
+		-- resize triggers one safe rebuild instead of rebuilding while cards render.
+		CHARINFO._resizeRefreshToken = (tonumber(CHARINFO._resizeRefreshToken or 0) or 0) + 1
+		local token = CHARINFO._resizeRefreshToken
+		CHARINFO._resizeRefreshPending = true
+
+		local function RefreshAfterResize()
+			if token ~= CHARINFO._resizeRefreshToken then return end
+			CHARINFO._resizeRefreshPending = false
+
+			local ui = UIRef()
+			if not ui or ui._page ~= "CHARINFO" then return end
+			if not (ui._frame and type(ui._frame.IsShown) == "function" and ui._frame:IsShown()) then return end
+			if not (ui._pageContainers and ui._pageContainers.CHARINFO == root) then return end
+			OpenSelf()
+		end
+
+		if C_Timer and type(C_Timer.After) == "function" then
+			C_Timer.After(0.55, RefreshAfterResize)
+		else
+			RefreshAfterResize()
+		end
+	end
+
+	root._gmsCharInfoResizeHooked = true
+	root.frame:HookScript("OnSizeChanged", QueueRefresh)
+
+	-- The container can already have its final size before this page installs
+	-- its hook (notably after a reload/open). Queue the same settled pass once.
+	if type(root.frame.GetSize) == "function" then
+		QueueRefresh(root.frame, root.frame:GetSize())
+	end
 end
 
 BuildContextFallbackDetails = function(ctxGuid, ctxName)
@@ -3738,6 +3784,13 @@ function CHARINFO:TryRegisterPage()
 		contentRow:SetFullWidth(true)
 		contentRow:SetLayout("List")
 		wrapper:AddChild(contentRow)
+
+		-- The page container may have been created before its parent Fill layout
+		-- has received the final window size. Force the complete chain once
+		-- before calculating columns or adding deferred cards.
+		if type(root.DoLayout) == "function" then root:DoLayout() end
+		if type(outer.DoLayout) == "function" then outer:DoLayout() end
+		if type(scroller.DoLayout) == "function" then scroller:DoLayout() end
 
 		local pageWidth = 0
 		if root and root.frame and type(root.frame.GetWidth) == "function" then
@@ -4517,7 +4570,10 @@ function CHARINFO:TryRegisterPage()
 			pinnedRow:SetFullWidth(true)
 			pinnedRow:SetLayout("Table")
 			pinnedRow:SetUserData("table", {
-				columns = { colWidth, colWidth },
+				-- Weighted columns follow the live ScrollFrame width. Fixed widths
+				-- captured while a page is opening can otherwise leave one stack at
+				-- its old size until the next full rebuild.
+				columns = { { weight = 1 }, { weight = 1 } },
 				spaceH = colGap,
 				alignV = "TOP",
 			})
@@ -4525,13 +4581,13 @@ function CHARINFO:TryRegisterPage()
 
 			local leftStack = AceGUI:Create("SimpleGroup")
 			leftStack:SetLayout("List")
-			leftStack:SetWidth(colWidth)
+			leftStack:SetFullWidth(true)
 			leftStack:SetUserData("cell", { alignV = "TOP" })
 			pinnedRow:AddChild(leftStack)
 
 			local rightStack = AceGUI:Create("SimpleGroup")
 			rightStack:SetLayout("List")
-			rightStack:SetWidth(colWidth)
+			rightStack:SetFullWidth(true)
 			rightStack:SetUserData("cell", { alignV = "TOP" })
 			pinnedRow:AddChild(rightStack)
 
@@ -4587,7 +4643,7 @@ function CHARINFO:TryRegisterPage()
 
 		-- StartUIDataTicker invalidates any previous render token. It therefore
 		-- must run before creating this page's deferred render queue.
-		StartUIBuildQueue(renderQueue, scroller, outer)
+		StartUIBuildQueue(renderQueue, scroller, outer, root)
 	end)
 
 	self._pageRegistered = true

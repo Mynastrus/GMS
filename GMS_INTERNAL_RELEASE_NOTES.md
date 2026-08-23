@@ -18,11 +18,19 @@ Eintraege aus `Unreleased` werden erst bei einem echten Release in `Core/Changel
 - (none)
 
 ### Changed
+- Reworked SavedVariables around schema 4: stable canonical character domains, one account character registry, seven-day migration backup, daily configurable cleanup, and canonical sync-domain handling replace parallel V1/V2 data paths (`GMS/Core/Database.lua`, `GMS/Core/Comm.lua`, `GMS/Modules/AccountInfo.lua`, `GMS/Modules/Equipment.lua`, `GMS/Modules/MythicPlus.lua`, `GMS/Modules/Raids.lua`, `GMS/Modules/Roster.lua`, `GMS/Modules/CharInfo.lua`).
 - Updated Retail compatibility for Midnight 12.1 / Curse of Ula'tek: TOC interface version, Retail-first addon enumeration, current Midnight raid selection, and the prepared bilingual 2.0.2 release entry (`GMS/GMS.toc`, `GMS/Core/UI.lua`, `GMS/Modules/CharInfo.lua`, `GMS/Core/Changelog.lua`).
 - Updated Character Info raid fallbacks with the current Midnight Season 1 and 2 raids, localized names, and correct boss totals (`GMS/Modules/CharInfo.lua`, `GMS/Locales/enUS.lua`, `GMS/Locales/deDE.lua`).
 - Made the Roster Raid column report only each player's best progress in the current Midnight Season 2 raid, Der Giftige Abgrund / The Venomous Abyss (`GMS/Modules/Roster.lua`).
 
 ### Fixed
+- Fixed a recursive sync-domain normalizer that could prevent AccountInfo, Roster, and MythicPlus from enabling after the schema migration (`GMS/Core/Comm.lua`).
+- Included legacy `ACCOUNT_CHARS_V2` character records in same-account discovery, so characters saved before `ACCOUNTINFO_V1` are still shown when they are members of the current guild roster (`GMS/Modules/AccountInfo.lua`).
+- Restored Account/Twink discovery across character switches by merging legacy per-character links and twink metadata with new GUID-indexed account records; guild-context comparisons now fall back to the current guild name when storage keys differ, while outbound sync includes only characters confirmed in the live guild roster (`GMS/Modules/AccountInfo.lua`).
+- Made the Roster Raid column validate synchronized progress against the transmitted current raid instance ID; missing or older raid IDs now remain muted while the row tooltip shows the reported progress, raid, and ID (`GMS/Modules/Roster.lua`, `GMS/Locales/enUS.lua`, `GMS/Locales/deDE.lua`).
+- Preserved the current raid instance ID and name when Roster reads progress from the live Raids module, so the enriched data reaches the guild-sync payload (`GMS/Modules/Roster.lua`).
+- Preserved the current raid instance ID and name when Roster falls back to the stored RAIDS_V2 snapshot, ensuring the UI can validate locally cached progress as well (`GMS/Modules/Roster.lua`).
+- Rebuilt the Character Info layout once after a settled panel resize, changed its primary card stacks to live weighted columns, and force-laid out the parent-to-scroll content chain before deferred cards render; this prevents stale opening widths from leaving a column partially rendered after opening, reloading, or resizing (`GMS/Modules/CharInfo.lua`).
 - Force CurseForge uploads to the explicit Retail game version (`12.1.0`) so releases cannot be misclassified as Titan Reforged Classic (`.github/workflows/upload-to-curseforge.yml`).
 - Restored guild member counts, online counts, MOTD, and guild-info text on the current Retail `C_GuildInfo` API (`GMS/Modules/GuildInfo.lua`).
 - Prevented the Character Info panel from synchronously initializing the Encounter Journal, scanning the full spellbook for portal names, constructing protected Mythic+ portal/cooldown frames, or building all cards in the click handler; Journal tier scans and UI rendering are now bounded to avoid Retail client soft locks (`GMS/Modules/CharInfo.lua`, `GMS/Modules/Raids.lua`).

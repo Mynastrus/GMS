@@ -34,7 +34,7 @@ local METADATA = {
 	INTERN_NAME  = "MythicPlus",
 	SHORT_NAME   = "MYTHIC",
 	DISPLAY_NAME = "Mythic Plus",
-	VERSION      = "1.1.11",
+	VERSION      = "1.2.0",
 }
 
 -- Ensure global log buffer exists
@@ -73,7 +73,7 @@ end
 -- ###########################################################################
 
 local MODULE_NAME = "MythicPlus"
-local MYTHIC_SYNC_DOMAIN = "MYTHICPLUS_V2"
+local MYTHIC_SYNC_DOMAIN = "mythicPlus"
 
 local MYTHIC = GMS:GetModule(MODULE_NAME, true)
 if not MYTHIC then
@@ -269,7 +269,7 @@ end
 
 function MYTHIC:InitializeOptions()
 	self._options = self._options or {}
-	LOCAL_LOG("INFO", "MythicPlus options initialized (MYTHICPLUS_V2 char scope)")
+	LOCAL_LOG("INFO", "MythicPlus options initialized (canonical mythicPlus scope)")
 end
 
 local function EnsureMythicV2Store(charStore)
@@ -278,11 +278,12 @@ local function EnsureMythicV2Store(charStore)
 	end
 	local migrated = false
 	local legacyStore = type(charStore.MYTHICPLUS) == "table" and charStore.MYTHICPLUS or nil
-	local node = type(charStore.MYTHICPLUS_V2) == "table" and charStore.MYTHICPLUS_V2 or nil
+	local node = type(charStore.mythicPlus) == "table" and charStore.mythicPlus or nil
 	if type(node) ~= "table" then
-		node = { data = {}, meta = {} }
-		charStore.MYTHICPLUS_V2 = node
+		node = { schema = 1, data = {}, meta = {} }
+		charStore.mythicPlus = node
 	end
+	node.schema = tonumber(node.schema or 1) or 1
 	node.data = type(node.data) == "table" and node.data or {}
 	node.meta = type(node.meta) == "table" and node.meta or {}
 	local store = node.data
@@ -319,7 +320,7 @@ local function EnsureMythicV2Store(charStore)
 		store[deleteKeys[i]] = nil
 	end
 
-	-- Legacy persistence removed; keep only MYTHICPLUS_V2.
+	-- Legacy persistence removed; keep only the canonical mythicPlus domain.
 	charStore.MYTHICPLUS = nil
 
 	return store, migrated
@@ -480,7 +481,7 @@ function MYTHIC:OnEnable()
 	LOCAL_LOG("INFO", "Module enabled")
 	local purged = PurgeLegacyMythicStores()
 	if purged > 0 then
-		LOCAL_LOG("INFO", "Migrated legacy MYTHICPLUS stores to MYTHICPLUS_V2", purged)
+		LOCAL_LOG("INFO", "Migrated legacy MYTHICPLUS stores to canonical mythicPlus", purged)
 	end
 	self:InitializeOptions()
 

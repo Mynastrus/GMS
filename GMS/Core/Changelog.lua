@@ -36,7 +36,7 @@ local METADATA = {
 	INTERN_NAME  = "CHANGELOG",
 	SHORT_NAME   = "Changelog",
 	DISPLAY_NAME = "Release Notes",
-	VERSION      = "1.3.19",
+	VERSION      = "1.3.20",
 }
 
 -- ###########################################################################
@@ -110,6 +110,26 @@ Changelog._autoShowDone = Changelog._autoShowDone or false
 -- ###########################################################################
 
 local RELEASES = {
+	{
+		version = "2.0.4",
+		date = "2026-08-23",
+		title_en = "Unified Character Data and Reliable Guild Views",
+		title_de = "Einheitliche Charakterdaten und zuverlässige Gildenansichten",
+		notes_en = {
+			"Introduced database schema 4 with stable data domains, one account character registry, a safe seven-day migration backup, and automatic cleanup for former guild members.",
+			"Reworked same-account character discovery and guild sharing: only characters currently in the guild roster are shared, while the complete account list stays local.",
+			"Added deterministic main-character selection with manual priority, guild-rank fallback, and authorized guild-specific overrides.",
+			"Updated character-data synchronization to canonical domains while retaining compatibility with incoming legacy records.",
+			"Improved Character Info reliability after opening, reloads, and resizes, including current-raid validation by transmitted raid ID.",
+		},
+		notes_de = {
+			"Datenbankschema 4 eingeführt: stabile Datenbereiche, eine zentrale Account-Charakterliste, ein sicheres siebentägiges Migrationsbackup und automatische Bereinigung ehemaliger Gildenmitglieder.",
+			"Erkennung und Gildenfreigabe von Account-Charakteren überarbeitet: Nur aktuelle Gildenmitglieder werden geteilt, die vollständige Accountliste bleibt lokal.",
+			"Deterministische Main-Charakter-Auswahl mit manueller Priorität, Fallback über den Gildenrang und berechtigten gildenbezogenen Überschreibungen ergänzt.",
+			"Charakterdatensynchronisation auf kanonische Bereiche umgestellt und Kompatibilität für eingehende Altdatensätze erhalten.",
+			"Zuverlässigkeit der Charakterinformationen beim Öffnen, Neuladen und Skalieren verbessert, einschließlich Raid-Validierung über die übertragene Raid-ID.",
+		},
+	},
 	{
 		version = "2.0.3",
 		date = "2026-08-23",

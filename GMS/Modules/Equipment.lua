@@ -2,7 +2,7 @@
 --	GMS/Modules/Equipment.lua
 --	Equipment MODULE (Ace)
 --	- Auto-Scan: nach Login (delayed) + bei Änderungen (debounced)
---	- Speichert Snapshot pro Charakter in SavedVariables: GMS_DB.global.characters[charKey].EQUIPMENT_V2
+--	- Speichert Snapshot pro Charakter in SavedVariables: GMS_DB.global.characters[charKey].equipment
 --	  (global, damit andere Chars es sehen können)
 --	- charKey: UnitGUID("player") (Fallback: Name-Realm)
 --	- Memory buffer falls SV noch nicht verfügbar ist, Migration sobald möglich
@@ -52,7 +52,7 @@ local METADATA = {
 	INTERN_NAME  = "Equipment",
 	SHORT_NAME   = "EQUIP",
 	DISPLAY_NAME = "Ausrüstung",
-	VERSION      = "1.3.21",
+	VERSION      = "1.4.0",
 }
 
 -- ###########################################################################
@@ -121,7 +121,7 @@ local SLOT_SCAN_DELAY_SEC   = 0.02
 
 local STORE_POLL_MAX_TRIES = 25
 local STORE_POLL_INTERVAL  = 1.0
-local EQUIP_SYNC_DOMAIN    = "EQUIPMENT_V2"
+local EQUIP_SYNC_DOMAIN    = "equipment"
 
 -- ###########################################################################
 -- #	INTERNAL STATE
@@ -557,9 +557,9 @@ function EQUIP:SaveSnapshot(snapshot, reason)
 		opts.lastScanTs = snapshot.ts or 0
 	end
 
-	-- Canonical character domain persistence (global.characters[guid].EQUIPMENT_V2 = {data,meta}).
+	-- Canonical character domain persistence (global.characters[guid].equipment = {schema,data,meta}).
 	if GMS and type(GMS.SetCharacterDomainData) == "function" then
-		GMS:SetCharacterDomainData(snapshot.guid, "EQUIPMENT_V2", snapshot.slots, {
+		GMS:SetCharacterDomainData(snapshot.guid, "equipment", snapshot.slots, {
 			sourceGuid = snapshot.guid,
 			sourceName = _getPlayerNameFull(),
 			updatedAtTs = tonumber(snapshot.ts or 0) or 0,

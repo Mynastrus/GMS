@@ -3,7 +3,7 @@
 --  RAIDS MODULE (Ace)
 --  - Kein UI
 --  - Nur aktueller Spieler (charKey = UnitGUID("player"))
---  - Persistenz: GMS_DB.global.characters[charKey].RAIDS_V2
+--  - Persistenz: GMS_DB.global.characters[charKey].raids
 --  - Key pro Raid: Encounter Journal instanceID (EJ)
 --  - Current (lockout-spezifisch) pro Difficulty: "H 3/8", Boss-Kills, resetAt
 --  - Best (persistiert) pro Raid: höchste Difficulty + Progress (zuerst diff, dann killed)
@@ -79,7 +79,7 @@ local METADATA = {
 	INTERN_NAME  = "RAIDS",
 	SHORT_NAME   = "Raids",
 	DISPLAY_NAME = "Raids",
-	VERSION      = "1.2.27",
+	VERSION      = "1.3.0",
 }
 
 -- ###########################################################################
@@ -133,7 +133,7 @@ end
 -- ###########################################################################
 
 local MODULE_NAME = METADATA.INTERN_NAME
-local RAIDS_SYNC_DOMAIN = "RAIDS_V2"
+local RAIDS_SYNC_DOMAIN = "raids"
 
 local RAIDS = GMS:GetModule(MODULE_NAME, true)
 if not RAIDS then
@@ -169,7 +169,7 @@ RAIDS._catalog = nil
 
 function RAIDS:InitializeOptions()
 	self._options = self._options or {}
-	LOCAL_LOG("INFO", "Raids options initialized (RAIDS_V2 char scope)")
+	LOCAL_LOG("INFO", "Raids options initialized (canonical raids scope)")
 end
 
 local function EnsureRaidsV2Store(charStore)
@@ -178,11 +178,12 @@ local function EnsureRaidsV2Store(charStore)
 	end
 	local migrated = false
 	local legacyStore = type(charStore.RAIDS) == "table" and charStore.RAIDS or nil
-	local raidsNode = type(charStore.RAIDS_V2) == "table" and charStore.RAIDS_V2 or nil
+	local raidsNode = type(charStore.raids) == "table" and charStore.raids or nil
 	if type(raidsNode) ~= "table" then
-		raidsNode = { data = {}, meta = {} }
-		charStore.RAIDS_V2 = raidsNode
+		raidsNode = { schema = 1, data = {}, meta = {} }
+		charStore.raids = raidsNode
 	end
+	raidsNode.schema = tonumber(raidsNode.schema or 1) or 1
 	raidsNode.data = type(raidsNode.data) == "table" and raidsNode.data or {}
 	raidsNode.meta = type(raidsNode.meta) == "table" and raidsNode.meta or {}
 
@@ -418,7 +419,7 @@ local function EnsureRaidsV2Store(charStore)
 	raidsNode.data = compact
 	raidsNode.meta = meta
 
-	-- Legacy RAIDS persistence is removed; keep only RAIDS_V2.
+	-- Legacy RAIDS persistence is removed; keep only the canonical raids domain.
 	charStore.RAIDS = nil
 
 	return {
@@ -2175,7 +2176,7 @@ function RAIDS:OnInitialize()
 	LOCAL_LOG("INFO", "Initializing Raids module", METADATA.VERSION)
 	local purged = PurgeLegacyRaidsStores()
 	if purged > 0 then
-		LOCAL_LOG("INFO", "Migrated legacy RAIDS stores to RAIDS_V2", purged)
+		LOCAL_LOG("INFO", "Migrated legacy RAIDS stores to canonical raids", purged)
 	end
 	self:InitializeOptions()
 	self._pendingScan = false

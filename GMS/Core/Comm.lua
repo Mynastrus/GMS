@@ -11,7 +11,7 @@ local METADATA = {
 	INTERN_NAME  = "COMM",
 	SHORT_NAME   = "Comm",
 	DISPLAY_NAME = "Kommunikation",
-	VERSION      = "1.2.14",
+	VERSION      = "1.3.1",
 }
 
 ---@diagnostic disable: undefined-global
@@ -72,11 +72,19 @@ Comm.PREFIX = "GMS_G"
 Comm.SYNC_SUBPREFIX = "__SYNC_V2"
 Comm.MIN_SYNC_ADDON_VERSION = tostring((GMS and GMS.VERSION) or "0.0.0")
 Comm.SYNC_ALLOWED_DOMAINS = Comm.SYNC_ALLOWED_DOMAINS or {
-	ROSTER_META_V2 = true,
-	EQUIPMENT_V2 = true,
-	MYTHICPLUS_V2 = true,
-	RAIDS_V2 = true,
-	ACCOUNT_CHARS_V2 = true,
+	roster = true,
+	equipment = true,
+	mythicPlus = true,
+	raids = true,
+	account = true,
+}
+
+local LEGACY_SYNC_DOMAINS = {
+	ROSTER_META_V2 = "roster",
+	EQUIPMENT_V2 = "equipment",
+	MYTHICPLUS_V2 = "mythicPlus",
+	RAIDS_V2 = "raids",
+	ACCOUNT_CHARS_V2 = "account",
 }
 
 Comm._handlers = Comm._handlers or {}
@@ -146,9 +154,14 @@ local function IsVersionAtLeast(candidate, required)
 end
 
 local function IsAllowedSyncDomain(domain)
-	local d = tostring(domain or "")
+	local d = LEGACY_SYNC_DOMAINS[tostring(domain or "")] or tostring(domain or "")
 	if d == "" then return false end
 	return Comm.SYNC_ALLOWED_DOMAINS[d] == true
+end
+
+local function NormalizeSyncDomain(domain)
+	local d = tostring(domain or "")
+	return LEGACY_SYNC_DOMAINS[d] or d
 end
 
 local GUILD_SENDER_CACHE_TTL = 10
@@ -356,6 +369,7 @@ local function ValidateRecord(record, opts)
 	if type(record.charGUID) ~= "string" or record.charGUID == "" then return false, "missing-char" end
 	if type(record.domain) ~= "string" or record.domain == "" then return false, "missing-domain" end
 	if not IsAllowedSyncDomain(record.domain) then return false, "unsupported-domain" end
+	record.domain = NormalizeSyncDomain(record.domain)
 	if type(record.seq) ~= "number" then return false, "missing-seq" end
 	if type(record.updatedAt) ~= "number" then return false, "missing-updatedAt" end
 	if type(record.checksum) ~= "string" or record.checksum == "" then return false, "missing-checksum" end
@@ -522,8 +536,9 @@ function Comm:RegisterRecordListener(domain, callback)
 	if type(domain) ~= "string" or domain == "" then return false end
 	if not IsAllowedSyncDomain(domain) then return false end
 	if type(callback) ~= "function" then return false end
-	self._recordListeners[domain] = self._recordListeners[domain] or {}
-	self._recordListeners[domain][#self._recordListeners[domain] + 1] = callback
+	local normalized = NormalizeSyncDomain(domain)
+	self._recordListeners[normalized] = self._recordListeners[normalized] or {}
+	self._recordListeners[normalized][#self._recordListeners[normalized] + 1] = callback
 	return true
 end
 
@@ -631,7 +646,7 @@ local function StoreIfNewer(record, senderGUID, channel)
 end
 
 function Comm:GetRecord(originGUID, charGUID, domain)
-	local key = BuildRecordKey(originGUID, charGUID, domain)
+	local key = BuildRecordKey(originGUID, charGUID, NormalizeSyncDomain(domain))
 	local best = nil
 	local function consider(rec)
 		if type(rec) ~= "table" then return end
@@ -650,11 +665,11 @@ function Comm:GetRecord(originGUID, charGUID, domain)
 end
 
 function Comm:GetRecordsByDomain(domain)
-	local d = tostring(domain or "")
+	local d = NormalizeSyncDomain(domain)
 	local byKey = {}
 	local function consider(rec)
 		if type(rec) ~= "table" then return end
-		if tostring(rec.domain or "") ~= d then return end
+		if NormalizeSyncDomain(rec.domain) ~= d then return end
 		local k = tostring(rec.key or "")
 		if k == "" then return end
 		local cur = byKey[k]
@@ -778,7 +793,7 @@ function Comm:PublishRecord(domain, charGUID, payload, opts)
 	if type(owner) ~= "string" or owner == "" then return false, "no-owner" end
 
 	local cGuid = tostring(charGUID or owner)
-	local d = tostring(domain or "")
+	local d = NormalizeSyncDomain(domain)
 	if d == "" then return false, "no-domain" end
 	if not IsAllowedSyncDomain(d) then return false, "unsupported-domain" end
 
@@ -822,7 +837,7 @@ end
 function Comm:RequestCharacterDomain(charGUID, domain, opts)
 	opts = type(opts) == "table" and opts or {}
 	local cGuid = tostring(charGUID or "")
-	local d = tostring(domain or "")
+	local d = NormalizeSyncDomain(domain)
 	if cGuid == "" then return false, "no-char-guid" end
 	if d == "" then return false, "no-domain" end
 	if not IsAllowedSyncDomain(d) then return false, "unsupported-domain" end

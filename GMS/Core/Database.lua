@@ -9,7 +9,7 @@ local METADATA = {
 	INTERN_NAME  = "DB",
 	SHORT_NAME   = "DB",
 	DISPLAY_NAME = "Database",
-	VERSION      = "1.1.27",
+	VERSION      = "1.2.0",
 }
 
 -- Blizzard Globals
@@ -30,6 +30,7 @@ local C_GuildInfo = C_GuildInfo
 local C_Club = C_Club
 local C_Timer = C_Timer
 local GetServerTime = GetServerTime
+local InCombatLockdown = InCombatLockdown
 local date = date
 local ReloadUI     = ReloadUI
 local UIParent     = UIParent
@@ -146,6 +147,171 @@ local EnsureGuidInGlobal
 local EnsureAccountGuidInGlobal
 local NormalizeGuid
 
+local DATABASE_SCHEMA = 4
+local MIGRATION_BACKUP_SECONDS = 7 * 24 * 60 * 60
+local DEFAULT_CLEANUP_DAYS = 180
+
+local LEGACY_DOMAIN_ALIASES = {
+	CHARINFO = "identity",
+	CHARINFO_V2 = "identity",
+	ACCOUNTINFO_V1 = "identity",
+	ROSTER_META_V2 = "roster",
+	EQUIPMENT_V2 = "equipment",
+	MYTHICPLUS_V2 = "mythicPlus",
+	RAIDS = "raids",
+	RAIDS_V2 = "raids",
+	ACCOUNT_CHARS_V2 = "account",
+}
+
+local function CopyTable(value, seen)
+	if type(value) ~= "table" then return value end
+	seen = seen or {}
+	if seen[value] then return seen[value] end
+	local out = {}
+	seen[value] = out
+	for k, v in pairs(value) do
+		out[CopyTable(k, seen)] = CopyTable(v, seen)
+	end
+	return out
+end
+
+local function NormalizeDomain(domain)
+	local key = tostring(domain or "")
+	return LEGACY_DOMAIN_ALIASES[key] or key
+end
+
+local function NormalizeNode(node, fallbackMeta)
+	if type(node) ~= "table" then return nil end
+	local data = type(node.data) == "table" and node.data or node
+	local sourceMeta = type(node.meta) == "table" and node.meta or fallbackMeta or {}
+	return {
+		schema = tonumber(node.schema or 1) or 1,
+		data = CopyTable(data),
+		meta = {
+			sourceGuid = tostring(sourceMeta.sourceGuid or ""),
+			sourceName = tostring(sourceMeta.sourceName or ""),
+			updatedAt = tostring(sourceMeta.updatedAt or ""),
+			updatedAtTs = tonumber(sourceMeta.updatedAtTs or sourceMeta.ts or 0) or 0,
+		},
+	}
+end
+
+local function IsNewerNode(candidate, existing)
+	if type(existing) ~= "table" then return true end
+	local candidateTs = tonumber(candidate and candidate.meta and candidate.meta.updatedAtTs or 0) or 0
+	local existingTs = tonumber(existing.meta and existing.meta.updatedAtTs or 0) or 0
+	return candidateTs >= existingTs
+end
+
+local function MoveLegacyDomain(character, legacyKey, canonicalKey, fallbackMeta)
+	if type(character) ~= "table" then return end
+	local legacy = character[legacyKey]
+	if type(legacy) ~= "table" then return end
+	local normalized = NormalizeNode(legacy, fallbackMeta)
+	if normalized and IsNewerNode(normalized, character[canonicalKey]) then
+		character[canonicalKey] = normalized
+	end
+	character[legacyKey] = nil
+end
+
+local function MigrateSchema4(self, rawDB)
+	if type(rawDB) ~= "table" then return false end
+	rawDB.global = type(rawDB.global) == "table" and rawDB.global or {}
+	local global = rawDB.global
+	if tonumber(global.schema or 0) >= DATABASE_SCHEMA then return false end
+
+	local backup = {
+		createdAtTs = self:GetServerTimestamp(),
+		expiresAtTs = self:GetServerTimestamp() + MIGRATION_BACKUP_SECONDS,
+		legacy = {
+			accountChars = CopyTable(global.accountChars),
+			accountLinks = CopyTable(global.accountLinks),
+			twinks = CopyTable(global.twinks),
+			twinkMeta = CopyTable(global.twinkMeta),
+			char = CopyTable(rawDB.char),
+		},
+	}
+
+	global.characters = type(global.characters) == "table" and global.characters or {}
+	global.account = type(global.account) == "table" and global.account or {}
+	local account = global.account
+	account.characterOrder = type(account.characterOrder) == "table" and account.characterOrder or {}
+	account.cleanupAfterDays = tonumber(account.cleanupAfterDays) or DEFAULT_CLEANUP_DAYS
+	local known = {}
+	for i = 1, #account.characterOrder do known[tostring(account.characterOrder[i] or "")] = true end
+	local function Register(guid)
+		local g = NormalizeGuid(guid)
+		if g ~= "" and not known[g] then
+			known[g] = true
+			account.characterOrder[#account.characterOrder + 1] = g
+		end
+		return g
+	end
+	for i = 1, #(global.accountChars or {}) do Register(global.accountChars[i]) end
+
+	for guid, character in pairs(global.characters) do
+		local normalizedGuid = NormalizeGuid(guid)
+		if normalizedGuid ~= "" and normalizedGuid ~= guid then
+			global.characters[normalizedGuid] = character
+			global.characters[guid] = nil
+		end
+		if type(character) == "table" then
+			local legacyAccount = character.ACCOUNT_CHARS_V2
+			local legacyPayload = type(legacyAccount) == "table" and (type(legacyAccount.data) == "table" and legacyAccount.data or legacyAccount) or nil
+			for _, accountRow in pairs(type(legacyPayload) == "table" and legacyPayload.chars or {}) do
+				if type(accountRow) == "table" then
+					local accountGuid = Register(accountRow.guid)
+					if accountGuid ~= "" then
+						global.characters[accountGuid] = type(global.characters[accountGuid]) == "table" and global.characters[accountGuid] or {}
+						local identity = NormalizeNode({ data = accountRow })
+						if IsNewerNode(identity, global.characters[accountGuid].identity) then
+							global.characters[accountGuid].identity = identity
+						end
+					end
+				end
+			end
+			MoveLegacyDomain(character, "CHARINFO", "identity")
+			MoveLegacyDomain(character, "CHARINFO_V2", "identity")
+			MoveLegacyDomain(character, "ACCOUNTINFO_V1", "identity")
+			MoveLegacyDomain(character, "ROSTER_META_V2", "roster")
+			MoveLegacyDomain(character, "EQUIPMENT_V2", "equipment")
+			MoveLegacyDomain(character, "MYTHICPLUS_V2", "mythicPlus")
+			MoveLegacyDomain(character, "RAIDS", "raids")
+			MoveLegacyDomain(character, "RAIDS_V2", "raids")
+			MoveLegacyDomain(character, "ACCOUNT_CHARS_V2", "account")
+		end
+	end
+
+	local legacyChars = type(rawDB.char) == "table" and rawDB.char.chars or nil
+	if type(legacyChars) == "table" then
+		for _, charRoot in pairs(legacyChars) do
+			local links = type(charRoot) == "table" and charRoot.links or nil
+			for guid, row in pairs(type(links) == "table" and links.chars or {}) do
+				local g = Register(guid)
+				if g ~= "" then
+					global.characters[g] = type(global.characters[g]) == "table" and global.characters[g] or {}
+					local identity = NormalizeNode({ data = row })
+					if IsNewerNode(identity, global.characters[g].identity) then global.characters[g].identity = identity end
+				end
+			end
+		end
+	end
+
+	if tostring(account.mainCharacterGuid or "") == "" or not known[tostring(account.mainCharacterGuid)] then
+		account.mainCharacterGuid = account.characterOrder[1] or ""
+		account.mainCharacterManual = false
+	end
+	account.migrationBackup = backup
+	global.accountChars = nil
+	global.accountLinks = nil
+	global.twinks = nil
+	global.twinkMeta = nil
+	if type(rawDB.char) == "table" and type(rawDB.char.chars) == "table" then rawDB.char.chars = nil end
+	global.schema = DATABASE_SCHEMA
+	global.version = DATABASE_SCHEMA
+	return true
+end
+
 -- ###########################################################################
 -- #	STANDARD DATABASE INIT
 -- ###########################################################################
@@ -180,7 +346,8 @@ function GMS:InitializeStandardDatabases(force)
 			global = self.db.global
 		end
 		global.version = tonumber(global.version) or 3
-		global.accountChars = type(global.accountChars) == "table" and global.accountChars or {}
+		global.account = type(global.account) == "table" and global.account or {}
+		global.accountChars = nil
 		global.characters = type(global.characters) == "table" and global.characters or {}
 		global.guilds = type(global.guilds) == "table" and global.guilds or {}
 		-- Hard cutover cleanup for deprecated roots.
@@ -197,9 +364,12 @@ function GMS:InitializeStandardDatabases(force)
 			_G.GMS_DB = rawDB
 		end
 		rawDB.global = type(rawDB.global) == "table" and rawDB.global or {}
-		rawDB.global.accountChars = type(rawDB.global.accountChars) == "table" and rawDB.global.accountChars or {}
+		if tonumber(rawDB.global.schema or 0) < DATABASE_SCHEMA then
+			rawDB.global.accountChars = type(rawDB.global.accountChars) == "table" and rawDB.global.accountChars or {}
+		end
 		rawDB.global.characters = type(rawDB.global.characters) == "table" and rawDB.global.characters or {}
 		rawDB.global.guilds = type(rawDB.global.guilds) == "table" and rawDB.global.guilds or {}
+		MigrateSchema4(self, rawDB)
 		rawDB.global.chars = nil
 		rawDB.global.accountLinks = nil
 		rawDB.global.twinks = nil
@@ -212,9 +382,12 @@ function GMS:InitializeStandardDatabases(force)
 		rawDB.profiles = type(rawDB.profiles) == "table" and rawDB.profiles or {}
 
 		if type(self.db) == "table" and type(self.db.global) == "table" then
-			self.db.global.accountChars = rawDB.global.accountChars
+			self.db.global.account = rawDB.global.account
+			self.db.global.accountChars = nil
 			self.db.global.characters = rawDB.global.characters
 			self.db.global.guilds = rawDB.global.guilds
+			self.db.global.schema = rawDB.global.schema
+			self.db.global.version = rawDB.global.version
 		end
 
 		local function IsCharacterNodeEmpty(node)
@@ -288,7 +461,18 @@ function GMS:InitializeStandardDatabases(force)
 
 	NormalizeGlobalSchema()
 
-	LOCAL_LOG("INFO", "Standard databases initialized", "schema=3")
+	if C_Timer and type(C_Timer.After) == "function" and not self._schemaCleanupScheduled then
+		self._schemaCleanupScheduled = true
+		C_Timer.After(20, function()
+			if type(GMS.RunSchemaCleanup) == "function" then GMS:RunSchemaCleanup(false) end
+			if C_Timer and type(C_Timer.NewTicker) == "function" and not GMS._schemaCleanupTicker then
+				GMS._schemaCleanupTicker = C_Timer.NewTicker(86400, function()
+					if type(GMS.RunSchemaCleanup) == "function" then GMS:RunSchemaCleanup(false) end
+				end)
+			end
+		end)
+	end
+	LOCAL_LOG("INFO", "Standard databases initialized", "schema=" .. tostring(DATABASE_SCHEMA))
 	return true
 end
 
@@ -379,14 +563,142 @@ EnsureAccountGuidInGlobal = function(global, guid)
 	if type(global) ~= "table" then return nil end
 	local g = NormalizeGuid(guid)
 	if g == "" then return nil end
-	global.accountChars = type(global.accountChars) == "table" and global.accountChars or {}
-	for i = 1, #global.accountChars do
-		if tostring(global.accountChars[i] or "") == g then
+	global.account = type(global.account) == "table" and global.account or {}
+	global.account.characterOrder = type(global.account.characterOrder) == "table" and global.account.characterOrder or {}
+	for i = 1, #global.account.characterOrder do
+		if tostring(global.account.characterOrder[i] or "") == g then
 			return g
 		end
 	end
-	global.accountChars[#global.accountChars + 1] = g
+	global.account.characterOrder[#global.account.characterOrder + 1] = g
 	return g
+end
+
+function GMS:NormalizeCharacterDomain(domain)
+	return NormalizeDomain(domain)
+end
+
+function GMS:GetAccountStore()
+	if type(self.InitializeStandardDatabases) == "function" then self:InitializeStandardDatabases(false) end
+	local global = self.db and self.db.global
+	if type(global) ~= "table" then return nil end
+	global.account = type(global.account) == "table" and global.account or {}
+	global.account.characterOrder = type(global.account.characterOrder) == "table" and global.account.characterOrder or {}
+	global.account.cleanupAfterDays = tonumber(global.account.cleanupAfterDays) or DEFAULT_CLEANUP_DAYS
+	return global.account
+end
+
+function GMS:GetAccountCharacterGuids()
+	local account = self:GetAccountStore()
+	if type(account) ~= "table" then return {} end
+	return account.characterOrder
+end
+
+function GMS:SetAccountMainCharacter(guid, manual)
+	local g = NormalizeGuid(guid)
+	if g == "" then return false end
+	local account = self:GetAccountStore()
+	if type(account) ~= "table" then return false end
+	local exists = false
+	for i = 1, #account.characterOrder do
+		if tostring(account.characterOrder[i] or "") == g then exists = true break end
+	end
+	if not exists then return false end
+	account.mainCharacterGuid = g
+	account.mainCharacterManual = manual == true
+	return true
+end
+
+function GMS:GetAccountMainCharacter()
+	local account = self:GetAccountStore()
+	return type(account) == "table" and tostring(account.mainCharacterGuid or "") or ""
+end
+
+function GMS:GetGuildAccountMain(guildId)
+	local account = self:GetAccountStore()
+	local gid = tostring(guildId or self:GetCurrentGuildId() or "")
+	if type(account) ~= "table" or gid == "" then return "" end
+	local global = self.db and self.db.global or {}
+	local guild = type(global.guilds) == "table" and global.guilds[gid] or nil
+	local roster = type(guild) == "table" and guild.roster or {}
+	local override = type(guild) == "table" and guild.accountMainOverrides and guild.accountMainOverrides[tostring(account.mainCharacterGuid or "")] or nil
+	if type(override) == "table" and type(roster[tostring(override.guid or "")]) == "table" then
+		return tostring(override.guid)
+	end
+	local candidates = {}
+	for i = 1, #account.characterOrder do
+		local guid = tostring(account.characterOrder[i] or "")
+		local member = roster[guid]
+		if type(member) == "table" then
+			local identity = self:GetCharacterDomainData(guid, "identity")
+			local firstSeenAt = tonumber(identity and identity.data and identity.data.firstSeenAt or 0) or 0
+			candidates[#candidates + 1] = { guid = guid, rank = tonumber(member.rankIndex or member.rankOrder) or 9999, firstSeenAt = firstSeenAt, order = i }
+		end
+	end
+	table.sort(candidates, function(a, b)
+		if a.rank ~= b.rank then return a.rank < b.rank end
+		if a.firstSeenAt ~= b.firstSeenAt then return a.firstSeenAt < b.firstSeenAt end
+		return a.order < b.order
+	end)
+	return candidates[1] and candidates[1].guid or ""
+end
+
+function GMS:RefreshAutomaticAccountMain(guildId)
+	local account = self:GetAccountStore()
+	if type(account) ~= "table" or account.mainCharacterManual == true then return false end
+	local selected = self:GetGuildAccountMain(guildId)
+	if selected == "" or selected == tostring(account.mainCharacterGuid or "") then return false end
+	account.mainCharacterGuid = selected
+	return true
+end
+
+function GMS:CanSetGuildAccountMain(ownerGuid)
+	local playerGuid = type(UnitGUID) == "function" and tostring(UnitGUID("player") or "") or ""
+	if playerGuid ~= "" and playerGuid == tostring(ownerGuid or "") then return true end
+	local permissions = GMS and GMS.Permissions
+	if type(permissions) == "table" then
+		if type(permissions.IsAuthorized) == "function" and permissions:IsAuthorized() then return true end
+		if type(permissions.HasCapability) == "function" and permissions:HasCapability(playerGuid, "MODIFY_PERMISSIONS") then return true end
+	end
+	return false
+end
+
+function GMS:SetGuildAccountMain(ownerGuid, mainGuid, guildId)
+	local owner = NormalizeGuid(ownerGuid)
+	local selected = NormalizeGuid(mainGuid)
+	local gid = tostring(guildId or self:GetCurrentGuildId() or "")
+	if owner == "" or selected == "" or gid == "" or not self:CanSetGuildAccountMain(owner) then return false end
+	local root = self:EnsureGlobalGuildRoot(gid)
+	if type(root) ~= "table" or type(root.roster[selected]) ~= "table" then return false end
+	root.accountMainOverrides = type(root.accountMainOverrides) == "table" and root.accountMainOverrides or {}
+	root.accountMainOverrides[owner] = { guid = selected, updatedAtTs = self:GetServerTimestamp(), setByGuid = type(UnitGUID) == "function" and tostring(UnitGUID("player") or "") or "" }
+	return true
+end
+
+function GMS:RunSchemaCleanup(force)
+	if InCombatLockdown and InCombatLockdown() then return false, "in-combat" end
+	local account = self:GetAccountStore()
+	local global = self.db and self.db.global
+	if type(account) ~= "table" or type(global) ~= "table" then return false, "db-unavailable" end
+	local nowTs = self:GetServerTimestamp()
+	if not force and nowTs - (tonumber(account.lastCleanupAtTs or 0) or 0) < 86400 then return false, "not-due" end
+	local backup = account.migrationBackup
+	if type(backup) == "table" and nowTs >= (tonumber(backup.expiresAtTs or 0) or 0) then account.migrationBackup = nil end
+	local days = tonumber(account.cleanupAfterDays) or DEFAULT_CLEANUP_DAYS
+	if days <= 0 then account.lastCleanupAtTs = nowTs return true, "disabled" end
+	local protected = {}
+	for i = 1, #account.characterOrder do protected[tostring(account.characterOrder[i] or "")] = true end
+	for _, guild in pairs(type(global.guilds) == "table" and global.guilds or {}) do
+		for guid in pairs(type(guild) == "table" and guild.roster or {}) do protected[tostring(guid)] = true end
+	end
+	local cutoff = nowTs - (days * 86400)
+	for guid, node in pairs(type(global.characters) == "table" and global.characters or {}) do
+		local identity = type(node) == "table" and node.identity or nil
+		local lastSeen = tonumber(identity and identity.data and identity.data.lastSeenAt or identity and identity.meta and identity.meta.updatedAtTs or 0) or 0
+		if not protected[tostring(guid)] and lastSeen > 0 and lastSeen < cutoff then global.characters[guid] = nil end
+	end
+	account.lastCleanupAtTs = nowTs
+	return true, "cleaned"
 end
 
 function GMS:GetServerTimestamp()
@@ -503,7 +815,7 @@ end
 
 function GMS:SetCharacterDomainData(guid, domain, payload, meta)
 	local g = NormalizeGuid(guid)
-	local d = tostring(domain or "")
+	local d = NormalizeDomain(domain)
 	if g == "" or d == "" or type(payload) ~= "table" then
 		return false
 	end
@@ -523,6 +835,7 @@ function GMS:SetCharacterDomainData(guid, domain, payload, meta)
 		updatedAt = self:FormatServerTimestamp(ts)
 	end
 	root[d] = {
+		schema = tonumber(m.schema or 1) or 1,
 		data = payload,
 		meta = {
 			sourceGuid = NormalizeGuid(m.sourceGuid) ~= "" and NormalizeGuid(m.sourceGuid) or NormalizeGuid(m.senderGuid) or "",
@@ -536,7 +849,7 @@ end
 
 function GMS:GetCharacterDomainData(guid, domain)
 	local g = NormalizeGuid(guid)
-	local d = tostring(domain or "")
+	local d = NormalizeDomain(domain)
 	if g == "" or d == "" then return nil end
 	local global = self.db and self.db.global
 	if type(global) ~= "table" or type(global.characters) ~= "table" then
@@ -592,10 +905,12 @@ function GMS:UpsertGuildPlayer(guid, playerData, guildId)
 	if nameFull ~= "" then row.name_full = nameFull end
 
 	if pd.rank ~= nil then row.rank = tostring(pd.rank or "") end
+	if pd.rankIndex ~= nil then row.rankIndex = tonumber(pd.rankIndex or 9999) or 9999 end
 	if pd.note ~= nil then row.note = tostring(pd.note or "") end
 	if pd.points ~= nil then row.points = tonumber(pd.points or 0) or 0 end
 
 	row.rank = tostring(row.rank or "")
+	row.rankIndex = tonumber(row.rankIndex or 9999) or 9999
 	row.note = tostring(row.note or "")
 	row.points = tonumber(row.points or 0) or 0
 
@@ -611,6 +926,7 @@ function GMS:UpsertGuildPlayer(guid, playerData, guildId)
 	if row.updatedAt == "" then
 		row.updatedAt = self:FormatServerTimestamp(ts)
 	end
+	if type(self.RefreshAutomaticAccountMain) == "function" then self:RefreshAutomaticAccountMain(gid) end
 	return true
 end
 
@@ -670,62 +986,29 @@ function GMS:TrackCurrentCharacterInGlobalStores(reason)
 	end
 
 	self:RegisterKnownGuid(id.guid)
-	local charRoot = self:GetCurrentCharRoot()
-	if type(charRoot) ~= "table" then
-		return false, "char-root-unavailable"
-	end
-	charRoot.links = type(charRoot.links) == "table" and charRoot.links or {}
-	local links = charRoot.links
-	links.chars = type(links.chars) == "table" and links.chars or {}
-	links.twinks = type(links.twinks) == "table" and links.twinks or {}
-	links.twinkMeta = type(links.twinkMeta) == "table" and links.twinkMeta or {}
-
 	local guildKey = tostring(self:GetGuildStorageKey() or "")
 	local guildName = ""
 	if type(GetGuildInfo) == "function" then
 		guildName = tostring(GetGuildInfo("player") or "")
 	end
-	local seenAt = type(now) == "function" and (tonumber(now() or 0) or 0) or 0
-
-	local row = type(links.chars[id.guid]) == "table" and links.chars[id.guid] or {}
-	links.chars[id.guid] = row
-	row.guid = id.guid
-	row.name = id.name
-	row.realm = id.realm
-	row.name_full = id.nameFull
-	row.class = id.class
-	row.classFile = id.classFile
-	row.level = id.level
-	row.guild = guildName
-	row.guildKey = guildKey
-	row.lastSeenAt = seenAt
-	row.lastSeenReason = tostring(reason or "db-fallback")
-
-	local hasTwink = false
-	for i = 1, #links.twinks do
-		if tostring(links.twinks[i] or "") == id.guid then
-			hasTwink = true
-			break
-		end
-	end
-	if not hasTwink then
-		links.twinks[#links.twinks + 1] = id.guid
-	end
-
-	local meta = type(links.twinkMeta[id.guid]) == "table" and links.twinkMeta[id.guid] or {}
-	links.twinkMeta[id.guid] = meta
-	meta.guid = id.guid
-	meta.name = id.name
-	meta.realm = id.realm
-	meta.name_full = id.nameFull
-	meta.class = id.class
-	meta.classFile = id.classFile
-	meta.level = id.level
-	meta.guild = guildName
-	meta.guildKey = guildKey
-	meta.lastSeenAt = seenAt
-
-	return true
+	local existing = self:GetCharacterDomainData(id.guid, "identity")
+	local existingData = type(existing) == "table" and existing.data or {}
+	local seenAt = self:GetServerTimestamp()
+	local firstSeenAt = tonumber(existingData.firstSeenAt or 0) or seenAt
+	return self:SetCharacterDomainData(id.guid, "identity", {
+		guid = id.guid,
+		name = id.name,
+		realm = id.realm,
+		name_full = id.nameFull,
+		class = id.class,
+		classFile = id.classFile,
+		level = id.level,
+		guild = guildName,
+		guildKey = guildKey,
+		firstSeenAt = firstSeenAt,
+		lastSeenAt = seenAt,
+		lastSeenReason = tostring(reason or "db-track"),
+	}, { sourceGuid = id.guid, updatedAtTs = seenAt, schema = 1 })
 end
 
 local function TryTrackCurrentCharacter(reason)
